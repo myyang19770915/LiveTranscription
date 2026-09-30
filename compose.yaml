@@ -1,0 +1,82 @@
+services:
+  asr:
+    image: qwenllm/qwen3-asr:latest
+    gpus: all
+    working_dir: /workspace
+    command: ["bash", "/workspace/docker/asr/entrypoint.sh"]
+    environment:
+      ASR_MODEL_PATH: ${ASR_MODEL_PATH:-netease-youdao/Confucius4-R2T2}
+      VAD_MODEL_PATH: /models/vad/Stream-VAD
+      ASR_SECRET_KEY: ${ASR_SECRET_KEY:-change-me-local-only}
+      HF_HOME: /models/huggingface
+      CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
+      GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-0.88}
+      ASR_MAX_MODEL_LEN: ${ASR_MAX_MODEL_LEN:-16384}
+    volumes:
+      - ./:/workspace
+      - model-cache:/models
+    shm_size: 4gb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8272/health', timeout=3).read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 10m
+
+  translate:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    gpus: all
+    command:
+      - --hf-repo
+      - ${TRANSLATE_MODEL_REPO:-google/gemma-4-E2B-it-qat-q4_0-gguf}
+      - --hf-file
+      - ${TRANSLATE_MODEL_FILE:-gemma-4-E2B_q4_0-it.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+      - --n-gpu-layers
+      - "99"
+      - --ctx-size
+      - "3072"
+      - --parallel
+      - "1"
+      - --flash-attn
+      - on
+      - --no-mmproj
+      - --reasoning
+      - "off"
+      - --no-webui
+    volumes:
+      - translation-model-cache:/root/.cache
+    shm_size: 2gb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5000/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 80
+      start_period: 15m
+
+  app:
+    build: ./webapp
+    volumes:
+      - ./webapp:/app
+    environment:
+      ASR_WS_URL: ws://asr:8272/asr_stream_api_v1
+      ASR_SECRET_KEY: ${ASR_SECRET_KEY:-change-me-local-only}
+      TRANSLATE_URL: http://translate:5000
+      TRANSLATE_MODEL: gemma-4-E2B_q4_0-it.gguf
+    ports:
+      - "${APP_PORT:-18082}:8080"
+    depends_on:
+      asr:
+        condition: service_healthy
+      translate:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  model-cache:
+  translation-model-cache:

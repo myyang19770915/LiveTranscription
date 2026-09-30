@@ -1,0 +1,204 @@
+/* Calm, readable meeting workspace: simplify the visual hierarchy and clarify actions. */
+:root {
+  --bg: #0c100e;
+  --surface: #141a17;
+  --line: #29352f;
+  --soft: #202a24;
+  --text: #f3f6f3;
+  --muted: #a0aaa4;
+  --dim: #748078;
+  --mint: #93efbf;
+  font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif;
+}
+
+body {
+  background:
+    radial-gradient(ellipse 65% 32% at 50% -10%, #1c392a55, transparent 72%),
+    var(--bg);
+}
+
+main { width: min(1360px, 100%); padding: 24px 40px 18px; }
+nav { min-height: 42px; }
+.brand { gap: 12px; }
+.brand-mark { width: 40px; height: 40px; border-radius: 13px; }
+.brand-mark img { width: 32px; height: 32px; object-fit: contain; display: block; }
+.status { padding: 8px 12px; background: #111713; }
+
+header {
+  align-items: center;
+  padding: 36px 2px 26px;
+}
+header > div:first-child { max-width: 760px; }
+.eyebrow { color: #9bc9ad; font-size: 9px; letter-spacing: .22em; }
+h1 {
+  margin: 10px 0 9px;
+  font-size: clamp(34px, 3.5vw, 48px);
+  font-weight: 600;
+  letter-spacing: -.04em;
+}
+h1 em { color: #b9c6be; }
+header p { font-size: 13px; }
+.privacy { min-width: 228px; padding: 13px 16px; }
+
+.controls {
+  grid-template-columns: minmax(130px, 1.1fr) 58px minmax(145px, 1.1fr) minmax(155px, 1.2fr) minmax(180px, 1.35fr) 156px !important;
+  grid-template-areas:
+    "source swap target audio mic test"
+    "hint hint hint hint hint hint"
+    "context context context context context start";
+  gap: 9px;
+  padding: 13px;
+  margin-bottom: 14px;
+  border-color: #303b35;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #171e1a, #111613 70%);
+  box-shadow: 0 18px 60px #0002, 0 1px #fff07 inset;
+}
+.controls > .field,
+.controls > .direction,
+.controls > .mic-test,
+.controls > .primary { min-height: 62px; }
+.controls > .field {
+  padding: 11px 14px;
+  border-color: #29322d;
+  background: #101512;
+}
+.controls > .field:focus-within { border-color: #557963; }
+.field label { color: #a8b3ac; font-size: 9px; letter-spacing: .1em; }
+select, input { font-size: 13px; }
+select { padding-top: 9px; }
+.language-field { grid-area: source !important; }
+.source-field { grid-area: audio !important; }
+.direction { grid-area: swap !important; min-height: 62px; background: #18211c; }
+.target-field { grid-area: target !important; }
+.mic-field { grid-area: mic !important; }
+.mic-test { grid-area: test !important; border-radius: 12px; background: #19221d; }
+.source-hint {
+  grid-area: hint !important;
+  padding: 1px 4px 2px;
+  color: #89968e;
+  font-size: 10px;
+}
+.context-field { grid-area: context !important; }
+.context-field input { padding-top: 8px; }
+.primary {
+  grid-area: start !important;
+  min-height: 62px;
+  border-radius: 12px;
+  box-shadow: 0 6px 20px #58d89312;
+}
+.primary:hover { box-shadow: 0 10px 28px #49dd9b25; }
+.button-copy b { font-size: 13px; }
+
+.live-bar {
+  height: 0;
+  gap: 14px;
+  padding: 0 18px;
+  border: 0 solid transparent;
+  border-radius: 12px;
+  background: #112019;
+}
+.live-bar.visible {
+  height: 46px;
+  margin: 0 0 12px;
+  border-width: 1px;
+  border-color: #254532;
+}
+.live-bar > span { color: #c8d8cf; font-size: 10px; letter-spacing: .04em; text-transform: none; }
+.live-bar strong { font-size: 10px; }
+
+.transcripts { gap: 14px; }
+.transcript-card {
+  height: clamp(430px, 54vh, 690px);
+  border-color: #2c3731;
+  border-radius: 17px;
+  background: linear-gradient(150deg, #161c19, #111613 72%);
+}
+.translation-card { background: linear-gradient(150deg, #15231b, #111713 72%); }
+.card-head { min-height: 76px; padding: 16px 20px; }
+.card-title { gap: 13px; }
+.language-dot { width: 36px; height: 36px; border-radius: 11px; }
+.label { font-size: 9px; letter-spacing: .15em; }
+.card-head h2 { margin-top: 4px; font-size: 14px; }
+.copy {
+  padding: 26px 28px;
+  font-size: clamp(19px, 1.55vw, 25px);
+  line-height: 1.78;
+  overflow-wrap: anywhere;
+}
+.translated { color: #d8f2e3; }
+.empty-state { max-width: 300px; padding: 18px; }
+.empty-state b { color: #aab5ae; font-size: 13px; }
+.empty-state small { color: #77847c; line-height: 1.65; }
+.card-foot { min-height: 42px; align-items: center; padding: 10px 20px; letter-spacing: .045em; }
+footer { padding: 13px 4px 0; }
+.secure-note { color: #88958d; }
+.text-btn { padding: 8px 11px; }
+button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid #a2efc2;
+  outline-offset: 3px;
+}
+
+@media (max-width: 1180px) {
+  main { padding-inline: 28px; }
+  .controls {
+    grid-template-columns: minmax(135px, 1fr) 54px minmax(145px, 1fr) minmax(155px, 1fr) !important;
+    grid-template-areas:
+      "source swap target audio"
+      "mic mic test start"
+      "hint hint hint hint"
+      "context context context context";
+  }
+}
+
+@media (max-width: 760px) {
+  main { padding: 16px 14px 20px; }
+  header { align-items: flex-start; padding: 30px 2px 22px; }
+  h1 { max-width: 570px; font-size: clamp(32px, 8vw, 40px); line-height: 1.16; }
+  header p { max-width: 360px; font-size: 12px; line-height: 1.65; }
+  .privacy { display: none; }
+  .controls {
+    grid-template-columns: minmax(0, 1fr) 54px !important;
+    grid-template-areas:
+      "source swap"
+      "target target"
+      "audio audio"
+      "mic mic"
+      "test test"
+      "hint hint"
+      "context context"
+      "start start";
+    gap: 8px;
+    padding: 10px;
+  }
+  .controls > .field,
+  .controls > .direction,
+  .controls > .mic-test { min-height: 58px; }
+  .primary { min-height: 58px; }
+  .source-hint { padding: 1px 4px 3px; line-height: 1.6; }
+  .transcripts { grid-template-columns: 1fr; gap: 10px; }
+  .transcript-card { height: min(54vh, 470px); min-height: 340px; }
+  .card-head { min-height: 70px; padding: 14px 16px; }
+  .copy { padding: 22px 20px; font-size: 20px; }
+  .card-foot { padding-inline: 16px; font-size: 8px; }
+  footer { align-items: flex-start; gap: 8px; padding-top: 12px; }
+  .secure-note { flex-wrap: wrap; gap: 6px; font-size: 9px; }
+  .secure-note i { display: inline-block; }
+  .secure-note span:last-child { display: inline; }
+  .footer-actions { gap: 2px; }
+  .text-btn { padding-inline: 7px; font-size: 10px; }
+  .live-bar.visible { gap: 8px; }
+  .level { width: 44px; }
+  .live-bar strong { max-width: 130px; }
+}
+
+@media (max-width: 380px) {
+  .secure-note i,.secure-note span:last-child { display: none; }
+  .card-head { padding-inline: 12px; }
+  .label { font-size: 8px; }
+  .state-chip { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; }
+}

@@ -1,0 +1,52 @@
+# Byte-compiled / cached files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / runtime artifacts
+*.log
+nohup.log
+run_example.log
+outputs/
+runs/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Downloaded model weights (see README: FireRedVAD Stream-VAD goes here)
+checkpoints/
+
+# Local meeting captures and review material
+artifacts/
+
+
