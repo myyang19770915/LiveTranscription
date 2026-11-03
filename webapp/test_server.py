@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import unittest
@@ -6,8 +7,9 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from server import (TO_TRADITIONAL, TranslationRequest, app, detect_pair_language, resolve_translation_direction,
-                    translation_backend, translation_payload)
+import mai_asr
+from server import (TO_TRADITIONAL, TranscriptDisplay, TranslationRequest, app, asr_engine, detect_pair_language,
+                    resolve_translation_direction, translation_backend, translation_payload)
 from translation_quality import consolidate_terms, parse_discovered_terms, policy
 
 
@@ -296,6 +298,90 @@ class WebAppTests(unittest.TestCase):
         response = TestClient(app).post("/api/translate/stream", json={"text": "这个会议", "source": "zh", "target": "zh"})
         event = json.loads(next(line[6:] for line in response.text.splitlines() if line.startswith("data: ")))
         self.assertEqual(event, {"text": "這個會議", "done": True})
+
+
+class FakeBrowser:
+    def __init__(self):
+        self.sent = []
+
+    async def send_text(self, text):
+        self.sent.append(json.loads(text))
+
+
+class MaiTests(unittest.TestCase):
+    def test_realtime_url_comes_from_the_portal_rest_endpoint(self):
+        rest = "https://res1.openai.azure.com/openai/deployments/MAI/audio/transcriptions?api-version=2025-03-01-preview"
+        self.assertEqual(mai_asr.realtime_url(rest), "wss://res1.services.ai.azure.com/mai/v1/realtime?intent=transcription")
+        self.assertEqual(mai_asr.realtime_url("wss://x.example/mai/v1/realtime"), "wss://x.example/mai/v1/realtime")
+        self.assertEqual(mai_asr.realtime_url(""), "")
+
+    def test_merge_marks_takes_only_punctuation_from_the_model(self):
+        merge = lambda a, b: mai_asr.merge_marks(a, b, TO_TRADITIONAL.convert)
+        self.assertEqual(merge("或许你会说那是你的年代", "或許你會說，那是你的年代。"), "或许你会说，那是你的年代。")
+        self.assertEqual(merge("用AI agent做", "用 AI agent 做，"), "用AI agent做，")
+        self.assertEqual(merge("我们，开始", "我们，开始。"), "我们，开始。")
+        self.assertEqual(merge("三人陈尸浴室", "三人沉屍於世。"), "")  # a changed word drops the answer
+        self.assertEqual(merge("开始", "开始研究。"), "")
+
+    def test_engine_choice_keeps_chinese_local_in_hybrid_mode(self):
+        with patch("mai_asr.configured", return_value=True):
+            self.assertEqual(asr_engine("hybrid", "ja"), "mai")
+            self.assertEqual(asr_engine("hybrid", "en"), "mai")
+            for language in ("zh", "auto", "zh_ja"):
+                self.assertEqual(asr_engine("hybrid", language), "local")
+            self.assertEqual(asr_engine("mai", "zh"), "mai")
+            self.assertEqual(asr_engine("local", "ja"), "local")
+        with patch("mai_asr.configured", return_value=False):
+            self.assertEqual(asr_engine("mai", "ja"), "local")
+        self.assertIn("mai", TestClient(app).get("/api/config").json())
+
+    def run_items(self, language, events, punctuate=None, speech=False):
+        browser = FakeBrowser()
+        bridge = mai_asr.MaiBridge(browser, language, TranscriptDisplay(language, ""), punctuate)
+        bridge.vad.speech, bridge.vad.silence = speech, 1.0
+        bridge.items.extend(True for event in events if event["type"].endswith("completed"))
+
+        async def go():
+            for event in events + [None]:
+                await bridge.events.put(event)
+            await bridge.process()
+        asyncio.run(go())
+        return browser.sent
+
+    @staticmethod
+    def item(*deltas):
+        events = [{"type": "conversation.item.input_audio_transcription.delta", "delta": d} for d in deltas]
+        return events + [{"type": "conversation.item.input_audio_transcription.completed", "transcript": "".join(deltas)}]
+
+    def test_mai_chinese_item_is_shown_in_traditional_and_closed_at_the_pause(self):
+        sent = self.run_items("zh", self.item("这个会议", "支持实时翻译"))
+        self.assertEqual(sent[1]["displayText"], "這個會議支持實時翻譯")
+        self.assertEqual((sent[-1]["displayText"], sent[-1]["msg"]["speech_end"]), ("這個會議支持實時翻譯。", True))
+        resumed = self.run_items("ja", self.item("お腹に今二人目がいるんですけれども"), speech=True)
+        self.assertEqual(resumed[-1]["displayText"], "お腹に今二人目がいるんですけれども、")
+
+    def test_cloud_punctuation_rewrites_only_the_committed_item(self):
+        async def punctuate(context, text, pause):
+            self.assertEqual((context, text), ("第一句。", "或许你会说那是你的年代"))
+            return mai_asr.merge_marks(text, "或許你會說，那是你的年代？", TO_TRADITIONAL.convert)
+        sent = self.run_items("zh", self.item("第一句") + self.item("或许你会说", "那是你的年代"), punctuate=self.first_then(punctuate))
+        self.assertEqual(sent[-1]["displayText"], "第一句。或許你會說，那是你的年代？")
+        self.assertTrue(sent[-1]["msg"]["speech_end"])
+
+    @staticmethod
+    def first_then(punctuate):
+        calls = []
+
+        async def wrapper(context, text, pause):
+            calls.append(text)
+            return text + "。" if len(calls) == 1 else await punctuate(context, text, pause)
+        return wrapper
+
+    def test_english_is_left_to_mai_and_never_committed_at_pauses(self):
+        self.assertNotIn("en", mai_asr.PAUSE_COMMITS)
+        sent = self.run_items("en", self.item("That means that despite", " all of these things."))
+        self.assertEqual(sent[-1]["msg"], {"text": "", "reset": False, "speech_end": True, "language": ""})
+        self.assertEqual(sent[-2]["displayText"], "That means that despite all of these things.")
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketState
+import mai_asr
 from translation_quality import (TERMS_SCHEMA, apply_aliases, asr_context, consolidate_terms, glossary_entries, learned_replacements,
                                  parse_discovered_terms, policy, repair_asr, strip_context_echo, term_discovery_messages, violations)
 
@@ -27,6 +28,11 @@ TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "gemma-4-E2B_q4_0-it.gguf")
 REFINE_URL = os.getenv("TRANSLATE_REFINE_URL", "").rstrip("/")
 REFINE_MODEL = os.getenv("TRANSLATE_REFINE_MODEL", "")
 REFINE_KEY = os.getenv("TRANSLATE_REFINE_KEY", "")
+# Chinese MAI punctuation must come back within a pause, so the cloud model is asked not to reason.
+# Off by default: in the 2026-11-03 benchmark (bench/README.md) the model ended items with 。 that the
+# speaker had not finished, and MAI Chinese scored 73.7 with it vs 80.7 with pause-rule marks.
+PUNCTUATE_MAI = os.getenv("TRANSLATE_PUNCTUATE_MAI", "") == "1"
+PUNCTUATE_EXTRA = json.loads(os.getenv("TRANSLATE_PUNCTUATE_EXTRA", "") or '{"thinking": {"type": "disabled"}}')
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 # Meeting recordings and transcripts land here (compose mounts the project's output/ folder).
 OUTPUT_DIR = Path(os.getenv("MEETING_OUTPUT_DIR", "/output"))
@@ -194,7 +200,41 @@ async def health():
 
 @app.get("/api/config")
 async def config():
-    return {"cloudRefine": bool(REFINE_URL and REFINE_MODEL)}
+    return {"cloudRefine": bool(REFINE_URL and REFINE_MODEL), "mai": mai_asr.configured()}
+
+
+def asr_engine(choice: str, language: str) -> str:
+    """'mai' or 'local'. 混合 keeps Chinese, and the modes that may contain it, on the local model."""
+    if not mai_asr.configured():
+        return "local"
+    if choice == "mai" or (choice == "hybrid" and language not in ("zh", "auto", "zh_ja", "yue")):
+        return "mai"
+    return "local"
+
+
+def refine_headers() -> dict:
+    return {"Authorization": f"Bearer {REFINE_KEY}"} if REFINE_KEY else {}
+
+
+async def punctuate_item(context: str, text: str, pause: bool) -> str:
+    """Punctuation for one committed MAI Chinese item from the cloud text model; only its marks are used."""
+    messages = [
+        {"role": "system", "content": "你是語音辨識的標點修復器。為 TEXT 加上全形標點（，。？！、：；「」）。"
+                                      "不得增加、刪除或替換任何字，也不要轉換繁簡，只輸出加好標點的 TEXT。"
+                                      "結尾一定要有標點：句子已完整用。？！，話還沒說完用，。"},
+        {"role": "user", "content": f"前文（僅供判斷，不要輸出）：{context[-120:]}\n"
+                                    f"說話者在 TEXT 之後{'停頓' if pause else '結束發言'}。\nTEXT：{text}"},
+    ]
+    payload = {"model": REFINE_MODEL, "messages": messages, "temperature": 0, "max_tokens": len(text) * 2 + 32, **PUNCTUATE_EXTRA}
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            response = await client.post(f"{REFINE_URL}/chat/completions", json=payload, headers=refine_headers())
+            response.raise_for_status()
+            answer = response.json()["choices"][0]["message"]["content"] or ""
+    except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as exc:
+        logger.warning("punctuation failed: %s", exc)
+        return ""
+    return mai_asr.merge_marks(text, answer.strip().removeprefix("TEXT："), TO_TRADITIONAL.convert)
 
 
 def translation_backend(body: "TranslationRequest", payload: dict) -> tuple[str, dict, dict]:
@@ -203,7 +243,7 @@ def translation_backend(body: "TranslationRequest", payload: dict) -> tuple[str,
         return f"{TRANSLATE_URL}/v1/chat/completions", {}, payload
     # llama.cpp-only sampling options are not part of the OpenAI API.
     cloud = {k: v for k, v in payload.items() if k not in ("repeat_penalty", "chat_template_kwargs", "top_p")}
-    headers = {"Authorization": f"Bearer {REFINE_KEY}"} if REFINE_KEY else {}
+    headers = refine_headers()
     # Reasoning models (deepseek-v4-flash) spend max_tokens on thinking first; an exact budget
     # returns an empty translation, so leave room for it. Refinements run in the background.
     budget = payload.get("max_tokens", 512) + 4096
@@ -391,6 +431,43 @@ async def translate_stream(body: TranslationRequest):
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+class TranscriptDisplay:
+    """What the browser shows for either ASR engine: Traditional script for Chinese, the meeting glossary's
+    corrections, and per-chunk zh/ja detection in 中日雙向 mode."""
+
+    def __init__(self, language: str, glossary: str):
+        self.glossary, self.bilingual = glossary, language == "zh_ja"
+        self.chinese = language in ("auto", "zhen", "zh", "Chinese", "yue", "Cantonese")
+        self.raw = self.pair_text = self.detected = ""
+
+    def render(self, text: str) -> str:
+        return apply_aliases(repair_asr(strip_context_echo(text, self.glossary)), self.glossary)
+
+    def annotate(self, payload: dict) -> None:
+        msg = payload.get("msg")
+        if not isinstance(msg, dict):
+            return
+        chunk = msg.get("text") if isinstance(msg.get("text"), str) else ""
+        if self.bilingual:
+            self.detected = detect_pair_language(chunk, msg.get("language"), self.detected)
+            payload["detectedLanguage"] = self.detected
+            if chunk:
+                self.pair_text += TO_TRADITIONAL.convert(chunk) if self.detected == "zh" else chunk
+                payload["displayText"] = self.render(self.pair_text)
+            if msg.get("reset"):
+                self.detected = ""
+        if chunk:
+            self.raw += chunk
+            if not self.bilingual:
+                payload["displayText"] = self.render(TO_TRADITIONAL.convert(self.raw) if self.chinese else self.raw)
+
+    def rewrite(self, start: int, text: str) -> None:
+        """Replace the raw transcript from `start` (a punctuated MAI item); shown with the next chunk.
+        中日雙向 builds its text per chunk, so it is never rewritten."""
+        if not self.bilingual:
+            self.raw = self.raw[:start] + text
+
+
 @app.websocket("/ws/transcribe")
 async def transcribe(browser: WebSocket):
     await browser.accept()
@@ -398,8 +475,16 @@ async def transcribe(browser: WebSocket):
         raw_header = await browser.receive_text()
         header = json.loads(raw_header)
         glossary = str(header.get("system_prompt", ""))[:4000]
-        bilingual = header.get("language") == "zh_ja"
-        chinese_display = header.get("language", "auto") in ("auto", "zhen", "zh", "Chinese", "yue", "Cantonese")
+        language = header.get("language") if header.get("language") in ("auto", "zh_ja", *LANGUAGES) else "auto"
+        bilingual = language == "zh_ja"
+        display = TranscriptDisplay(language, glossary)
+        if asr_engine(str(header.get("engine", "")), language) == "mai":
+            # Audio goes to Azure; text goes to the cloud text model only when 雲端精修 is on.
+            cloud_marks = PUNCTUATE_MAI and bool(header.get("refine")) and language == "zh" and bool(REFINE_URL and REFINE_MODEL)
+            await mai_asr.MaiBridge(browser, language, display, punctuate_item if cloud_marks else None).run()
+            if browser.client_state == WebSocketState.CONNECTED:
+                await browser.close()
+            return
         safe_header = {
             "channels": 1,
             "sample_rate": 16000,
@@ -412,9 +497,6 @@ async def transcribe(browser: WebSocket):
         }
         async with websockets.connect(ASR_WS_URL, ping_interval=None, max_size=None) as upstream:
             await upstream.send(json.dumps(safe_header, ensure_ascii=False))
-            raw_transcript = ""
-            display_transcript = ""
-            detected_language = ""
 
             async def browser_to_asr():
                 while True:
@@ -427,28 +509,14 @@ async def transcribe(browser: WebSocket):
                         await upstream.send(event["text"])
 
             async def asr_to_browser():
-                nonlocal raw_transcript, display_transcript, detected_language
                 async for message in upstream:
                     if isinstance(message, bytes):
                         await browser.send_bytes(message)
                     else:
                         try:
                             payload = json.loads(message)
-                            chunk = payload.get("msg", {}).get("text", "")
-                            if bilingual and isinstance(payload.get("msg"), dict):
-                                language = detect_pair_language(chunk if isinstance(chunk, str) else "", payload["msg"].get("language"), detected_language)
-                                detected_language = language
-                                payload["detectedLanguage"] = language
-                                if isinstance(chunk, str) and chunk:
-                                    display_transcript += TO_TRADITIONAL.convert(chunk) if language == "zh" else chunk
-                                    payload["displayText"] = apply_aliases(repair_asr(strip_context_echo(display_transcript, glossary)), glossary)
-                                if payload["msg"].get("reset"):
-                                    detected_language = ""
-                            if isinstance(chunk, str) and chunk:
-                                raw_transcript += chunk
-                                if not bilingual:
-                                    display = TO_TRADITIONAL.convert(raw_transcript) if chinese_display else raw_transcript
-                                    payload["displayText"] = apply_aliases(repair_asr(strip_context_echo(display, glossary)), glossary)
+                            if isinstance(payload, dict):
+                                display.annotate(payload)
                             message = json.dumps(payload, ensure_ascii=False)
                         except (json.JSONDecodeError, AttributeError, TypeError):
                             pass

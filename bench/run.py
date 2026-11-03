@@ -1,5 +1,6 @@
 """Benchmark: record ASR tracks (3 at a time), then replay each through the real UI sequentially.
-Usage: python run.py RUN_TAG [case ...]   -> artifacts/replay/<RUN_TAG>_<case>.json/.md"""
+Usage: [ASR_ENGINE=mai|hybrid] python run.py RUN_TAG [case ...]   -> artifacts/replay/<RUN_TAG>_<case>.json/.md
+RUN_TAG starting with "cloud" turns 雲端精修 on; TRACK_PREFIX=mai_ replays tracks from mai_record.py."""
 import json, os, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -17,12 +18,13 @@ tracks = replay_browser.OUT / 'tracks'; tracks.mkdir(parents=True, exist_ok=True
 
 def args(c):
     return SimpleNamespace(wav=str(HERE / 'data' / c['name'] / 'clip.wav'), start=0.0, duration=float(c['duration']),
-                           language=c['language'], context='', track=os.getenv('TRACK_PREFIX', '') + c['name'])
+                           language=c['language'], context='', track=os.getenv('TRACK_PREFIX', '') + c['name'],
+                           engine=os.getenv('ASR_ENGINE', 'local'), cloud_refine=tag.startswith('cloud'))
 
 with ThreadPoolExecutor(3) as pool:
     list(pool.map(lambda c: replay_browser.record_track(args(c), tracks), cases))
 print('tracks ready', flush=True)
 for c in cases if tag != 'record' else []:
     subprocess.run([sys.executable, str(WEBAPP / 'replay_browser.py'), args(c).wav, '--start', '0', '--duration', str(c['duration']),
-                    '--name', f"{tag}_{c['name']}", '--language', c['language'], '--target', c['target'], '--track', args(c).track,
+                    '--name', f"{tag}_{c['name']}", '--language', c['language'], '--target', c['target'], '--track', args(c).track, '--engine', args(c).engine,
                     *(['--cloud-refine'] if tag.startswith('cloud') else [])], check=False)

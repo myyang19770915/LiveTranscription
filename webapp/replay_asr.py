@@ -20,6 +20,8 @@ async def main():
     ap.add_argument('--start', type=float, default=0); ap.add_argument('--duration', type=float, default=0)
     ap.add_argument('--speed', type=float, default=1.0)
     ap.add_argument('--context', default='')
+    ap.add_argument('--engine', default='local', help='local, mai or hybrid (see /api/config)')
+    ap.add_argument('--refine', action='store_true', help='雲端精修 on: MAI Chinese is punctuated by the cloud model')
     a = ap.parse_args()
     with wave.open(a.wav) as w:
         assert w.getframerate() == 16000 and w.getnchannels() == 1 and w.getsampwidth() == 2
@@ -30,7 +32,7 @@ async def main():
     sent_s, steps, last_rx = a.start, 0, time.monotonic()
     async with websockets.connect(a.url, max_size=None) as ws:
         await ws.send(json.dumps({'requestId': str(uuid.uuid4()), 'language': a.language, 'use_vad': a.language == 'zh_ja',
-                                  'system_prompt': a.context}))
+                                  'system_prompt': a.context, 'engine': a.engine, 'refine': a.refine}))
         began = time.monotonic()
 
         async def send():

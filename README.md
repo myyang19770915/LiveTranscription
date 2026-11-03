@@ -259,6 +259,14 @@ docker compose logs -f asr translate app
 | `CUDA_VISIBLE_DEVICES` | `0` | 容器可見的 GPU device index |
 | `TRANSLATE_MODEL_REPO` | Google QAT Q4_0 GGUF repo | llama.cpp 下載的模型 repo |
 | `TRANSLATE_MODEL_FILE` | `gemma-4-E2B_q4_0-it.gguf` | repo 中指定的 GGUF 權重檔 |
+| `TRANSLATE_REFINE_URL` / `_MODEL` / `_KEY` | 空（關閉） | 選用：OpenAI 相容的雲端模型（例如 litellm `http://host.docker.internal:4001/v1`），用於「雲端精修」；設定後頁面出現開關 |
+| `AZURE_MAI_ENDPOINT` / `_API_KEY` / `_DEPLOYMENT` | 空（關閉） | 選用：Azure Foundry 的 MAI-Transcribe-2-Streaming；可填入口網站的 https 端點，程式會改用 `wss://<resource>.services.ai.azure.com/mai/v1/realtime`。設定後頁面出現「辨識引擎」選單 |
+| `TRANSLATE_PUNCTUATE_MAI` | 空（關閉） | 實驗：`1` 時 MAI 中文改由雲端模型補標點（benchmark 顯示會切斷句子，預設不開） |
+
+**辨識引擎**（頁面選單，預設本機）：
+- 本機 Confucius：音訊不離開設備。
+- 混合：中文、中英、中日雙向用本機，其他語言用雲端 MAI。目前 benchmark 最佳（約 87 分，見 [bench/README.md](bench/README.md)）。
+- 雲端 MAI：所有語言用 MAI；中文與日文由停頓偵測補標點。
 
 複製 [`.env.example`](.env.example) 成 `.env` 後修改。不要將含真實密鑰的 `.env` 提交到 Git。
 

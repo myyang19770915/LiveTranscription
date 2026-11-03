@@ -23,7 +23,8 @@ python bench/fetch.py            # 下載音訊（裁成 16 kHz wav）與字幕�
 | 產生評分表 | `python bench/evaluate.py TAG` | `bench/results/TAG/<case>.md` |
 | 盲評分組 | `python bench/blindn.py OUT SEED RUN_A RUN_B [RUN_C]` | `bench/results/OUT/<case>.X/Y/Z.md` |
 
-- `TAG` 以 `cloud` 開頭時會開啟雲端精修；設定 `TRACK_PREFIX=mai_` 會改用 MAI 軌。
+- `TAG` 以 `cloud` 開頭時會開啟雲端精修。
+- `ASR_ENGINE=mai`（或 `hybrid`）透過正式 gateway 錄 MAI 軌（檔名加 `_mai`／`_maip`）；`TRACK_PREFIX=mai_` 則重播 `mai_record.py` 錄的軌。
 - 同一批 ASR 軌可重複使用，改翻譯或斷句時比較的是相同輸入。
 - 盲評：每段影片由同一位評審依 `rubric.md` 同時評所有版本（滿分 100），評完才看 `mapping.json` 解盲。
 
@@ -37,6 +38,18 @@ python bench/fetch.py            # 下載音訊（裁成 16 kHz wav）與字幕�
 - `segcheck.js`：斷句規則案例
 - `guardcheck.js`：精修防重複檢查
 - `probe.py probe_*.json`：單句翻譯對照
+
+## 2026-11-03 結果（blind6，正式 gateway 版）
+
+| 版本 | 平均 | 英文 | 日文 | 中文 |
+|---|---|---|---|---|
+| Confucius + 雲端精修（`cloud1`） | 79.8 | 81.7 | 74.8 | **84.7** |
+| MAI 規則標點 + 雲端精修（`cloud_mai`，腳本錄製） | 85.2 | 87.7 | **86.8** | 80.7 |
+| MAI 正式 gateway + 雲端精修，中文雲端補標點（`cloud_maig`） | 83.8 | **90.3** | 86.5 | 73.7 |
+
+- 混合模式（英日 MAI、中文 Confucius）推算約 **87.1**。
+- 中文雲端補標點變差：模型常在話還沒講完時補「。」，斷句切斷句子，因此預設關閉（`TRANSLATE_PUNCTUATE_MAI`）。
+- 單支分數在不同輪次會浮動 ±5，看平均與同一輪內的比較。
 
 ## 2026-11-03 結果（blind5）
 

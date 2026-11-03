@@ -58,7 +58,7 @@ function renderTranslation(){
 }
 function updateCounts(){ $('transcriptCount').textContent=`${transcript.length.toLocaleString()} 字`; $('translationCount').textContent=`${visibleTranslation().length.toLocaleString()} 字`; }
 function toast(message,duration=2200){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),duration)}
-function setControls(active){const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
+function setControls(active){const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('asrEngine').disabled=active;$('cloudRefine').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
 function updateTranslationDirection(){
   const pair=$('language').value==='zh_ja';
   if(pair){if($('targetLanguage').value!=='zh_ja')fixedTarget=$('targetLanguage').value;$('targetLanguage').value='zh_ja'}
@@ -150,7 +150,7 @@ async function startMeeting() {
     socket = new WebSocket(`${protocol}//${location.host}/ws/transcribe`);
     socket.binaryType = 'arraybuffer';
     await new Promise((resolve, reject) => { socket.onopen=resolve; socket.onerror=()=>reject(new Error('WebSocket 連線失敗')); });
-    socket.send(JSON.stringify({requestId:crypto.randomUUID(),language:$('language').value,use_vad:direction.source==='zh_ja',system_prompt:$('context').value}));
+    socket.send(JSON.stringify({requestId:crypto.randomUUID(),language:$('language').value,use_vad:direction.source==='zh_ja',system_prompt:$('context').value,engine:asrEngine(),refine:cloudRefineOn()}));
     socket.onmessage = onMessage;
     socket.onclose = () => { if (stream && !stopping) stopMeeting(false).then(()=>setStatus('辨識連線已中斷','error')); };
 
@@ -219,11 +219,13 @@ function onMessage(event){
   let data; try{data=JSON.parse(event.data)}catch{return}
   if(data.status==='error'){setStatus(typeof data.msg==='string'?data.msg:'辨識服務錯誤','error');return}
   const chunk=data.msg?.text||'';
-  if(data.msg?.speech_end&&!incompleteClause(transcript+chunk))utteranceBoundaries.add(transcript.length+chunk.length);
-  if(!chunk){if(data.msg?.reset&&transcript.length>translationOffset)scheduleTranslation(false);return}
+  const markEnd=()=>{if(data.msg?.speech_end&&!incompleteClause(transcript))utteranceBoundaries.add(transcript.length)};
+  if(!chunk){markEnd();if(data.msg?.reset&&transcript.length>translationOffset)scheduleTranslation(false);return}
   const start=transcript.length;
   sourceRevision++;
   transcript = typeof data.displayText==='string' ? data.displayText : transcript+chunk;
+  // displayText can re-punctuate the current item (MAI), so the utterance ends at the new end.
+  markEnd();
   languageSpans.push({start,end:transcript.length,source:data.detectedLanguage||''});
   // ASR resets are decoding events, not proof of a complete semantic sentence.
   render('transcript',transcript); scheduleTranslation(false);
@@ -270,11 +272,14 @@ function finalizedRecords(){
 }
 // 雲端精修: refinements go to the configured cloud model. Off by default; the choice stays in this browser.
 function cloudRefineOn(){return !$('cloudRefineRow').hidden&&$('cloudRefine').checked}
-fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine})=>{
-  $('cloudRefineRow').hidden=!cloudRefine;
-  try{$('cloudRefine').checked=localStorage.getItem('cloudRefine')==='1'}catch{}
+// 辨識引擎: local Confucius, Azure MAI, or MAI for every language except Chinese. Shown only when MAI is configured.
+function asrEngine(){return $('asrEngineRow').hidden?'local':$('asrEngine').value}
+fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine,mai})=>{
+  $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;
+  try{$('cloudRefine').checked=localStorage.getItem('cloudRefine')==='1';const engine=localStorage.getItem('asrEngine');if([...$('asrEngine').options].some(o=>o.value===engine))$('asrEngine').value=engine}catch{}
 }).catch(()=>{});
 $('cloudRefine').onchange=()=>{try{localStorage.setItem('cloudRefine',$('cloudRefine').checked?'1':'0')}catch{}};
+$('asrEngine').onchange=()=>{try{localStorage.setItem('asrEngine',$('asrEngine').value)}catch{}};
 let correctionTimer=null;
 async function correctNext(){
   if(correcting||!correctionQueue.length)return;
@@ -339,7 +344,8 @@ async function streamTranslation(body,signal){
 async function runTranslation(){
   if(activeTranslation||transcript.length<=translationOffset)return;
   const plan=segmentPlan(flushRequested||finalizeRemaining),segmentEnd=plan.end,final=plan.final;
-  const segment=transcript.slice(translationOffset,segmentEnd).trim();
+  // A pause mark can arrive after its sentence was already cut (MAI "…です|、しかし"); it belongs to that one.
+  const segment=transcript.slice(translationOffset,segmentEnd).trim().replace(/^[、，,。．.！!？?；;]+\s*/u,'');
   if(!segment)return;
   // Each draft rewrites the visible line; only refresh once a meaningful chunk was added.
   const minGrowth=/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(segment)?12:24;
@@ -420,7 +426,7 @@ const mobileQuery=matchMedia('(max-width: 760px), (max-width: 1000px) and (max-h
 const mobilePanels={transcript:$('transcript').closest('article'),translation:$('translation').closest('article')};
 const mobileFollow={transcript:true,translation:true};
 let mobileView='translation';
-const mobileSettingsNodes=[$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('cloudRefineRow')];
+const mobileSettingsNodes=[$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('asrEngineRow'),$('cloudRefineRow')];
 const movableControls=[...mobileSettingsNodes,$('start')].map(node=>{
   const anchor=document.createComment('responsive-control');node.before(anchor);return{node,anchor};
 });
