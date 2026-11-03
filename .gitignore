@@ -48,5 +48,7 @@ checkpoints/
 
 # Local meeting captures and review material
 artifacts/
+output/
 
 
+.gstack/

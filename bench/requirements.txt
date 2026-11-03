@@ -1,0 +1,4 @@
+httpx
+websockets>=13
+opencc-python-reimplemented
+yt-dlp

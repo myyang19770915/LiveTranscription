@@ -271,7 +271,7 @@ async def initialize_models(app):
         pad_start_frame=5,
         min_speech_frame=8,
         max_speech_frame=2000,
-        min_silence_frame=20,
+        min_silence_frame=70,
         chunk_max_frame=30000)
     
     stream_vad = FireRedStreamVad.from_pretrained(args.vad_model_path, vad_config)
@@ -1019,6 +1019,8 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                         text= asr_model.finish_streaming_transcribe_no_reset(
                             asr_state, first_max_new_tokens
                         )
+                        if asr_state.text.startswith(text) and len(asr_state.text) > len(text):
+                            text = asr_state.text
                         text = text.split("|")[0]
                         if len(text) > len(last_fixed_asr_text):
                             new_asr_text = text[len(last_fixed_asr_text):]
@@ -1027,6 +1029,7 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                         else:
                             out_msg = {"text": "", "reset": True}
                         total_text = text
+                        out_msg["language"] = asr_state.language
                         out_str = {"status": "success", "requestId": f"{requestId}", "msg": out_msg}
                         await ws.send(json.dumps(out_str, ensure_ascii=False))
                         _logger.info(f"requestId={requestId}:finish! out_str={out_str},total_text={total_text}")
@@ -1097,6 +1100,7 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                     text, fixed_asr_text = asr_model.streaming_transcribe_no_reset(
                         audio_seg, asr_state, int(max_new_tokens), nmt_fast
                     )
+                    recognized_language = asr_state.language
                     asr_cost_ms = round((time.time() - t0) * 1000, 1)
                     if len(fixed_asr_text) > len(last_fixed_asr_text):
                         new_asr_text = fixed_asr_text[len(last_fixed_asr_text):]
@@ -1134,10 +1138,12 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                         halluc_reason = cur_reason
 
                     if speech_ended_in_this_chunk and use_vad:
-                        # seg_final_text = asr_model.finish_streaming_transcribe_no_reset(
-                        #     asr_state, max(1, int((step + lookahead) / 1280))
-                        # )
-                        seg_final_text = asr_state.text
+                        seg_final_text = asr_model.finish_streaming_transcribe_no_reset(
+                            asr_state, max(1, int((step + lookahead) / 1280))
+                        )
+                        if asr_state.text.startswith(seg_final_text) and len(asr_state.text) > len(seg_final_text):
+                            seg_final_text = asr_state.text
+                        recognized_language = asr_state.language
                         seg_final_text = seg_final_text.split("|")[0]
                         asr_state = asr_model.init_streaming_state(
                             context=context,
@@ -1153,8 +1159,16 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                             seg_new_asr_text = ""
                         total_text = seg_final_text
 
-                        out_msg = {"text": seg_new_asr_text, "reset": True, "asr_cost_ms": asr_cost_ms}
+                        # The current chunk's fixed increment has not been sent yet.
+                        # Include it as well as the final suffix, exactly once.
+                        out_msg = {"text": out_msg["text"] + seg_new_asr_text, "reset": True, "asr_cost_ms": asr_cost_ms}
                         last_fixed_asr_text = ""
+                        total_secs = 0.0
+                        total_new_asr_tokens = []
+                        no_new_text_chunks = 0
+                        is_halluc = False
+                    out_msg["speech_end"] = speech_ended_in_this_chunk
+                    out_msg["language"] = recognized_language
                     finish_cost_ms = round((time.time() - t0) * 1000, 1)
                     out_msg['total_cost_ms'] = vad_cost_ms + asr_cost_ms + finish_cost_ms
                     _recent_cost_ms.append(out_msg['total_cost_ms'])

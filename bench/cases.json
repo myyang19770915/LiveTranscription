@@ -1,0 +1,12 @@
+[
+ {"name": "en_torres",  "id": "aUYSDEYdmzw", "start": 60,  "duration": 240, "language": "en", "target": "zh", "subs": ["en", "zh-TW"]},
+ {"name": "en_sinek",   "id": "lmyZMtPVodo", "start": 60,  "duration": 240, "language": "en", "target": "ja", "subs": ["en", "ja"]},
+ {"name": "en_tesla",   "id": "qO7T5zgRvXM", "start": 2400, "duration": 240, "language": "en", "target": "zh", "subs": ["en", "en-orig"]},
+ {"name": "ja_komuro",  "id": "sd6OLoQW0hY", "start": 60,  "duration": 240, "language": "ja", "target": "zh", "subs": ["ja", "en"]},
+ {"name": "ja_taguchi", "id": "cjtmDEG-B7U", "start": 60,  "duration": 240, "language": "ja", "target": "zh", "subs": ["ja"]},
+ {"name": "ja_bluu",    "id": "br1twp32jbc", "start": 120, "duration": 240, "language": "ja", "target": "zh", "subs": ["ja", "ja-orig"]},
+ {"name": "ja_pivot",   "id": "Sn_9PxGIqT4", "start": 300, "duration": 240, "language": "ja", "target": "zh", "subs": ["ja", "ja-orig"]},
+ {"name": "zh_chen",    "id": "uiJ4zibW8_M", "start": 60,  "duration": 240, "language": "zh", "target": "en", "subs": ["zh-TW", "en"]},
+ {"name": "zh_fire",    "id": "a3CbSDzW2N0", "start": 30,  "duration": 240, "language": "zh", "target": "ja", "subs": ["zh-TW"]},
+ {"name": "zh_jian",    "id": "XHTfeCk0GwQ", "start": 600, "duration": 240, "language": "zh", "target": "ja", "subs": ["zh-TW", "zh-Hant", "zh-orig"]}
+]

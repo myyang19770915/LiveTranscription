@@ -73,6 +73,11 @@ select { padding-top: 9px; }
 .target-field { grid-area: target !important; }
 .mic-field { grid-area: mic !important; }
 .mic-test { grid-area: test !important; border-radius: 12px; background: #19221d; }
+/* The audio hint, learned terms and the cloud switch share the hint cell, stacked. */
+.hint-stack { grid-area: hint !important; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cloud-refine { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.cloud-refine input { margin: 0; accent-color: #58d893; }
+.cloud-refine span { opacity: .75; }
 .source-hint {
   grid-area: hint !important;
   padding: 1px 4px 2px;

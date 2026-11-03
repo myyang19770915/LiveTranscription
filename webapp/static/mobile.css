@@ -1,0 +1,118 @@
+/* Phone workspace: one reading surface, persistent controls, optional settings. */
+.mobile-only { display: none; }
+.mobile-settings-dialog { display: none; }
+
+@media (max-width: 760px), (max-width: 1000px) and (max-height: 500px) and (pointer: coarse) {
+  html, body { height: 100%; overflow: hidden; }
+  body { overscroll-behavior: none; }
+  main, :root[data-theme="light"] main {
+    width: 100%; height: 100dvh; min-height: 0; margin: 0;
+    padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    border: 0; border-radius: 0; box-shadow: none;
+    display: flex; flex-direction: column; gap: 10px; overflow: hidden;
+  }
+  main > nav { flex: 0 0 44px; min-height: 44px; gap: 8px; }
+  .brand { gap: 8px; min-width: 0; }
+  .brand-mark { width: 34px; height: 34px; border-radius: 10px; }
+  .brand-mark img { width: 28px; height: 28px; }
+  .brand b { font-size: 14px; white-space: nowrap; }
+  .brand small { display: none; }
+  .nav-actions { gap: 6px; min-width: 0; }
+  .status { max-width: 112px; min-width: 0; padding: 8px; font-size: 10px; }
+  .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status i { flex: 0 0 6px; }
+  .theme-toggle { min-width: 40px; min-height: 40px; padding: 0 10px; }
+  .theme-label { display: none; }
+  main > header, .ambient { display: none; }
+  .controls {
+    flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr) !important;
+    grid-template-areas: "source swap target"; gap: 6px; padding: 7px; margin: 0;
+    border-radius: 14px;
+  }
+  .controls > .field { min-height: 58px; padding: 8px 10px; min-width: 0; }
+  .controls .field label { font-size: 10px; letter-spacing: 0; }
+  .controls select { font-size: 14px; padding-top: 6px; padding-right: 14px; text-overflow: ellipsis; }
+  .controls > .direction { min-height: 44px; border: 0; background: transparent; gap: 0; }
+  .direction .lang-tag { display: none; }
+  .direction svg { width: 23px; }
+  .live-bar { flex: 0 0 auto; min-height: 0; }
+  .live-bar:not(.visible) { display: none; }
+  .live-bar.visible { height: 30px; margin: 0; padding: 0 10px; gap: 8px; border-radius: 9px; }
+  .live-bar > span { font-size: 10px; }
+  .live-bar strong { display: none; }
+  .wave { width: 40px; overflow: hidden; flex-shrink: 0; }
+  .level { width: 40px; }
+  .mobile-workspace-bar { display: flex; flex: 0 0 44px; align-items: center; gap: 8px; }
+  .mobile-tabs { display: flex; flex: 1; padding: 3px; background: var(--soft); border-radius: 11px; }
+  .mobile-tabs button { flex: 1; min-height: 38px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+  .mobile-tabs button[aria-selected="true"] { color: var(--text); background: var(--surface); box-shadow: 0 2px 8px #0002; }
+  .mobile-settings-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 0 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); color: var(--text); cursor: pointer; font-size: 12px; }
+  .mobile-settings-button svg { width: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+  .transcripts { flex: 1 1 0; display: flex; min-height: 0; overflow: hidden; }
+  .transcript-card { flex: 1; width: 100%; height: 100%; min-height: 0; border-radius: 15px; }
+  .transcripts[data-view="translation"] .transcript-card:not(.translation-card),
+  .transcripts[data-view="transcript"] .translation-card { display: none; }
+  .card-head { flex: 0 0 58px; min-height: 58px; padding: 9px 12px; }
+  .card-title { gap: 8px; min-width: 0; }
+  .language-dot { width: 30px; height: 30px; border-radius: 9px; }
+  .label { display: none; }
+  .card-head h2 { margin: 0; font-size: 13px; }
+  .head-actions { gap: 4px; }
+  .icon-button { min-width: 44px; width: 44px; height: 44px; }
+  .state-chip { font-size: 8px; }
+  .translation-card .state-chip { min-width: 48px; }
+  .copy { min-height: 0; padding: 16px; font-size: 19px; line-height: 1.7; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; }
+  .empty-state { padding: 8px; }
+  .empty-state small { max-width: 240px; }
+  .card-foot { flex: 0 0 30px; min-height: 30px; padding: 5px 12px; font-size: 9px; letter-spacing: 0; }
+  .translation-draft { padding: 10px 12px; }
+  footer { flex: 0 0 54px; display: flex; align-items: center; gap: 8px; padding: 0; }
+  footer .secure-note { display: none; }
+  #mobileActionSlot { display: flex; flex: 1; min-width: 0; }
+  #mobileActionSlot .primary { width: 100%; min-height: 54px; height: 54px; gap: 8px; border-radius: 12px; }
+  #mobileActionSlot .button-copy { text-align: left; }
+  #mobileActionSlot .button-copy small { display: none; }
+  .footer-actions { gap: 0; }
+  .footer-actions .text-btn { min-width: 44px; min-height: 48px; padding: 7px 8px; font-size: 11px; }
+  .toast { bottom: calc(80px + env(safe-area-inset-bottom)); max-width: calc(100% - 32px); width: max-content; }
+  button { touch-action: manipulation; }
+
+  .mobile-settings-dialog[open] {
+    display: flex; flex-direction: column; gap: 16px;
+    width: min(480px, calc(100% - 24px)); max-height: calc(100dvh - 40px);
+    padding: 20px; border: 1px solid var(--line); border-radius: 22px;
+    background: var(--surface); color: var(--text); overflow-y: auto;
+    overscroll-behavior: contain; box-shadow: 0 24px 80px #0006;
+  }
+  .mobile-settings-dialog::backdrop { background: #060b08b0; backdrop-filter: blur(6px); }
+  .mobile-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .mobile-settings-heading h2 { margin: 0; font-size: 19px; }
+  .mobile-settings-heading p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+  .mobile-settings-fields { display: flex; flex-direction: column; gap: 10px; }
+  .mobile-settings-fields .field { padding: 12px; border: 1px solid var(--line); background: var(--bg); }
+  .mobile-settings-fields .field label { color: var(--muted); font-size: 11px; letter-spacing: 0; }
+  .mobile-settings-fields select, .mobile-settings-fields input { font-size: 16px; }
+  .mobile-settings-fields .mic-field.is-hidden { display: none; }
+  .mobile-settings-fields .mic-test { min-height: 52px; }
+  .mobile-settings-fields .mic-test b { font-size: 13px; }
+  .mobile-settings-fields .mic-test small, .mobile-settings-fields .mic-health { font-size: 11px; }
+  .mobile-settings-fields .source-hint { color: var(--muted); padding: 2px; font-size: 12px; line-height: 1.65; }
+  .mobile-settings-fields :disabled { opacity: .52; cursor: not-allowed; }
+  .mobile-settings-done { flex: 0 0 48px; min-height: 48px; border: 0; border-radius: 12px; color: var(--bg); background: var(--mint); font-size: 14px; font-weight: 600; cursor: pointer; }
+  :root[data-theme="light"] .mobile-settings-fields .field { background: #fffefa; }
+  :root[data-theme="light"] .mobile-tabs button[aria-selected="true"] { background: #fffefa; }
+  :root[data-theme="light"] .mobile-settings-done { color: #fff; }
+}
+
+@media (max-width: 760px) and (max-height: 480px), (max-width: 1000px) and (max-height: 480px) and (pointer: coarse) {
+  main, :root[data-theme="light"] main { gap: 6px; padding-top: 6px; padding-bottom: 6px; }
+  main > nav { flex-basis: 34px; min-height: 34px; }
+  .controls > .field { min-height: 48px; padding-block: 5px; }
+  .mobile-workspace-bar { flex-basis: 38px; }
+  .mobile-tabs button { min-height: 32px; }
+  .card-head { flex-basis: 40px; min-height: 40px; padding-block: 0; }
+  .card-foot { display: none; }
+  .live-bar.visible { height: 24px; }
+  footer { flex-basis: 46px; }
+  #mobileActionSlot .primary { min-height: 46px; height: 46px; }
+}

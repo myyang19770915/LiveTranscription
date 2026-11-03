@@ -59,6 +59,16 @@ def _normalize_punct_by_context(text: str) -> str:
         return punct
     return _ALL_PUNCT_PAT.sub(_replace, text)
 
+def _echoes_context(text: str, context: str) -> bool:
+    """True when the decoded text reads back the context prompt ("LocalModel、Hugging Face、…")
+    instead of the audio; this happens at segment starts with little audio. Even a short
+    match is held unfixed: once "LocalModel、" is in the prefix the model recites the rest.
+    Real speech that starts with the first term diverges a chunk later and is then fixed."""
+    norm = lambda s: re.sub(r"[\s、，,。;；]", "", s or "").lower()
+    t, c = norm(text), norm(context)
+    return len(t) >= 4 and len(c) >= 4 and (c.startswith(t) or t.startswith(c))
+
+
 def parse_language_output(
     raw: str,
     user_language: Optional[str] = None,
@@ -185,6 +195,8 @@ class ASRStreamingState:
     chunk_text: List
     last_fixed_text: str
     _first_chunk_discarded: bool
+    # Language header the model wrote for this segment, reused as the prompt prefix.
+    header: str = ""
 
 class R2T2ASRModel(Qwen3ASRModel):
     def __init__(
@@ -671,11 +683,13 @@ class R2T2ASRModel(Qwen3ASRModel):
                 state.chunk_text = state.chunk_text[discard_chunks:]
 
             prefix_text = "".join(state.chunk_text)
-            if state.force_language == None and state.language != "":
-                prefix = f"language {state.language}<asr_text>" + prefix_text
+            # Pin the header once text follows it, even "language None<asr_text>是"; otherwise
+            # every chunk re-spends its few new tokens on the header and no text is ever fixed.
+            if state.force_language == None and state.header:
+                prefix = state.header + prefix_text
             else:
                 prefix = prefix_text
-            prefix = prefix.split("|")[0] 
+            prefix = prefix.split("|")[0]
 
             prompt = state.prompt_raw + prefix
 
@@ -740,13 +754,16 @@ class R2T2ASRModel(Qwen3ASRModel):
                 meta_part, fixed_text  = fixed_text.split("<asr_text>", 1)
             
             has_tag = "<asr_text>" in state._raw_decoded
-            if not has_tag and state.force_language == None:
+            # A context echo is not speech; leave it unfixed so the next chunk re-decodes the audio.
+            if (not has_tag and state.force_language == None) or _echoes_context(txt, state.context):
                 state.text = ""
                 fixed_text = ""
                 continue
-  
+
             state.language = lang
             state.text = txt.split("|")[0]
+            if lang or state.text:
+                state.header = f"language {lang or 'None'}<asr_text>"
 
             state.chunk_id += 1
             prefix_stripped = prefix_text.strip()
@@ -837,8 +854,8 @@ class R2T2ASRModel(Qwen3ASRModel):
             state.chunk_text = state.chunk_text[discard_chunks:]
 
         prefix_text = "".join(state.chunk_text)
-        if state.force_language == None and state.language != "":
-            prefix = f"language {state.language}<asr_text>" + prefix_text
+        if state.force_language == None and state.header:
+            prefix = state.header + prefix_text
         else:
             prefix = prefix_text
 

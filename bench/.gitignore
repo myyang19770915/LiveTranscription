@@ -1,0 +1,4 @@
+# Downloaded YouTube audio/subtitles and review sheets contain third-party content; keep them local.
+data/
+results/
+*.log

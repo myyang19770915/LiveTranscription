@@ -14,7 +14,8 @@ The product UI hides the names of the underlying models. This README documents t
 - Capture from a microphone, Chrome tab/system audio, or both; select an input device and check its audio level before a meeting.
 - Select source and target languages, or swap the direction—for example, Japanese to Chinese, Chinese to Japanese, English to Chinese, and Chinese to English.
 - Chinese transcripts and translations are displayed in Taiwan Traditional Chinese using OpenCC `s2twp`. Japanese text is not converted.
-- Two-column desktop layout and a single-column mobile layout. Add participant names, brands, and terminology as meeting context.
+- Two-column desktop layout and a mobile workspace with transcript/translation tabs, persistent meeting controls, and a settings dialog. Add participant names, brands, and terminology as meeting context.
+- Automatic Chinese/Japanese conversation mode: Chinese speech is translated into Japanese, and Japanese speech into Traditional Chinese, with a direction label on each translation.
 - Switch between light and dark themes. The selection is saved in the current browser.
 - Local Docker deployment with no cloud ASR or translation API dependency.
 
@@ -231,6 +232,10 @@ docker compose logs -f asr translate app
 The first run downloads container images, ASR weights, FireRedVAD Stream-VAD, and the Gemma GGUF. Wait for the `asr` and `translate` health checks to pass, then open [http://localhost:18082](http://localhost:18082). If you changed `APP_PORT` in `.env`, use that port instead. Press `Ctrl+C` to stop following logs; the services continue running in the background.
 
 ## Using it in a meeting
+
+On a phone, open the app over HTTPS. Translation is the default reading view; use the Transcript/Translation tabs to switch. Language selectors stay at the top, and Start/End meeting, Clear, and Export remain at the bottom while long text scrolls inside the reading panel. Settings opens the audio source, microphone test, and meeting context dialog. Unsupported system-audio capture options are disabled. Portrait and landscape layouts are supported; desktop keeps both text panels visible.
+
+The default **Automatic Chinese/Japanese** mode locks the target selector to Chinese ↔ Japanese. ASR detects the language and resets its language state when VAD identifies a pause at the end of an utterance. The gateway prefers Chinese/Japanese ASR language tags, with kana/han characters and the current utterance language as fallback when a tag is missing or outside the pair. Translation selects the opposite language for each segment, preserves draft/final revisions, and keeps utterance boundaries separate. Japanese transcript characters are preserved; Chinese translations are converted to Taiwan Traditional Chinese. Leave a short pause when speakers or languages change. Overlapping speech, mixed-language sentences, and kanji-only short phrases without a reliable language tag may still be misclassified.
 
 1. Choose a **Source language** and **Translate to** language. Select the source explicitly when known. Use the swap button to change directions, such as Chinese ↔ English or Japanese ↔ Chinese.
 2. Choose an audio source:

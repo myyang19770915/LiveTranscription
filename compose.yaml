@@ -63,11 +63,16 @@ services:
     build: ./webapp
     volumes:
       - ./webapp:/app
+      - ./output:/output
     environment:
       ASR_WS_URL: ws://asr:8272/asr_stream_api_v1
       ASR_SECRET_KEY: ${ASR_SECRET_KEY:-change-me-local-only}
       TRANSLATE_URL: http://translate:5000
-      TRANSLATE_MODEL: gemma-4-E2B_q4_0-it.gguf
+      TRANSLATE_MODEL: ${TRANSLATE_MODEL_FILE:-gemma-4-E2B_q4_0-it.gguf}
+      # Optional cloud model for 雲端精修 (OpenAI-compatible base URL, e.g. https://api.openai.com/v1).
+      TRANSLATE_REFINE_URL: ${TRANSLATE_REFINE_URL:-}
+      TRANSLATE_REFINE_MODEL: ${TRANSLATE_REFINE_MODEL:-}
+      TRANSLATE_REFINE_KEY: ${TRANSLATE_REFINE_KEY:-}
     ports:
       - "${APP_PORT:-18082}:8080"
     depends_on:

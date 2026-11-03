@@ -1,0 +1,5 @@
+[
+ {"text": "so so I think we're going to want to finish writing that software,", "source": "en", "target": "zh", "history": "unverified FST or rover taxi at large scale when we we know that there are major architectural improvements to the software that can improve safety,", "history_translation": "大規模部署未經驗證的 FSD 或漫遊計程車，當我們知道軟體方面還有能提高安全性的重大架構改進時，這並不合理。", "following": "validate it and release it before going to large scale and supervised FSD,"},
+ {"text": "It's sometimes trying to put you out of business, but at the very minimum,", "source": "en", "target": "ja", "following": "is working hard to frustrate your growth and steal your business from you."},
+ {"text": "可是呢最重要的地方它不是萬能，因為它沒有能力修水電，嗯它沒有兩歲孩子的對，", "source": "zh", "target": "ja", "following": "呃物理知識的擁有，比如說你知道斜坡會滾，那這個水會燙，陽光會刺眼"}
+]
