@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261104a"><link rel="stylesheet" href="/assets/admin.css?v=20261104b"></head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>團隊管理</small></span></a>
+  <div class="topbar-actions">
+    <a class="ghost-button" href="/">回到會議</a>
+    <div id="account" class="account"></div>
+    <button id="themeToggle" class="icon-button" type="button" aria-label="切換深淺主題" title="切換深淺主題"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="sun" d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/><path class="moon" d="M20.4 15.2A8.4 8.4 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/></svg></button>
+  </div>
+</header>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">TEAMS</p>
+      <h1>團隊管理</h1>
+      <p class="lead">每場會議屬於一個團隊，<strong>不同團隊的會議紀錄互相看不到</strong>。成員可以先用 LDAP 帳號加入，對方第一次登入時就會生效。</p>
+    </div>
+    <p id="summary" class="summary" aria-live="polite"></p>
+  </div>
+
+  <form id="createTeam" class="create card">
+    <label class="label" for="teamName">建立新團隊</label>
+    <div class="row">
+      <input id="teamName" class="input" maxlength="100" autocomplete="off" placeholder="例如 研發部、業務部" required>
+      <button class="primary-button" type="submit">建立團隊</button>
+    </div>
+  </form>
+
+  <p id="adminError" class="alert" role="alert" hidden></p>
+  <section id="teams" class="team-grid" aria-label="團隊列表"></section>
+</main>
+
+<script src="/assets/account.js?v=20261104a"></script>
+<script>
+const $=id=>document.getElementById(id);
+function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
+function showError(message){$('adminError').textContent=message;$('adminError').hidden=!message}
+async function call(method,url,body){
+  const response=await fetch(url,{method,headers:body?{'content-type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
+  if(!response.ok){const detail=(await response.json().catch(()=>({}))).detail;throw new Error(typeof detail==='string'?detail:'操作失敗，請再試一次')}
+  return response.status===204?null:response.json();
+}
+async function act(work,button){showError('');if(button)button.disabled=true;try{await work();await load()}catch(error){showError(error.message)}finally{if(button)button.disabled=false}}
+function initial(member){return [...(member.displayName||member.username)][0].toUpperCase()}
+
+function memberRow(team,member){
+  const remove=el('button',{type:'button',className:'text-button danger',textContent:'移除'});
+  remove.onclick=()=>{
+    if(remove.dataset.confirm){act(()=>call('DELETE',`/api/admin/teams/${team.id}/members/${encodeURIComponent(member.username)}`),remove);return}
+    remove.dataset.confirm='1';remove.textContent='確定移除？';
+    setTimeout(()=>{if(remove.isConnected){delete remove.dataset.confirm;remove.textContent='移除'}},4000);
+  };
+  const named=member.displayName&&member.displayName!==member.username;
+  return el('li',{className:'member'},
+    el('span',{className:'avatar',textContent:initial(member),ariaHidden:'true'}),
+    el('span',{className:'member-text'},el('b',{textContent:named?member.displayName:member.username}),named?el('small',{textContent:member.username}):null),
+    member.signedIn?null:el('span',{className:'chip',textContent:'尚未登入過',title:'帳號已加入，對方第一次登入時生效'}),
+    remove);
+}
+
+function teamCard(team){
+  const title=el('h2',{textContent:team.name});
+  const count=el('span',{className:'count',textContent:`${team.members.length} 位成員`});
+  const renameButton=el('button',{type:'button',className:'text-button',textContent:'改名'});
+  const head=el('div',{className:'team-head'},el('div',{className:'team-title'},title,count),renameButton);
+  renameButton.onclick=()=>{
+    const input=el('input',{className:'input compact',value:team.name,maxLength:100,ariaLabel:`「${team.name}」的新名稱`});
+    const save=el('button',{type:'submit',className:'primary-button compact',textContent:'儲存'});
+    const cancel=el('button',{type:'button',className:'text-button',textContent:'取消',onclick:()=>form.replaceWith(head)});
+    const form=el('form',{className:'rename',onsubmit:event=>{event.preventDefault();act(()=>call('PATCH',`/api/admin/teams/${team.id}`,{name:input.value}),save)}},input,save,cancel);
+    head.replaceWith(form);input.focus();input.select();
+  };
+  const list=team.members.length?el('ul',{className:'members'},...team.members.map(member=>memberRow(team,member)))
+    :el('p',{className:'empty-members',textContent:'還沒有成員。加入成員後，他們才能用這個團隊開會。'});
+  const username=el('input',{className:'input',placeholder:'輸入 LDAP 帳號',autocomplete:'off',autocapitalize:'none',spellcheck:false,ariaLabel:`加入「${team.name}」的帳號`});
+  const add=el('button',{type:'submit',className:'secondary-button',textContent:'加入成員'});
+  const addForm=el('form',{className:'row add-member',onsubmit:event=>{event.preventDefault();if(username.value.trim())act(()=>call('POST',`/api/admin/teams/${team.id}/members`,{username:username.value}),add)}},username,add);
+  return el('article',{className:'card team'},head,list,addForm);
+}
+
+async function load(){
+  const teams=await call('GET','/api/admin/teams');
+  const people=new Set(teams.flatMap(team=>team.members.map(member=>member.username)));
+  $('summary').textContent=teams.length?`${teams.length} 個團隊 · ${people.size} 位成員`:'';
+  $('teams').replaceChildren(...(teams.length?teams.map(teamCard):[el('div',{className:'card empty'},
+    el('b',{textContent:'還沒有任何團隊'}),el('p',{textContent:'在上方輸入名稱建立第一個團隊，再把成員加進去。'}))]));
+}
+$('createTeam').onsubmit=event=>{event.preventDefault();const button=event.submitter;act(async()=>{await call('POST','/api/admin/teams',{name:$('teamName').value});$('teamName').value=''},button)};
+$('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
+load().catch(error=>showError(error.message));
+</script>
+</body></html>

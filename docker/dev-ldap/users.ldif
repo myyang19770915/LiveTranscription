@@ -1,0 +1,29 @@
+# Test accounts for the dev-only directory (compose profile "dev-ldap"). Never use these passwords elsewhere.
+# displayName values are base64 UTF-8 (LDIF requires it for non-ASCII): 楊（測試）、王愛麗（測試）、陳柏（測試）
+dn: ou=people,dc=yuqiao,dc=test
+objectClass: organizationalUnit
+ou: people
+
+dn: uid=myyang,ou=people,dc=yuqiao,dc=test
+objectClass: inetOrgPerson
+uid: myyang
+cn: myyang
+sn: Yang
+displayName:: 5qWK77yI5ris6Kmm77yJ
+userPassword: yq-test-myyang
+
+dn: uid=alice,ou=people,dc=yuqiao,dc=test
+objectClass: inetOrgPerson
+uid: alice
+cn: alice
+sn: Wang
+displayName:: 546L5oSb6bqX77yI5ris6Kmm77yJ
+userPassword: yq-test-alice
+
+dn: uid=bob,ou=people,dc=yuqiao,dc=test
+objectClass: inetOrgPerson
+uid: bob
+cn: bob
+sn: Chen
+displayName:: 6Zmz5p+P77yI5ris6Kmm77yJ
+userPassword: yq-test-bob

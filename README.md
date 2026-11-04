@@ -231,6 +231,41 @@ docker compose logs -f asr translate app
 
 第一次需要下載程式 image、ASR 權重、FireRedVAD Stream-VAD 與 Gemma GGUF；等待 `asr` 與 `translate` healthcheck 通過後，開啟 [http://localhost:18082](http://localhost:18082)。若 `APP_PORT` 在 `.env` 改過，請改用該連接埠。停止看 log 使用 `Ctrl+C`，服務本身仍會在背景執行。
 
+## 登入與團隊
+
+語橋 Live 給多個團隊共用：每個人用公司 LDAP 帳號登入，每場會議屬於一個團隊，**不同團隊的會議紀錄互相看不到**。
+
+1. 在 `.env` 設定 `POSTGRES_PASSWORD`（長隨機字串）、`ADMIN_USERS`（系統管理員的 LDAP 帳號，逗號分隔）與 `LDAP_*`（見[設定參考](#設定參考)）。
+2. `docker compose up -d db app`；app 啟動時自動建立或升級資料表。
+3. 先驗證 LDAP 設定（密碼以不顯示的方式輸入）：
+   ```powershell
+   docker exec -it asr_confucius4-r2t2-app-1 python -m auth check-ldap <帳號>
+   ```
+4. 系統管理員登入後，從頁首「團隊管理」（`/admin`）建立團隊、加入成員。成員可以在對方第一次登入前先用帳號加入。
+5. 一般使用者登入後，在「團隊」選單選擇這場會議所屬的團隊再開始。沒有任何團隊的帳號無法開始會議。
+
+權限規則：
+- 所有頁面、API 與轉錄 WebSocket 都要登入（`/api/health` 除外）；登入狀態保存 12 小時，可隨時登出。
+- 同一帳號 5 分鐘內密碼錯 5 次，鎖定 5 分鐘。
+- 團隊成員都能看、聽、修改自己團隊的會議；系統管理員**沒有**隱含權限，必須是該團隊成員才看得到。成員被移除後立即失效。
+- 其他網站的頁面無法借用已登入的 cookie 呼叫 API 或開啟錄音。
+- 會議檔案存在 `output/teams/<團隊 id>/<會議 id>/`；本功能上線前存在 `output/` 根目錄的舊檔案保持原樣，不經網頁提供。
+
+**連不到公司 LDAP 時（開發測試）**：compose 有一個只供開發用的 OpenLDAP（profile `dev-ldap`，不對外開 port），內含測試帳號 `myyang`、`alice`、`bob`，密碼為 `yq-test-<帳號>`（見 [docker/dev-ldap/users.ldif](docker/dev-ldap/users.ldif)）：
+
+```powershell
+docker compose --profile dev-ldap up -d dev-ldap
+```
+
+`.env` 對應設定：`LDAP_URL=ldap://dev-ldap:389`、`LDAP_BASE_DN=ou=people,dc=yuqiao,dc=test`、`LDAP_BIND_DN=cn=admin,dc=yuqiao,dc=test`、`LDAP_BIND_PASSWORD` 與 `DEV_LDAP_ADMIN_PASSWORD` 相同、`LDAP_USER_FILTER=(uid={username})`。改接公司 LDAP 時換掉這幾行並 `docker compose up -d app`，再 `docker compose --profile dev-ldap rm -sfv dev-ldap` 移除測試目錄。正式環境不要啟動這個 profile。
+
+**腳本與 benchmark**：重播、冒煙測試等腳本不放密碼，改用容器內發出的 session：
+
+```powershell
+$env:YUQIAO_SESSION = docker exec -w /app asr_confucius4-r2t2-app-1 python -m auth issue-session <帳號> --hours 12
+$env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
+```
+
 ## 會議使用方式
 
 手機以 HTTPS 網址開啟後，預設顯示翻譯閱讀區；用「逐字稿／翻譯」分頁切換內容。頂部可選語言，底部的開始／結束、清除與匯出按鈕持續可見，長文字只在閱讀區內捲動。「設定」會開啟音源、麥克風測試與會議情境視窗；瀏覽器不支援的系統聲音擷取選項會停用。手機直向與橫向皆可使用，桌面維持雙欄顯示。
@@ -262,6 +297,16 @@ docker compose logs -f asr translate app
 | `TRANSLATE_REFINE_URL` / `_MODEL` / `_KEY` | 空（關閉） | 選用：OpenAI 相容的雲端模型（例如 litellm `http://host.docker.internal:4001/v1`），用於「雲端精修」；設定後頁面出現開關 |
 | `AZURE_MAI_ENDPOINT` / `_API_KEY` / `_DEPLOYMENT` | 空（關閉） | 選用：Azure Foundry 的 MAI-Transcribe-2-Streaming；可填入口網站的 https 端點，程式會改用 `wss://<resource>.services.ai.azure.com/mai/v1/realtime`。設定後頁面出現「辨識引擎」選單 |
 | `TRANSLATE_PUNCTUATE_MAI` | 空（關閉） | 實驗：`1` 時 MAI 中文改由雲端模型補標點（benchmark 顯示會切斷句子，預設不開） |
+| `POSTGRES_PASSWORD` | 必填 | 會議資料庫 `db` 的密碼；資料庫只在 Compose 內網，不對外開 port |
+| `ADMIN_USERS` | 空 | 系統管理員的 LDAP 帳號（逗號分隔），只有他們能管理團隊 |
+| `LDAP_URL` | 必填 | 例如 `ldaps://ldap.example.com`；沒設定時登入回應「無法連線登入伺服器」 |
+| `LDAP_BASE_DN` / `LDAP_BIND_DN` / `LDAP_BIND_PASSWORD` | 空 | 搜尋後綁定：以服務帳號在 Base DN 下找出使用者，再用使用者密碼綁定 |
+| `LDAP_USER_FILTER` | `(sAMAccountName={username})` | 找使用者的條件（AD 預設）；OpenLDAP 常用 `(uid={username})` |
+| `LDAP_USER_DN_TEMPLATE` | 空 | 沒有服務帳號時改用直接綁定，例如 `uid={username},ou=people,dc=example,dc=com` |
+| `LDAP_DISPLAY_ATTR` | `displayName` | 頁首顯示的名稱欄位 |
+| `LDAP_CA_FILE` | 空 | ldaps 使用自簽 CA 時，容器內可讀到的 CA 憑證路徑 |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 前面有 HTTPS 反向代理時，填代理的 IP，app 才會相信它轉來的 `https` |
+| `SESSION_COOKIE_SECURE` | 空 | 以 HTTPS 對外提供時設 `1`，登入 cookie 一律加上 Secure，不會經由明文 HTTP 送出 |
 
 **辨識引擎**（頁面選單，預設本機）：
 - 本機 Confucius：音訊不離開設備。
@@ -274,9 +319,13 @@ docker compose logs -f asr translate app
 
 | Endpoint | 用途 |
 | --- | --- |
-| `GET /` | 會議 Web App |
-| `GET /api/health` | FastAPI 簡易健康檢查 |
-| `WS /ws/transcribe` | 瀏覽器至 app 的即時 PCM 音訊 WebSocket |
+| `GET /` | 會議 Web App（未登入導向 `/login`） |
+| `GET /api/health` | FastAPI 簡易健康檢查（不需登入） |
+| `POST /api/login`、`POST /api/logout`、`GET /api/me` | LDAP 登入、登出、目前使用者與所屬團隊 |
+| `GET /admin`、`/api/admin/teams…` | 團隊管理（限系統管理員） |
+| `POST /api/meetings`、`GET /api/meetings`、`GET /api/meetings/{id}` | 建立會議（需指定自己的團隊）、列出與讀取自己團隊的會議 |
+| `PUT /api/meetings/{id}/files/{recording\|transcript}` | 儲存會議錄音或逐字稿到 `output/teams/<團隊>/<會議>/` |
+| `WS /ws/transcribe` | 瀏覽器至 app 的即時 PCM 音訊 WebSocket；首包需帶 `meeting_id`，非團隊成員以關閉碼 4404 拒絕 |
 | `POST /api/translate` | 請求 Gemma 文字翻譯；JSON 欄位為 `text`、`source`、`target` 和可選 `history` |
 | `POST /api/translate/stream` | 串流翻譯；相同欄位加可選 `draft`，回傳 SSE `data: {"text":"...","done":false}`，完成時 `done=true` |
 | ASR `ws://asr:8272/asr_stream_api_v1` | 僅供 Compose 網路中的 app 使用 |
@@ -288,6 +337,47 @@ docker compose logs -f asr translate app
 $body = @{ text = "この会議を翻訳します。"; source = "ja"; target = "zh" } | ConvertTo-Json
 Invoke-RestMethod -Method Post -Uri http://localhost:18082/api/translate -ContentType 'application/json' -Body $body
 ```
+
+## 品質優化紀錄（2026-11）
+
+這一輪改善用 [bench/](bench/README.md) 驅動：10 段公開 YouTube 影片（英 3、日 4、中 3，每段 4 分鐘）先錄成固定的 ASR 軌，再重播進真實網頁，最後由評審依 [rubric](bench/rubric.md) 盲評（意義 45、術語 15、完整 15、流暢 15、斷句 10）。同一段影片由同一位評審同時看所有版本，分數才可比較；單支分數在不同輪次會浮動 ±5。
+
+### 分數演進
+
+| 階段 | 平均 | 說明 |
+|---|---|---|
+| Baseline（Confucius + 本機 Gemma） | 約 79 | 改善前 |
+| 本機優化 v6 | 約 81.5 | 下表 1–9 項，全部本機 |
+| + 雲端精修（deepseek-v4-flash） | 約 82 | 第 10 項 |
+| MAI + 雲端精修 | 約 85–86 | 第 11 項；英日大幅進步，中文退步 |
+| **混合（英日 MAI、中文 Confucius）+ 雲端精修** | **約 87** | 目前建議設定 |
+
+### 改了什麼
+
+| # | 問題 | 改法 | 程式位置 |
+|---|---|---|---|
+| 1 | 每段翻譯只看到自己，前後文斷裂、代名詞與術語不一致 | 帶前 2 段原文與譯文當上下文（原文 500 字、譯文 600 字上限） | `app.js` `runTranslation()`；`server.py` `translation_payload()` |
+| 2 | 句子在逗號處被切，譯者不知道後半句，語意反轉 | 定稿時附上「後文」約 120 字，只供參考、不翻譯；說明放在原文之前，避免模型順手翻進來 | `app.js` `runTranslation()` 的 `following`；`server.py` `following_note()` |
+| 3 | 逗號停頓太早定稿，後文還沒出現 | 逗號結尾的停頓要等後面至少 8 個字才定稿 | `segmentation.js` `settled()` |
+| 4 | ASR 同音錯字被照翻（城市設計→程式設計、農藥→尼古丁） | 翻譯規則說明原文是 ASR：同音錯字若與上下文矛盾，翻成原本想說的詞；假設語氣與問句保持原樣 | `translation_quality.py` `policy()` |
+| 5 | s2twp 把一般詞改成 IT 用語（迴圈、擴充套件、演演算法） | 繁簡轉換改用 `s2tw`（只轉字，不轉詞） | `server.py` `TO_TRADITIONAL` |
+| 6 | 日文長時間沒有標點，整段變成 300 字的文字牆 | 超過 90 字改在句號或敬體句尾切；超過 160 字才在普通動詞後、新詞開頭處切 | `segmentation.js` `plan()` 的 `ja-loose`／`ja-plain` |
+| 7 | 定稿後才聽到下一句，前一句的翻譯無法修正 | 第 N+1 句定稿後，背景帶前後文重譯第 N 句（延遲精修） | `app.js` `queueRefinement()`、`correctNext()` |
+| 8 | 精修把前後句的譯文重複翻進本句 | 精修結果太長，或含有鄰句譯文的開頭或結尾時，丟棄並保留原譯 | `app.js` `plausibleRefinement()` |
+| 9 | 按停止後，結尾的最後幾句被切成碎片 | 收尾等待從 10 秒延長到 20 秒 | `app.js` `stopMeeting()` |
+| 10 | 本機 Gemma 26B 的翻譯能力有上限 | 選用「雲端精修」：延遲精修改送 OpenAI 相容的雲端模型；推理型模型需要額外 token 空間，否則回傳空白 | `server.py` `translation_backend()`；頁面開關 `#cloudRefine` |
+| 11 | 日文與英文的 ASR 錯字是最大扣分 | 新增 Azure MAI-Transcribe-2-Streaming 當第二個辨識引擎；可選本機、混合或 MAI | `mai_asr.py`；`server.py` `asr_engine()`、`TranscriptDisplay`；頁面選單 `#asrEngine` |
+| 12 | MAI 的中文和日文不輸出標點，也沒有伺服器端 VAD | 本機能量 VAD 在停頓 0.4 秒時送 commit，依停頓長短補上「。」或「，、」；英文由 MAI 自己加標點，中途不送 commit（送了會在句中補句號） | `mai_asr.py` `PauseDetector`、`MaiBridge.close_item()` |
+| 13 | 補上的標點落到下一段開頭（「、しかし」） | 段落開頭的標點歸給前一句 | `app.js` `runTranslation()` |
+| 14 | 斷句點位置以舊文字長度計算，補標點改寫目前段落後就會錯位 | 改在套用 `displayText` 之後才記錄斷句點 | `app.js` `onMessage()` 的 `markEnd` |
+| 15 | Azure 偶爾回 `service_unavailable` | 自動重連，最多 5 次；斷線期間的音訊會遺失 | `mai_asr.py` `MaiBridge.mai_to_queue()` |
+| 16 | 中文 MAI 停頓規則補的標點不夠準 | 實驗：改由雲端模型加標點，只採用標點、不改字。實測模型會在話還沒講完時加「。」切斷句子，中文從 80.7 降到 73.7，所以預設關閉 | `server.py` `punctuate_item()`；`mai_asr.py` `merge_marks()`；`TRANSLATE_PUNCTUATE_MAI` |
+
+### 還沒解決的
+
+- 剩下的扣分大多來自 ASR 錯字，例如 unsupervised 聽成 supervised、WeWork 聽成 Uiwak、陳屍浴室聽成沉屍於世；以及翻譯模型對成語和雙關的理解。
+- 台語（閩南語）不在 MAI 的支援清單上。實測 MAI 和 Confucius 都只能辨識一部分；MAI 開自動偵測時甚至會輸出緬甸文。台語請選「中文」，並使用本機或混合模式。
+- 印尼語 MAI 錯字率 4.4%（Confucius 6.8%），可以使用。
 
 ## 驗證與日常維護
 
@@ -305,9 +395,12 @@ docker compose logs --tail 100 app asr translate
 docker compose exec -T app python -m unittest -v test_server
 ```
 
+測試使用 `db` 中另一個資料庫 `yuqiao_test`（自動建立、每個測試前清空），LDAP 以 ldap3 的模擬伺服器代替，不會連到公司 LDAP。
+
 執行本機 WAV WebSocket smoke test（需要 Python 專案環境、`websockets` 套件，以及自行準備的 16 kHz／單聲道／16-bit PCM WAV）：
 
 ```powershell
+$env:YUQIAO_SESSION = docker exec -w /app asr_confucius4-r2t2-app-1 python -m auth issue-session <帳號> --hours 1
 python smoke_test.py --audio C:\path\to\sample-16k-mono.wav
 ```
 
@@ -332,7 +425,7 @@ docker compose down
 
 ## 隱私與授權
 
-此 app 不提供登入或多使用者隔離，預設應只在可信任的本機網路使用；若要讓其他裝置或網際網路存取，需自行加上 HTTPS、身分驗證與適當的網路存取控制。啟動時下載模型會連線至外部 registry／Hugging Face；推論請求則留在本機 Docker 網路。請自行確認 ASR 模型、Gemma 4、`llama.cpp` 與相依套件的授權條款符合你的使用方式；Gemma 4 QAT repo 的模型卡標示 Apache-2.0，仍應以實際下載檔案隨附的 license 為準。
+此 app 以 LDAP 登入並依團隊隔離會議紀錄（見[登入與團隊](#登入與團隊)）；讓其他裝置或網際網路存取時，仍需在前面加上 HTTPS（登入密碼與 session cookie 會經過網路），並做好網路存取控制。啟動時下載模型會連線至外部 registry／Hugging Face；推論請求則留在本機 Docker 網路。請自行確認 ASR 模型、Gemma 4、`llama.cpp` 與相依套件的授權條款符合你的使用方式；Gemma 4 QAT repo 的模型卡標示 Apache-2.0，仍應以實際下載檔案隨附的 license 為準。
 
 ## 參考資料
 

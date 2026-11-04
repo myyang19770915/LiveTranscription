@@ -6,13 +6,15 @@ and with the previous source plus its translation from the same arm.
 """
 import argparse, json, sys, urllib.request
 
+import yuqiao_session
+
 ARMS = ("none", "prev_source", "prev_source+translation")
 
 
 def translate(app, text, glossary, history="", history_translation=""):
     body = json.dumps({"text": text, "source": "zh", "target": "ja", "glossary": glossary,
                        "history": history, "history_translation": history_translation}).encode()
-    request = urllib.request.Request(app + "api/translate", body, {"Content-Type": "application/json"})
+    request = urllib.request.Request(app + "api/translate", body, {"Content-Type": "application/json", **yuqiao_session.headers()})
     with urllib.request.urlopen(request, timeout=120) as response:
         return json.load(response)["translatedText"]
 

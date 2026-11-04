@@ -12,6 +12,13 @@ python bench/fetch.py            # 下載音訊（裁成 16 kHz wav）與字幕�
 
 `bench/data/`、`bench/results/` 含第三方內容，不進 git。
 
+語橋 Live 需要登入，錄軌與重播前先發一個 session（不需要密碼），並指定會議所屬團隊：
+
+```powershell
+$env:YUQIAO_SESSION = docker exec -w /app asr_confucius4-r2t2-app-1 python -m auth issue-session <帳號> --hours 12
+$env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
+```
+
 ## 流程
 
 | 步驟 | 指令 | 產出 |

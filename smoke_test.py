@@ -6,8 +6,12 @@ import json
 import sys
 import uuid
 import wave
+from pathlib import Path
 
 import websockets
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "webapp"))
+import yuqiao_session  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -20,9 +24,11 @@ async def run(uri: str, audio_path: str, language: str = "zhen", realtime: bool 
 
     texts: list[str] = []
     display_text = ""
-    async with websockets.connect(uri, ping_interval=None) as socket:
+    meeting_id = yuqiao_session.create_meeting(uri, language)
+    async with websockets.connect(uri, ping_interval=None, additional_headers=yuqiao_session.headers()) as socket:
         await socket.send(json.dumps({
             "requestId": str(uuid.uuid4()),
+            "meeting_id": meeting_id,
             "language": language,
             "use_vad": False,
         }))

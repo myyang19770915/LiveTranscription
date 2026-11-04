@@ -1,0 +1,42 @@
+/* Colour tokens for the sign-in and administration pages, one set per theme (contrast checked: fields 3:1+). */
+:root {
+  color-scheme: dark;
+  --page: #0b0e0d;
+  --glow: #1c3a2b;
+  --intro: linear-gradient(160deg, #13201a 0%, #0e1512 65%);
+  --panel: #121715;
+  --border: #26302b;
+  --text: #f1f4f2;
+  --muted: #a3aea8;
+  --faint: #7d8983;
+  --field: #0c100e;
+  --field-border: #5d6c64;       /* 3.2:1 against the field */
+  --field-hover: #7b8b83;
+  --accent: #80efbd;
+  --accent-ink: #072117;
+  --accent-soft: #80efbd26;
+  --danger: #ff8f78;
+  --danger-soft: #ff795d1a;
+  --warn: #f2c66d;
+  font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --page: #ebe4d6;
+  --glow: #fffaf0;
+  --intro: linear-gradient(160deg, #e3eee6 0%, #f3f1ea 70%);
+  --panel: #fffefb;
+  --border: #e2ddd2;
+  --text: #20231f;
+  --muted: #5f645d;
+  --faint: #7a7e76;
+  --field: #ffffff;
+  --field-border: #8d9389;       /* 3.2:1 against white */
+  --field-hover: #6b7168;
+  --accent: #2f7356;
+  --accent-ink: #ffffff;
+  --accent-soft: #2f735626;
+  --danger: #b2442f;
+  --danger-soft: #b2442f14;
+  --warn: #8a5a00;
+}

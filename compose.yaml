@@ -77,6 +77,20 @@ services:
       AZURE_MAI_ENDPOINT: ${AZURE_MAI_ENDPOINT:-}
       AZURE_MAI_API_KEY: ${AZURE_MAI_API_KEY:-}
       AZURE_MAI_DEPLOYMENT: ${AZURE_MAI_DEPLOYMENT:-MAI-Transcribe-2-Streaming}
+      DATABASE_URL: postgresql://yuqiao:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/yuqiao
+      # Sign-in: company LDAP; ADMIN_USERS (comma-separated usernames) manage teams.
+      ADMIN_USERS: ${ADMIN_USERS:-}
+      LDAP_URL: ${LDAP_URL:-}
+      LDAP_BASE_DN: ${LDAP_BASE_DN:-}
+      LDAP_BIND_DN: ${LDAP_BIND_DN:-}
+      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:-}
+      LDAP_USER_FILTER: ${LDAP_USER_FILTER:-(sAMAccountName={username})}
+      LDAP_USER_DN_TEMPLATE: ${LDAP_USER_DN_TEMPLATE:-}
+      LDAP_DISPLAY_ATTR: ${LDAP_DISPLAY_ATTR:-displayName}
+      LDAP_CA_FILE: ${LDAP_CA_FILE:-}
+      # Behind an HTTPS reverse proxy: trust its X-Forwarded-Proto (uvicorn reads this) and/or force Secure cookies.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
     ports:
       - "${APP_PORT:-18082}:8080"
     depends_on:
@@ -84,8 +98,41 @@ services:
         condition: service_healthy
       translate:
         condition: service_healthy
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Meetings, accounts and teams. Reachable only inside the Compose network.
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: yuqiao
+      POSTGRES_DB: yuqiao
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - meeting-db:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yuqiao -d yuqiao"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Dev-only directory with test accounts (docker/dev-ldap/users.ldif) for when the company LDAP is
+  # unreachable. Starts only with: docker compose --profile dev-ldap up -d dev-ldap
+  dev-ldap:
+    image: osixia/openldap:1.5.0
+    profiles: ["dev-ldap"]
+    command: ["--copy-service"]
+    environment:
+      LDAP_ORGANISATION: Yuqiao Test
+      LDAP_DOMAIN: yuqiao.test
+      LDAP_ADMIN_PASSWORD: ${DEV_LDAP_ADMIN_PASSWORD:-dev-only-not-reachable-outside-compose}
+    volumes:
+      - ./docker/dev-ldap/users.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-users.ldif:ro
     restart: unless-stopped
 
 volumes:
   model-cache:
   translation-model-cache:
+  meeting-db:

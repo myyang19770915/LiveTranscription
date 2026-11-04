@@ -15,10 +15,20 @@ const inject = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'repla
 
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage();
+  // Signed in with YUQIAO_SESSION (python -m auth issue-session); YUQIAO_TEAM picks the meeting's team.
+  if (!process.env.YUQIAO_SESSION) throw new Error('Set YUQIAO_SESSION (python -m auth issue-session <username> in the app container)');
+  const context = await browser.newContext();
+  await context.addCookies([{name: 'yq_session', value: process.env.YUQIAO_SESSION, url: cfg.app}]);
+  const page = await context.newPage();
   page.on('pageerror', error => console.error('pageerror:', error.message));
   page.on('crash', () => console.error('page crashed'));
   await page.goto(cfg.app);
+  const team = await page.evaluate(async name => {
+    const {teams} = await window.accountReady, chosen = name ? teams.find(t => t.name === name) : teams.length === 1 ? teams[0] : null;
+    if (chosen) $('team').value = String(chosen.id);
+    return chosen?.name || null;
+  }, process.env.YUQIAO_TEAM || '');
+  if (!team) throw new Error("Set YUQIAO_TEAM to one of this user's teams");
   await page.evaluate(config => { window.__replayConfig = config; }, cfg.replay);
   await page.evaluate(inject);
   await page.click('#start');

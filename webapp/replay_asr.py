@@ -8,6 +8,8 @@ are an ASR event track that replay_browser.py can play back into the real UI.
 import argparse, asyncio, json, time, uuid, wave
 import websockets
 
+import yuqiao_session
+
 CHUNK_S = 0.16
 EOS = 'YOUDAO_ONETIME_ASR_STREAM_EOS'
 
@@ -30,8 +32,9 @@ async def main():
         pcm = w.readframes(frames)
     step = int(CHUNK_S * 16000) * 2
     sent_s, steps, last_rx = a.start, 0, time.monotonic()
-    async with websockets.connect(a.url, max_size=None) as ws:
-        await ws.send(json.dumps({'requestId': str(uuid.uuid4()), 'language': a.language, 'use_vad': a.language == 'zh_ja',
+    meeting_id = yuqiao_session.create_meeting(a.url, a.language, a.engine)
+    async with websockets.connect(a.url, max_size=None, additional_headers=yuqiao_session.headers()) as ws:
+        await ws.send(json.dumps({'requestId': str(uuid.uuid4()), 'meeting_id': meeting_id, 'language': a.language, 'use_vad': a.language == 'zh_ja',
                                   'system_prompt': a.context, 'engine': a.engine, 'refine': a.refine}))
         began = time.monotonic()
 

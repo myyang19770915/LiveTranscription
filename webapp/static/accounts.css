@@ -1,0 +1,5 @@
+/* Signed-in user in the meeting page's nav (account.js). Colours come from themes.css. */
+.account{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:.9rem;white-space:nowrap}
+.account b{color:var(--text);font-weight:600}
+.account a,.account button{background:none;border:1px solid var(--line);border-radius:999px;color:var(--text);padding:5px 12px;font:inherit;cursor:pointer;text-decoration:none}
+@media (max-width:720px){.account .account-name{display:none}}

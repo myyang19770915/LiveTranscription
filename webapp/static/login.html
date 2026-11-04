@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>登入 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261104a"><link rel="stylesheet" href="/assets/login.css?v=20261104b"></head>
+<body>
+<main class="auth">
+  <section class="auth-intro" aria-label="語橋 Live 介紹">
+    <a class="auth-brand" href="/"><span class="auth-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="30" height="30"></span><span><b>語橋 Live</b><small>跨語會議助理</small></span></a>
+    <div class="auth-pitch">
+      <p class="auth-eyebrow">REAL-TIME MULTILINGUAL MEETING</p>
+      <h2>專注對話，<br><em>語言交給我們。</em></h2>
+      <ul class="auth-points">
+        <li><i aria-hidden="true"></i>即時逐字稿與翻譯，中、日、英等多語</li>
+        <li><i aria-hidden="true"></i>會後可對照錄音校對，修正自動重譯</li>
+        <li><i aria-hidden="true"></i>紀錄依團隊隔離，只有成員看得到</li>
+      </ul>
+    </div>
+    <p class="auth-foot">在公司內部伺服器處理；登入資訊只用來向 LDAP 驗證，不會被儲存。</p>
+  </section>
+
+  <section class="auth-panel">
+    <button id="themeToggle" class="auth-theme" type="button" aria-label="切換深淺主題" title="切換深淺主題">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path class="sun" d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/><path class="moon" d="M20.4 15.2A8.4 8.4 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/></svg>
+    </button>
+    <form id="loginForm" class="auth-form" novalidate>
+      <h1>登入</h1>
+      <p class="auth-sub">使用公司帳號（LDAP）登入</p>
+
+      <label class="auth-label" for="username">帳號</label>
+      <input id="username" class="auth-input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="例如 myyang" required autofocus>
+
+      <label class="auth-label" for="password">密碼</label>
+      <div class="auth-password">
+        <input id="password" class="auth-input" name="password" type="password" autocomplete="current-password" required>
+        <button id="reveal" class="auth-reveal" type="button" aria-label="顯示密碼" aria-pressed="false">顯示</button>
+      </div>
+      <p id="capsLock" class="auth-caps" hidden>大寫鎖定已開啟</p>
+
+      <p id="loginError" class="auth-error" role="alert" hidden></p>
+      <button id="loginButton" class="auth-submit" type="submit"><span class="auth-spinner" aria-hidden="true"></span><span class="auth-submit-label">登入</span></button>
+      <p class="auth-help">忘記密碼或無法登入，請洽 IT；需要加入團隊，請聯絡系統管理員。</p>
+    </form>
+  </section>
+</main>
+<script>
+const $=id=>document.getElementById(id),form=$('loginForm'),error=$('loginError'),button=$('loginButton');
+function busy(on){button.disabled=on;button.classList.toggle('loading',on);button.querySelector('.auth-submit-label').textContent=on?'登入中…':'登入'}
+function fail(message,field){const target=field||form.password;error.textContent=message;error.hidden=false;busy(false);target.setAttribute('aria-invalid','true');target.setAttribute('aria-describedby','loginError');target.focus();target.select?.()}
+form.addEventListener('input',event=>event.target.removeAttribute('aria-invalid'));
+form.onsubmit=async event=>{
+  event.preventDefault();error.hidden=true;
+  if(!form.username.value.trim())return fail('請輸入帳號',form.username);
+  if(!form.password.value)return fail('請輸入密碼',form.password);
+  busy(true);
+  try{
+    const response=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:form.username.value,password:form.password.value})});
+    if(response.ok){location.replace('/');return}
+    fail((await response.json().catch(()=>({}))).detail||'登入失敗');
+  }catch{fail('無法連線到語橋 Live，請確認網路')}
+};
+$('reveal').onclick=()=>{const show=form.password.type==='password';form.password.type=show?'text':'password';$('reveal').textContent=show?'隱藏':'顯示';$('reveal').setAttribute('aria-pressed',show);$('reveal').setAttribute('aria-label',show?'隱藏密碼':'顯示密碼');form.password.focus()};
+form.password.addEventListener('keyup',event=>{$('capsLock').hidden=!event.getModifierState?.('CapsLock')});
+form.password.addEventListener('blur',()=>{$('capsLock').hidden=true});
+$('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
+</script>
+</body></html>

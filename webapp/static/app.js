@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 const EOS = 'YOUDAO_ONETIME_ASR_STREAM_EOS';
 const translationEmptyMarkup = $('translation').innerHTML;
 let socket, stream, captureStreams = [], audioContext, sourceNodes = [], workletNode, startedAt, timerHandle, starting = false, stopping = false;
-let recorder, recordingChunks = [], recording, meetingStamp = '';
+let recorder, recordingChunks = [], recording, meetingStamp = '', meetingId = '';
 let testStream, testStreams = [], testAudioContext, testSources = [], testAnalyser, testAnimation;
 let transcript = '', translated = '', draftText = '', translationTimer, pauseTimer, activeTranslation;
 let translationOffset = 0, translationHistory = [], translationEpoch = 0, flushRequested = false, lastDraftSource = '';
@@ -58,7 +58,7 @@ function renderTranslation(){
 }
 function updateCounts(){ $('transcriptCount').textContent=`${transcript.length.toLocaleString()} 字`; $('translationCount').textContent=`${visibleTranslation().length.toLocaleString()} 字`; }
 function toast(message,duration=2200){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),duration)}
-function setControls(active){const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('asrEngine').disabled=active;$('cloudRefine').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
+function setControls(active){const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('asrEngine').disabled=active;$('team').disabled=active;$('cloudRefine').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
 function updateTranslationDirection(){
   const pair=$('language').value==='zh_ja';
   if(pair){if($('targetLanguage').value!=='zh_ja')fixedTarget=$('targetLanguage').value;$('targetLanguage').value='zh_ja'}
@@ -138,6 +138,8 @@ function floatToPCM16(samples) { const out=new Int16Array(samples.length); for(l
 
 async function startMeeting() {
   if(starting || stream)return;
+  const teamId=Number($('team').value);
+  if(!teamId){setStatus(NO_TEAM,'error');toast(NO_TEAM,5000);return}
   starting=true;$('start').disabled=true;
   try {
     if(testStream)stopMicTest();setStatus('正在檢查音源…');resetLearnedTerms();
@@ -146,13 +148,15 @@ async function startMeeting() {
     if(selectedSource()==='microphone')await refreshMicrophones(stream.getAudioTracks()[0].getSettings().deviceId);
     captureStreams.forEach(media=>media.getTracks().forEach(track=>track.onended=()=>{if(stream && !stopping){stopMeeting(false).then(()=>{setStatus('分享或麥克風已停止','error');setMicStatus('音源已中斷','error')})}}));
     setStatus('正在連線…');
+    meetingId=await createMeeting(teamId);
+    resetMeetingState();
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket = new WebSocket(`${protocol}//${location.host}/ws/transcribe`);
     socket.binaryType = 'arraybuffer';
     await new Promise((resolve, reject) => { socket.onopen=resolve; socket.onerror=()=>reject(new Error('WebSocket 連線失敗')); });
-    socket.send(JSON.stringify({requestId:crypto.randomUUID(),language:$('language').value,use_vad:direction.source==='zh_ja',system_prompt:$('context').value,engine:asrEngine(),refine:cloudRefineOn()}));
+    socket.send(JSON.stringify({requestId:crypto.randomUUID(),meeting_id:meetingId,language:$('language').value,use_vad:direction.source==='zh_ja',system_prompt:$('context').value,engine:asrEngine(),refine:cloudRefineOn()}));
     socket.onmessage = onMessage;
-    socket.onclose = () => { if (stream && !stopping) stopMeeting(false).then(()=>setStatus('辨識連線已中斷','error')); };
+    socket.onclose = event => { if(event.code===4401)return location.replace('/login'); if (stream && !stopping) stopMeeting(false).then(()=>setStatus(event.code===4404?'找不到這場會議，請重新整理後再試':'辨識連線已中斷','error')); };
 
     audioContext = new AudioContext();
     await audioContext.audioWorklet.addModule('/assets/pcm-worklet.js');
@@ -196,15 +200,15 @@ async function stopRecording(){
   if(active.state!=='inactive')await new Promise(resolve=>{active.onstop=resolve;active.stop()});
   if(!recordingChunks.length)return;
   recording=new Blob(recordingChunks,{type:active.mimeType||'audio/webm'});recordingChunks=[];$('downloadAudio').hidden=false;
-  await storeMeetingFile(recording,recordingName());
+  await storeMeetingFile(recording,'recording',recordingName());
 }
 function saveFile(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function recordingName(){return `meeting-${meetingStamp}.${recording.type.includes('mp4')?'m4a':recording.type.includes('ogg')?'ogg':'webm'}`}
 function saveRecording(){if(!recording)return toast('目前沒有錄音');saveFile(recording,recordingName())}
 // Each meeting's audio and transcript are written to the project's output/ folder for later review;
 // if the server cannot store them, the browser download keeps them from being lost.
-async function storeMeetingFile(blob,name){
-  try{const response=await fetch(`/api/meetings/${name}`,{method:'PUT',body:blob});if(!response.ok)throw new Error((await response.json()).detail||response.status);toast(`已儲存 output/${name}`,3000)}
+async function storeMeetingFile(blob,kind,name,id=meetingId){
+  try{if(!id)throw new Error('沒有會議編號');const response=await fetch(`/api/meetings/${id}/files/${kind}`,{method:'PUT',headers:{'content-type':blob.type||'application/octet-stream'},body:blob});if(!response.ok)throw new Error((await response.json()).detail||response.status);toast(`已儲存 ${(await response.json()).saved}`,3000)}
   catch(error){toast(`無法存到 output（${error.message}），改為下載`,5000);saveFile(blob,name)}
 }
 function transcriptFile(){
@@ -212,8 +216,23 @@ function transcriptFile(){
   const learned=learnedTerms?`\n\n自動學習詞彙\n${learnedTerms}`:'';
   return new Blob([`原文\n${transcript}\n\n翻譯\n${visibleTranslation()}\n\n逐段對照\n${pairs}${learned}\n`],{type:'text/plain;charset=utf-8'});
 }
-let transcriptSaveTimer;
-function storeTranscript(){clearTimeout(transcriptSaveTimer);if(meetingStamp&&transcript)transcriptSaveTimer=setTimeout(()=>storeMeetingFile(transcriptFile(),`meeting-${meetingStamp}.txt`),800)}
+let transcriptSaveTimer,saveTranscriptNow=null;
+// A new meeting starts empty: the previous one's text, translations and terms belong to its own
+// meeting (maybe another team) and must never be saved into the new meeting's transcript.
+function resetMeetingState(){
+  saveTranscriptNow?.();
+  transcript='';sourceRevision=0;finalizeRemaining=false;
+  segmentRecords.clear();languageSpans.length=0;utteranceBoundaries.clear();
+  updateTranslationDirection();resetLearnedTerms();render('transcript','');
+}
+// Debounced; bound to the meeting it was scheduled for, and flushed at once if a new meeting starts first.
+function storeTranscript(){
+  clearTimeout(transcriptSaveTimer);saveTranscriptNow=null;
+  if(!meetingId||!transcript)return;
+  const id=meetingId,name=`meeting-${meetingStamp}.txt`;
+  saveTranscriptNow=()=>{clearTimeout(transcriptSaveTimer);saveTranscriptNow=null;storeMeetingFile(transcriptFile(),'transcript',name,id)};
+  transcriptSaveTimer=setTimeout(saveTranscriptNow,800);
+}
 function updateTimer(){const sec=Math.floor((Date.now()-startedAt)/1000);$('timer').textContent=`${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;}
 function onMessage(event){
   let data; try{data=JSON.parse(event.data)}catch{return}
@@ -274,6 +293,21 @@ function finalizedRecords(){
 function cloudRefineOn(){return !$('cloudRefineRow').hidden&&$('cloudRefine').checked}
 // 辨識引擎: local Confucius, Azure MAI, or MAI for every language except Chinese. Shown only when MAI is configured.
 function asrEngine(){return $('asrEngineRow').hidden?'local':$('asrEngine').value}
+// 團隊: every meeting belongs to one of the user's teams; the last choice stays in this browser.
+const NO_TEAM='尚未加入任何團隊，請聯絡管理員';
+window.accountReady.then(({teams})=>{
+  let saved='';try{saved=localStorage.getItem('team')||''}catch{}
+  $('team').replaceChildren(...teams.map(team=>Object.assign(document.createElement('option'),{value:team.id,textContent:team.name})));
+  if(teams.some(team=>String(team.id)===saved))$('team').value=saved;
+  $('team').hidden=!teams.length;$('teamHint').textContent=teams.length?'':NO_TEAM;
+});
+$('team').onchange=()=>{try{localStorage.setItem('team',$('team').value)}catch{}};
+async function createMeeting(teamId){
+  const response=await fetch('/api/meetings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({team_id:teamId,language:$('language').value,engine:asrEngine()})});
+  if(response.status===401){location.replace('/login');throw new Error('請先登入')}
+  if(!response.ok)throw new Error((await response.json().catch(()=>({}))).detail||'無法建立會議');
+  return (await response.json()).id;
+}
 fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine,mai})=>{
   $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;
   try{$('cloudRefine').checked=localStorage.getItem('cloudRefine')==='1';const engine=localStorage.getItem('asrEngine');if([...$('asrEngine').options].some(o=>o.value===engine))$('asrEngine').value=engine}catch{}
@@ -426,7 +460,7 @@ const mobileQuery=matchMedia('(max-width: 760px), (max-width: 1000px) and (max-h
 const mobilePanels={transcript:$('transcript').closest('article'),translation:$('translation').closest('article')};
 const mobileFollow={transcript:true,translation:true};
 let mobileView='translation';
-const mobileSettingsNodes=[$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('asrEngineRow'),$('cloudRefineRow')];
+const mobileSettingsNodes=[$('teamRow'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('asrEngineRow'),$('cloudRefineRow')];
 const movableControls=[...mobileSettingsNodes,$('start')].map(node=>{
   const anchor=document.createComment('responsive-control');node.before(anchor);return{node,anchor};
 });

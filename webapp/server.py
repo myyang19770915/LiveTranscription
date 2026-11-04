@@ -5,17 +5,21 @@ import os
 import re
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 import websockets
 from opencc import OpenCC
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketState
+import auth
+import db
 import mai_asr
+import team_access
 from translation_quality import (TERMS_SCHEMA, apply_aliases, asr_context, consolidate_terms, glossary_entries, learned_replacements,
                                  parse_discovered_terms, policy, repair_asr, strip_context_echo, term_discovery_messages, violations)
 
@@ -34,10 +38,6 @@ REFINE_KEY = os.getenv("TRANSLATE_REFINE_KEY", "")
 PUNCTUATE_MAI = os.getenv("TRANSLATE_PUNCTUATE_MAI", "") == "1"
 PUNCTUATE_EXTRA = json.loads(os.getenv("TRANSLATE_PUNCTUATE_EXTRA", "") or '{"thinking": {"type": "disabled"}}')
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-# Meeting recordings and transcripts land here (compose mounts the project's output/ folder).
-OUTPUT_DIR = Path(os.getenv("MEETING_OUTPUT_DIR", "/output"))
-MEETING_FILE = re.compile(r"meeting-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.(txt|webm|ogg|m4a)")
-MAX_MEETING_BYTES = 1 << 30
 class _Traditional(OpenCC):
     # s2twp reads 了 after 說明/證明/表明… as 瞭 ("說明瞭付款方式"); the aspect particle is meant.
     MISREAD_LIAO = re.compile(r"([說證表聲發查講標註])明瞭")
@@ -84,8 +84,20 @@ LANGUAGES = {
 LANGUAGE_PATTERN = "^(auto|zh_ja|" + "|".join(LANGUAGES) + ")$"
 TARGET_PATTERN = "^(" + "|".join(LANGUAGES) + ")$"
 
-app = FastAPI(title="語橋 Live — 即時會議翻譯")
 logger = logging.getLogger("uvicorn.error")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # An unreachable database or a failed migration stops the app instead of failing on first sign-in.
+    await db.check()
+    logger.info("system administrators (ADMIN_USERS): %s", ", ".join(sorted(auth.ADMIN_USERS)) or "none")
+    yield
+
+
+app = FastAPI(title="語橋 Live — 即時會議翻譯", lifespan=lifespan, dependencies=[Depends(auth.require_signed_in)])
+app.include_router(auth.router)
+app.include_router(team_access.router)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 
@@ -170,27 +182,6 @@ def detect_pair_language(text: str, hint: str = "", previous: str = "") -> str:
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
-
-
-@app.put("/api/meetings/{name}")
-async def save_meeting_file(name: str, request: Request):
-    """Store one meeting's recording or transcript; the fixed name pattern keeps writes inside OUTPUT_DIR."""
-    if not MEETING_FILE.fullmatch(name):
-        raise HTTPException(status_code=400, detail="invalid meeting file name")
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    partial, size = OUTPUT_DIR / f".{name}.part", 0
-    try:
-        with partial.open("wb") as file:
-            async for chunk in request.stream():
-                size += len(chunk)
-                if size > MAX_MEETING_BYTES:
-                    raise HTTPException(status_code=413, detail="meeting file too large")
-                file.write(chunk)
-        partial.replace(OUTPUT_DIR / name)
-    finally:
-        partial.unlink(missing_ok=True)
-    logger.info("saved meeting file %s bytes=%d", name, size)
-    return {"saved": f"output/{name}", "bytes": size}
 
 
 @app.get("/api/health")
@@ -471,9 +462,19 @@ class TranscriptDisplay:
 @app.websocket("/ws/transcribe")
 async def transcribe(browser: WebSocket):
     await browser.accept()
+    if browser.state.user is None:
+        await browser.close(code=4401, reason="請先登入")
+        return
     try:
         raw_header = await browser.receive_text()
         header = json.loads(raw_header)
+        # The meeting must belong to one of the user's teams before any audio leaves for ASR or MAI.
+        try:
+            async with db.connect() as conn:
+                await team_access.require_member(conn, browser.state.user, header.get("meeting_id", ""))
+        except HTTPException:
+            await browser.close(code=4404, reason="meeting not found")
+            return
         glossary = str(header.get("system_prompt", ""))[:4000]
         language = header.get("language") if header.get("language") in ("auto", "zh_ja", *LANGUAGES) else "auto"
         bilingual = language == "zh_ja"
