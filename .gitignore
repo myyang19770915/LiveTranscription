@@ -52,3 +52,6 @@ output/
 
 
 .gstack/
+
+# Spectra app data
+.spectra/

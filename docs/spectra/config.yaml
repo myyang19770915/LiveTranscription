@@ -1,0 +1,35 @@
+schema: spec-driven
+
+context: |
+  專案：語橋 Live（Yuqiao Live）— 會議即時語音辨識＋即時翻譯網頁。
+  架構（Docker Compose，compose.yaml）：
+    - asr：vLLM 跑 Confucius4-R2T2 串流 ASR（ws_server.py、r2t2/）
+    - translate：llama.cpp 跑 Gemma 4 本機翻譯
+    - app：FastAPI gateway（webapp/server.py，:18082），前端在 webapp/static/（app.js、segmentation.js）
+  可切換辨識引擎：本機 Confucius / Azure MAI-Transcribe-2-Streaming（webapp/mai_asr.py）/ 混合（中文本機、其他語言 MAI）
+  雲端精修：litellm（OpenAI 相容）deepseek-v4-flash，由 TRANSLATE_REFINE_* 設定
+  測試：PowerShell 執行 docker exec -w /app asr_confucius4-r2t2-app-1 python -m unittest -q test_server
+  品質評測：bench/（錄軌 → 重播真實 UI → 盲評），改動翻譯或斷句後用它比較分數
+  慣例：
+    - 文件與回覆一律繁體中文（台灣用語）
+    - 不可輸出或提交任何 API key／ASR_SECRET_KEY；.env 只能改 TRANSLATE_* 行
+    - 錄音與逐字稿放 output/；只有使用者要求時才 commit
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
