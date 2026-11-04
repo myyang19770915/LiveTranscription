@@ -1,10 +1,11 @@
-"""Download a 4-minute 16 kHz mono clip plus manual/auto subtitles for each benchmark video."""
+"""Download a 16 kHz mono clip plus manual/auto subtitles for each benchmark video.
+Usage: python fetch.py [cases.json]"""
 import json, shutil, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 YT = shutil.which('yt-dlp') or sys.exit('yt-dlp not found: pip install -r bench/requirements.txt')
-CASES = json.loads((HERE / 'cases.json').read_text(encoding='utf-8'))
+CASES = json.loads(Path(sys.argv[1] if len(sys.argv) > 1 else HERE / 'cases.json').read_text(encoding='utf-8'))
 DATA = HERE / 'data'
 
 for c in CASES:

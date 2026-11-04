@@ -1,0 +1,5 @@
+[
+ {"name": "nan_ptsnews", "id": "NIo7K4_vqoI", "start": 60,  "duration": 180, "language": "zh", "target": "zh", "subs": ["zh-Hant"]},
+ {"name": "nan_variety", "id": "L_foSZ79bnY", "start": 420, "duration": 180, "language": "zh", "target": "zh", "subs": ["zh-TW"]},
+ {"name": "id_tedx",     "id": "Hoxx47dFxn0", "start": 60,  "duration": 180, "language": "id", "target": "zh", "subs": ["id"]}
+]
