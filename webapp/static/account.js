@@ -8,7 +8,8 @@ window.accountReady=fetch('/api/me').then(response=>{
     const name=Object.assign(document.createElement('span'),{className:'account-name'});
     name.append(Object.assign(document.createElement('b'),{textContent:me.displayName||me.username}));
     const out=Object.assign(document.createElement('button'),{type:'button',textContent:'登出',onclick:async()=>{await fetch('/api/logout',{method:'POST'});location.replace('/login')}});
-    const links=me.admin&&location.pathname!=='/admin'?[Object.assign(document.createElement('a'),{href:'/admin',textContent:'團隊管理'})]:[];
+    const link=(href,text)=>Object.assign(document.createElement('a'),{href,textContent:text});
+    const links=[location.pathname==='/'?link('/meetings','會議紀錄'):null,me.admin&&location.pathname!=='/admin'?link('/admin','團隊管理'):null].filter(Boolean);
     slot.replaceChildren(name,...links,out);
   }
   return me;

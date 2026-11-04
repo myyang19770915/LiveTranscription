@@ -1,10 +1,17 @@
 import asyncio
+import base64
 import hashlib
+import io
 import json
 import os
 import re
+import shutil
 import tempfile
+import time
+import wave
+import zipfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,6 +24,7 @@ from ldap3.core.exceptions import LDAPSocketOpenError
 import auth
 import db
 import mai_asr
+import meeting_audio
 from server import (TO_TRADITIONAL, TranscriptDisplay, TranslationRequest, app, asr_engine, detect_pair_language,
                     resolve_translation_direction, translation_backend, translation_payload)
 from translation_quality import consolidate_terms, parse_discovered_terms, policy
@@ -164,6 +172,12 @@ class AccountTestCase(DatabaseTestCase):
         for fake in self.ldap.patches():
             fake.start()
             self.addCleanup(fake.stop)
+        # Meeting files (recordings included) go to a scratch folder, never the real output/.
+        self.output = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.output, ignore_errors=True)
+        output = patch("team_access.OUTPUT_DIR", self.output)
+        output.start()
+        self.addCleanup(output.stop)
 
     def team(self, name, *members):
         """Create a team directly in the database; returns its id."""
@@ -506,6 +520,334 @@ class MaiTests(AccountTestCase):
         self.assertEqual(sent[-2]["displayText"], "That means that despite all of these things.")
 
 
+class MeetingAudioTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+
+    def test_ten_seconds_of_audio_make_a_ten_second_wav(self):
+        audio = meeting_audio.MeetingAudio(self.folder / "audio.wav")
+        for _ in range(10):
+            audio.write(b"\x01\x00" * 16000)
+        self.assertEqual(audio.position_ms, 10000)
+        audio.close()
+        with wave.open(str(self.folder / "audio.wav")) as w:
+            self.assertEqual((w.getframerate(), w.getnchannels(), w.getsampwidth(), w.getnframes()), (16000, 1, 2, 160000))
+
+    def test_file_left_without_final_header_is_repaired_and_readable(self):
+        audio = meeting_audio.MeetingAudio(self.folder / "audio.wav")
+        audio.write(bytes(range(256)) * 250)       # 64000 bytes = 2 s
+        audio.file.flush()                          # the app stops here: header still says 0 bytes
+        clip = meeting_audio.read_range(self.folder / "audio.wav", 500, 1500)
+        with wave.open(io.BytesIO(clip)) as w:
+            self.assertEqual(w.getnframes(), 16000)
+        self.assertEqual(meeting_audio.duration_ms(self.folder / "audio.wav"), 2000)
+
+    def test_range_is_clamped_to_the_recording(self):
+        audio = meeting_audio.MeetingAudio(self.folder / "audio.wav")
+        audio.write(b"\x00\x00" * 16000 * 3)      # 3 s
+        audio.close()
+        for (start, end), expected_ms in {(-1500, 500): 500, (2500, 9000): 500, (5000, 6000): 0, (1000, 1000): 0}.items():
+            with wave.open(io.BytesIO(meeting_audio.read_range(self.folder / "audio.wav", start, end))) as w:
+                self.assertEqual(w.getnframes() // 16, expected_ms, (start, end))
+
+
+class AudioAfter(FakeUpstream):
+    """Answers once it has received `wait` bytes of audio, as ASR answers after hearing speech."""
+
+    def __init__(self, wait):
+        super().__init__(["這個會議"])
+        self.wait, self.received, self.heard = wait, 0, asyncio.Event()
+
+    async def send(self, message):
+        await super().send(message)
+        if isinstance(message, bytes):
+            self.received += len(message)
+            if self.received >= self.wait:
+                self.heard.set()
+
+    async def __aiter__(self):
+        await self.heard.wait()
+        async for message in super().__aiter__():
+            yield message
+
+
+class MeetingTimelineTests(AccountTestCase):
+    def recording(self):
+        meeting = self.meeting_id()
+        team_id = self.query("SELECT team_id FROM meetings WHERE id = %s", (meeting,))[0][0]
+        return meeting, self.output / "teams" / str(team_id) / meeting / "audio.wav"
+
+    def test_local_engine_records_what_asr_receives_and_stamps_audio_ms(self):
+        meeting, path = self.recording()
+        pcm = bytes(range(256)) * 375  # 96000 bytes = 3 s
+        upstream = AudioAfter(len(pcm))
+        # A running client keeps its event loop alive, as uvicorn does, so the gateway can finish the recording.
+        with patch("server.websockets.connect", return_value=upstream), self.signed_in("alice") as client:
+            with client.websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"meeting_id": meeting, "language": "zh"})
+                for i in range(0, len(pcm), 5120):
+                    websocket.send_bytes(pcm[i:i + 5120])
+                event = websocket.receive_json()
+            for _ in range(50):  # the gateway finishes the recording just after the socket closes
+                if self.query("SELECT ended_at IS NOT NULL FROM meetings")[0][0]:
+                    break
+                time.sleep(0.05)
+        self.assertEqual(event["audioMs"], 3000)
+        self.assertEqual(b"".join(m for m in upstream.sent if isinstance(m, bytes)), pcm)
+        with wave.open(str(path)) as w:
+            self.assertEqual(w.readframes(w.getnframes()), pcm)
+        self.assertEqual(self.query("SELECT audio_bytes, ended_at IS NOT NULL FROM meetings"), [(96000, True)])
+
+    def test_a_second_connection_cannot_overwrite_the_recording(self):
+        meeting, path = self.recording()
+        with patch("server.websockets.connect", return_value=FakeUpstream()):
+            with self.signed_in("alice").websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"meeting_id": meeting, "language": "zh"})
+                websocket.send_bytes(b"\x01\x00" * 100)
+                websocket.receive_json()
+        size = path.stat().st_size
+        with patch("server.websockets.connect") as upstream:
+            with self.assertRaises(WebSocketDisconnect) as closed:
+                with self.signed_in("alice").websocket_connect("/ws/transcribe") as websocket:
+                    websocket.send_json({"meeting_id": meeting, "language": "zh"})
+                    websocket.receive_json()
+        self.assertEqual(closed.exception.code, 4409)
+        upstream.assert_not_called()
+        self.assertEqual(path.stat().st_size, size)
+
+    def test_mai_engine_records_the_frames_it_sends_to_mai(self):
+        path = self.output / "mai.wav"
+        audio = meeting_audio.MeetingAudio(path)
+        frames = [b"\x02\x00" * 1600, b"\x03\x00" * 1600]
+
+        class Browser(FakeBrowser):
+            def __init__(self):
+                super().__init__()
+                self.events = [{"bytes": f} for f in frames] + [{"text": mai_asr.EOS}]
+
+            async def receive(self):
+                return self.events.pop(0)
+        bridge = mai_asr.MaiBridge(Browser(), "en", TranscriptDisplay("en", "", audio), None)
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+        bridge.send = send
+        asyncio.run(bridge.browser_to_mai())
+        audio.close()
+        appended = b"".join(base64.b64decode(m["audio"]) for m in sent if m["type"] == "input_audio_buffer.append")
+        self.assertEqual(appended, b"".join(frames))
+        with wave.open(str(path)) as w:
+            self.assertEqual(w.readframes(w.getnframes()), appended)
+
+
+class ReviewTestCase(AccountTestCase):
+    """alice's meeting with segments 1..n saved the way the meeting page saves them."""
+
+    def save(self, client, meeting, segments, **extra):
+        body = {"glossary": "LINE=耐", "learned": "MiniMax=迷你max", "sourceLanguage": "zh", "targetLanguage": "en", **extra,
+                "segments": [{"seq": i + 1, "startMs": i * 1000, "endMs": (i + 1) * 1000, "source": source, "target": target, "detected": ""}
+                             for i, (source, target) in enumerate(segments)]}
+        return client.put(f"/api/meetings/{meeting}/segments", json=body)
+
+    def segment(self, seq):
+        return self.query("SELECT asr_text, source, live_target, target, state, version FROM segments WHERE seq = %s", (seq,))[0]
+
+
+class SegmentStorageTests(ReviewTestCase):
+    def test_new_segments_keep_asr_text_and_live_translation(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        self.assertEqual(self.save(client, meeting, [("第一句。", "First."), ("第二句。", "Second.")]).status_code, 200)
+        self.assertEqual(self.segment(2), ("第二句。", "第二句。", "Second.", "Second.", "unreviewed", 1))
+        stored = self.query("SELECT glossary, learned_terms, source_language, target_language FROM meetings")[0]
+        self.assertEqual(stored, ("LINE=耐", "MiniMax=迷你max", "zh", "en"))
+
+    def test_refinement_after_the_meeting_updates_only_the_current_translation(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        self.save(client, meeting, [("一", "One."), ("二", "Two."), ("三", "Three."), ("四", "Four."), ("五", "Five."), ("六", "Six."), ("七", "Seven (live).")])
+        self.save(client, meeting, [("一", "One."), ("二", "Two."), ("三", "Three."), ("四", "Four."), ("五", "Five."), ("六", "Six."), ("七", "Seven (refined).")])
+        self.assertEqual(self.segment(7)[2:], ("Seven (live).", "Seven (refined).", "unreviewed", 2))
+        self.assertEqual(self.segment(1)[5], 1)  # unchanged segments keep their version
+
+    def test_late_save_never_overwrites_a_reviewed_segment(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        self.save(client, meeting, [("城市設計", "urban design")])
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE segments SET source = '程式設計', target = 'programming', state = 'edited', version = 3")
+        self.save(client, meeting, [("城市設計", "city planning")])
+        self.assertEqual(self.segment(1), ("城市設計", "程式設計", "urban design", "programming", "edited", 3))
+
+    def test_saving_segments_of_another_teams_meeting_is_404(self):
+        theirs = self.team("業務", "bob")
+        meeting = self.signed_in("bob").post("/api/meetings", json={"team_id": theirs, "language": "zh"}).json()["id"]
+        self.assertEqual(self.save(self.signed_in("alice"), meeting, [("x", "y")]).status_code, 404)
+        self.assertEqual(self.query("SELECT count(*) FROM segments"), [(0,)])
+
+
+class ReviewApiTests(ReviewTestCase):
+    def setUp(self):
+        super().setUp()
+        self.alice, self.meeting = self.signed_in("alice"), self.meeting_id()
+        team_id = self.query("SELECT team_id FROM meetings")[0][0]
+        folder = self.output / "teams" / str(team_id) / self.meeting
+        audio = meeting_audio.MeetingAudio(folder / "audio.wav")
+        audio.write(b"\x00\x00" * 16000 * 60)  # 60 s
+        audio.close()
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE meetings SET audio_bytes = %s", (60 * 32000,))
+        self.save(self.alice, self.meeting, [(f"第{i}句", f"Sentence {i}") for i in range(1, 16)])
+
+    def post(self, client, seq, action, **body):
+        return client.post(f"/api/meetings/{self.meeting}/segments/{seq}/{action}", json=body)
+
+    def foreign(self):
+        return self.signed_in("bob") if self.team("業務", "bob") else None
+
+    def test_meeting_list_counts_segments_and_reviews_for_both_teams(self):
+        other = self.team("業務", "alice", "bob")
+        self.signed_in("bob").post("/api/meetings", json={"team_id": other, "language": "ja"})
+        self.team("人資", "carol")
+        self.post(self.alice, 3, "confirm", version=1)
+        listed = self.alice.get("/api/meetings").json()
+        self.assertEqual([m["team"] for m in listed], ["業務", "測試團隊"])  # newest first, no other team
+        self.assertEqual((listed[1]["segments"], listed[1]["reviewed"], listed[1]["durationMs"]), (15, 1, 60000))
+
+    def test_meeting_detail_lists_segments_in_order(self):
+        detail = self.alice.get(f"/api/meetings/{self.meeting}").json()
+        self.assertEqual([s["seq"] for s in detail["segments"]], list(range(1, 16)))
+        self.assertEqual((detail["segments"][0]["startMs"], detail["segments"][0]["endMs"], detail["hasRecording"]), (0, 1000, True))
+
+    def test_audio_range_is_wav_for_the_requested_span(self):
+        response = self.alice.get(f"/api/meetings/{self.meeting}/audio", params={"start": 1200, "end": 9600})
+        self.assertEqual(response.headers["content-type"], "audio/wav")
+        with wave.open(io.BytesIO(response.content)) as w:
+            self.assertEqual(w.getnframes(), 8400 * 16)
+
+    def test_audio_of_another_team_or_without_recording_is_404(self):
+        self.assertEqual(self.foreign().get(f"/api/meetings/{self.meeting}/audio", params={"start": 0, "end": 1000}).status_code, 404)
+        silent = self.alice.post("/api/meetings", json={"team_id": self.query("SELECT team_id FROM meetings LIMIT 1")[0][0], "language": "zh"}).json()["id"]
+        self.assertEqual(self.alice.get(f"/api/meetings/{silent}/audio", params={"start": 0, "end": 1000}).status_code, 404)
+
+    def test_edit_then_retranslation_are_two_history_entries_and_asr_text_stays(self):
+        edited = self.post(self.alice, 12, "edit", version=1, source="程式設計比賽").json()
+        self.assertEqual((edited["source"], edited["state"], edited["version"], edited["asrText"]), ("程式設計比賽", "edited", 2, "第12句"))
+        done = self.post(self.alice, 12, "translation", version=2, target="programming contest", refine=True).json()
+        self.assertEqual((done["target"], done["state"], done["version"]), ("programming contest", "edited", 3))
+        history = self.alice.get(f"/api/meetings/{self.meeting}/segments/12/history").json()
+        self.assertEqual([(h["kind"], h["username"], h["sourceAfter"], h["targetAfter"], h["refine"]) for h in history],
+                         [("edit", "alice", "程式設計比賽", "Sentence 12", False), ("retranslate", "alice", "程式設計比賽", "programming contest", True)])
+
+    def test_two_reviewers_editing_in_turn_keep_both_entries(self):
+        self.team_member("bob")
+        bob = self.signed_in("bob")
+        self.post(self.alice, 5, "edit", version=1, source="第五句（alice）")
+        self.post(bob, 5, "edit", version=2, source="第五句（bob）")
+        history = self.alice.get(f"/api/meetings/{self.meeting}/segments/5/history").json()
+        self.assertEqual([(h["username"], h["sourceBefore"], h["sourceAfter"]) for h in history],
+                         [("alice", "第5句", "第五句（alice）"), ("bob", "第五句（alice）", "第五句（bob）")])
+        self.assertEqual(self.segment(5)[0], "第5句")
+
+    def test_confirming_unchanged_is_recorded_and_editing_makes_it_edited(self):
+        confirmed = self.post(self.alice, 3, "confirm", version=1).json()
+        self.assertEqual((confirmed["state"], confirmed["version"]), ("confirmed", 2))
+        self.assertEqual([h["kind"] for h in self.alice.get(f"/api/meetings/{self.meeting}/segments/3/history").json()], ["confirm"])
+        self.assertEqual(self.post(self.alice, 3, "edit", version=2, source="第三句").json()["state"], "edited")
+
+    def test_stale_version_is_409_with_the_current_segment(self):
+        self.team_member("bob")
+        bob = self.signed_in("bob")
+        self.assertEqual(self.post(self.alice, 5, "edit", version=1, source="alice 的版本").status_code, 200)
+        refused = self.post(bob, 5, "edit", version=1, source="bob 的版本")
+        self.assertEqual(refused.status_code, 409)
+        self.assertEqual((refused.json()["detail"], refused.json()["segment"]["source"]), ("這段已被其他人修改，已重新載入", "alice 的版本"))
+        self.assertEqual(self.segment(5)[1], "alice 的版本")
+
+    def test_every_review_api_is_404_for_another_team(self):
+        bob, base = self.foreign(), f"/api/meetings/{self.meeting}"
+        calls = [("GET", base, None), ("GET", f"{base}/audio?start=0&end=10", None), ("GET", f"{base}/segments/1/history", None),
+                 ("POST", f"{base}/segments/1/edit", {"version": 1, "source": "x"}),
+                 ("POST", f"{base}/segments/1/translation", {"version": 1, "target": "x"}),
+                 ("POST", f"{base}/segments/1/confirm", {"version": 1}), ("PUT", f"{base}/segments", {"segments": []}),
+                 ("GET", f"/meetings/{self.meeting}", None)]
+        for method, path, body in calls:
+            self.assertEqual(bob.request(method, path, json=body, follow_redirects=False).status_code, 404, f"{method} {path}")
+        self.assertEqual(self.query("SELECT count(*) FROM segment_history"), [(0,)])
+        self.assertEqual(self.segment(1)[1:], ("第1句", "Sentence 1", "Sentence 1", "unreviewed", 1))
+
+    def team_member(self, username):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("INSERT INTO team_members (team_id, username, added_by) SELECT team_id, %s, 'admin' FROM meetings LIMIT 1", (username,))
+
+
+class UncleanStopTests(ReviewTestCase):
+    def test_recording_left_by_a_stopped_app_still_plays(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        team_id = self.query("SELECT team_id FROM meetings")[0][0]
+        audio = meeting_audio.MeetingAudio(self.output / "teams" / str(team_id) / meeting / "audio.wav")
+        audio.write(b"\x00\x00" * 16000 * 5)
+        audio.file.flush()   # the app stops here: no final header, audio_bytes stays 0
+        self.save(client, meeting, [("一", "One.")])
+        detail = client.get(f"/api/meetings/{meeting}").json()
+        self.assertEqual((detail["hasRecording"], detail["durationMs"]), (True, 5000))
+        self.assertEqual(client.get("/api/meetings").json()[0]["durationMs"], 5000)
+        clip = client.get(f"/api/meetings/{meeting}/audio", params={"start": 1000, "end": 3000})
+        with wave.open(io.BytesIO(clip.content)) as w:
+            self.assertEqual(w.getnframes(), 32000)
+        audio.file.close()
+
+    def test_meeting_without_segments_is_listed_with_zero_segments(self):
+        client = self.signed_in("alice")
+        self.meeting_id()
+        listed = client.get("/api/meetings").json()
+        self.assertEqual((listed[0]["segments"], listed[0]["reviewed"], listed[0]["durationMs"]), (0, 0, 0))
+
+
+class AsrExportTests(ReviewApiTests):
+    def test_manifest_line_matches_the_spec_example(self):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE segments SET start_ms = 4200, end_ms = 9100, asr_text = '城市設計比賽', source = '城市設計比賽' WHERE seq = 12")
+        self.post(self.alice, 12, "edit", version=1, source="程式設計比賽")
+        team_id = self.query("SELECT team_id FROM meetings")[0][0]
+        archive = zipfile.ZipFile(io.BytesIO(self.export(self.alice, team_id).content))
+        line = json.loads(archive.read("manifest.jsonl").decode().splitlines()[0])
+        self.assertEqual(line, {"audio": f"clips/{self.meeting}_0012.wav", "text": "程式設計比賽", "asr_text": "城市設計比賽", "language": "zh",
+                                "engine": "local", "meeting_id": self.meeting, "seq": 12, "start_ms": 4200, "end_ms": 9100,
+                                "edited": True, "reviewed_by": "alice"})
+        with wave.open(io.BytesIO(archive.read(line["audio"]))) as w:
+            self.assertEqual(w.getnframes(), 4900 * 16)
+
+    def export(self, client, team_id, **dates):
+        today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
+        return client.get(f"/api/teams/{team_id}/asr-export", params={"from": dates.get("start", today), "to": dates.get("end", today)})
+
+    def test_only_confirmed_or_edited_segments_are_exported(self):
+        for seq in (1, 2, 3):
+            self.post(self.alice, seq, "edit", version=1, source=f"修正{seq}")
+        for seq in (4, 5):
+            self.post(self.alice, seq, "confirm", version=1)
+        team_id = self.query("SELECT team_id FROM meetings")[0][0]
+        response = self.export(self.alice, team_id)
+        archive = zipfile.ZipFile(io.BytesIO(response.content))
+        lines = [json.loads(line) for line in archive.read("manifest.jsonl").decode().splitlines()]
+        self.assertEqual(len([n for n in archive.namelist() if n.startswith("clips/")]), 5)
+        self.assertEqual(len(lines), 5)
+        first = lines[0]
+        self.assertEqual(first, {"audio": f"clips/{self.meeting}_0001.wav", "text": "修正1", "asr_text": "第1句", "language": "zh",
+                                 "engine": "local", "meeting_id": self.meeting, "seq": 1, "start_ms": 0, "end_ms": 1000,
+                                 "edited": True, "reviewed_by": "alice"})
+        self.assertFalse(lines[3]["edited"])
+        with wave.open(io.BytesIO(archive.read(first["audio"]))) as w:
+            self.assertEqual(w.getnframes(), 16000)  # its own span, no playback padding
+
+    def test_export_of_another_team_or_outside_the_dates_is_empty_or_404(self):
+        team_id = self.query("SELECT team_id FROM meetings")[0][0]
+        self.post(self.alice, 1, "confirm", version=1)
+        self.assertEqual(self.export(self.foreign(), team_id).status_code, 404)
+        old = zipfile.ZipFile(io.BytesIO(self.export(self.alice, team_id, start="2020-01-01", end="2020-01-31").content))
+        self.assertEqual(old.read("manifest.jsonl"), b"")
+
+
 class DatabaseTests(DatabaseTestCase):
     def test_migrations_apply_once(self):
         with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
@@ -519,7 +861,10 @@ class DatabaseTests(DatabaseTestCase):
         versions = [row[0] for row in self.query("SELECT version FROM schema_migrations ORDER BY version")]
         self.assertEqual(versions, [version for version, _ in db.migration_files()])
         tables = {row[0] for row in self.query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")}
-        self.assertLessEqual({"users", "teams", "team_members", "sessions", "login_failures", "meetings", "meeting_files"}, tables)
+        self.assertLessEqual({"users", "teams", "team_members", "sessions", "login_failures", "meetings", "meeting_files",
+                              "segments", "segment_history"}, tables)
+        columns = {row[0] for row in self.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'meetings'")}
+        self.assertLessEqual({"source_language", "target_language", "glossary", "learned_terms", "audio_bytes", "ended_at"}, columns)
 
 
 class SignInTests(AccountTestCase):

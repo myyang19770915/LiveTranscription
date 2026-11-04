@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>會後校對 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261104a"><link rel="stylesheet" href="/assets/admin.css?v=20261104b"><link rel="stylesheet" href="/assets/review.css?v=20261104b"></head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>會後校對</small></span></a>
+  <div class="topbar-actions">
+    <a class="ghost-button" href="/meetings">會議紀錄</a>
+    <div id="account" class="account"></div>
+    <button id="themeToggle" class="icon-button" type="button" aria-label="切換深淺主題" title="切換深淺主題"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="sun" d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/><path class="moon" d="M20.4 15.2A8.4 8.4 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/></svg></button>
+  </div>
+</header>
+
+<main class="page review-page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">REVIEW</p>
+      <h1 id="title">會後校對</h1>
+      <p id="meta" class="meeting-meta"></p>
+    </div>
+    <div class="review-progress">
+      <span id="progressText" class="small"></span>
+      <span class="bar" aria-hidden="true"><i id="progressBar"></i></span>
+    </div>
+  </div>
+
+  <div class="card toolbar">
+    <p class="hint">點一段就會播放那段錄音。修正轉錄後按「儲存並重譯」，譯文會用和會議中相同的方式（帶前後文與會議詞彙）重新翻譯；每次修改都會留下紀錄。</p>
+    <label id="refineRow" class="toggle" hidden><input id="refine" type="checkbox"> 雲端精修 <span class="muted small">會議內容會傳送到外部服務</span></label>
+  </div>
+
+  <p id="notice" class="alert" role="alert" hidden></p>
+  <div class="segment-head" aria-hidden="true"><span>時間</span><span>原文（轉錄）</span><span>譯文</span><span></span></div>
+  <section id="segments" class="segments" aria-label="段落"></section>
+  <audio id="player" preload="none"></audio>
+</main>
+
+<script src="/assets/account.js?v=20261104b"></script>
+<script src="/assets/translation-context.js?v=20261104b"></script>
+<script src="/assets/timeline.js?v=20261104a"></script>
+<script src="/assets/review.js?v=20261104d"></script>
+</body></html>

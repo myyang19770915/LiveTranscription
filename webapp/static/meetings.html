@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>會議紀錄 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261104a"><link rel="stylesheet" href="/assets/admin.css?v=20261104b"><link rel="stylesheet" href="/assets/review.css?v=20261104b"></head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>會議紀錄</small></span></a>
+  <div class="topbar-actions">
+    <a class="ghost-button" href="/">回到會議</a>
+    <div id="account" class="account"></div>
+    <button id="themeToggle" class="icon-button" type="button" aria-label="切換深淺主題" title="切換深淺主題"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="sun" d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/><path class="moon" d="M20.4 15.2A8.4 8.4 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/></svg></button>
+  </div>
+</header>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">MEETINGS</p>
+      <h1>會議紀錄</h1>
+      <p class="lead">你所屬團隊的會議。點「校對」可以逐段聽錄音、修正轉錄，修正後會自動重譯，所有修改都會留下紀錄。</p>
+    </div>
+    <p id="summary" class="summary" aria-live="polite"></p>
+  </div>
+
+  <form id="exportForm" class="card export">
+    <div>
+      <b class="label">匯出 ASR 微調資料</b>
+      <p class="hint">已確認或已修改的段落，每段一個錄音檔，加上 <code>manifest.jsonl</code>（修正後文字與 ASR 原文）。</p>
+    </div>
+    <div class="export-fields">
+      <label>團隊<select id="exportTeam" class="input compact"></select></label>
+      <label>從<input id="exportFrom" class="input compact" type="date" required></label>
+      <label>到<input id="exportTo" class="input compact" type="date" required></label>
+      <button class="secondary-button" type="submit">下載 zip</button>
+    </div>
+  </form>
+
+  <p id="listError" class="alert" role="alert" hidden></p>
+  <section id="meetings" class="meeting-list" aria-label="會議列表"></section>
+</main>
+
+<script src="/assets/account.js?v=20261104b"></script>
+<script>
+const $=id=>document.getElementById(id);
+function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
+const LANG={zh:'中文',en:'英文',ja:'日文',zh_ja:'中日雙向',auto:'中英自動',ko:'韓文',yue:'粵語',id:'印尼文'};
+const ENGINE={local:'本機',hybrid:'混合',mai:'雲端 MAI'};
+const pad=n=>String(n).padStart(2,'0');
+function clock(ms){const s=Math.round(ms/1000);return s>=3600?`${Math.floor(s/3600)}:${pad(Math.floor(s/60)%60)}:${pad(s%60)}`:`${pad(Math.floor(s/60))}:${pad(s%60)}`}
+function when(iso){const d=new Date(iso);return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`}
+function localDate(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`}
+
+function meetingRow(m){
+  const percent=m.segments?Math.round(m.reviewed/m.segments*100):0;
+  const action=m.segments?el('a',{className:'primary-button compact link-button',href:`/meetings/${m.id}`,textContent:'校對'})
+    :el('span',{className:'muted small',textContent:'沒有校對資料'});
+  return el('article',{className:'card meeting'},
+    el('div',{className:'meeting-main'},
+      el('b',{className:'meeting-when',textContent:when(m.startedAt)}),
+      el('div',{className:'meeting-meta'},
+        el('span',{className:'count',textContent:m.team}),
+        el('span',{textContent:m.durationMs?clock(m.durationMs):'無錄音'}),
+        el('span',{textContent:LANG[m.language]||m.language}),
+        el('span',{textContent:ENGINE[m.engine]||m.engine}),
+        el('span',{textContent:`建立者 ${m.createdBy}`}))),
+    el('div',{className:'meeting-progress'},
+      el('span',{className:'small',textContent:m.segments?`已校對 ${m.reviewed} / ${m.segments} 段`:''}),
+      m.segments?el('span',{className:'bar',ariaHidden:'true'},el('i',{style:`width:${percent}%`})):null),
+    action);
+}
+async function load(){
+  const response=await fetch('/api/meetings');
+  if(!response.ok)throw new Error('無法載入會議列表');
+  const meetings=await response.json();
+  $('summary').textContent=meetings.length?`${meetings.length} 場會議`:'';
+  $('meetings').replaceChildren(...(meetings.length?meetings.map(meetingRow):[el('div',{className:'card empty'},
+    el('b',{textContent:'還沒有會議'}),el('p',{textContent:'回到會議頁開始一場會議，結束後就會出現在這裡。'}))]));
+}
+window.accountReady.then(({teams})=>{
+  $('exportTeam').replaceChildren(...teams.map(t=>Object.assign(document.createElement('option'),{value:t.id,textContent:t.name})));
+  $('exportForm').hidden=!teams.length;
+});
+const today=new Date(),monthAgo=new Date(today.getTime()-30*86400000);
+$('exportFrom').value=localDate(monthAgo);$('exportTo').value=localDate(today);
+$('exportForm').onsubmit=event=>{event.preventDefault();
+  const params=new URLSearchParams({from:$('exportFrom').value,to:$('exportTo').value});
+  location.href=`/api/teams/${$('exportTeam').value}/asr-export?${params}`};
+$('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
+load().catch(error=>{$('listError').textContent=error.message;$('listError').hidden=false});
+</script>
+</body></html>

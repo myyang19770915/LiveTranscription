@@ -39,6 +39,8 @@
   }
 
   window.startMeeting = async () => {
+    // --save-meeting: store the replay as a real meeting (segments only, no recording) for the review page.
+    if (cfg.saveMeeting) { meetingId = await createMeeting(Number($('team').value)); resetMeetingState(); }
     socket = new TrackSocket(cfg.track); socket.onmessage = onMessage;
     stream = {replay: true}; captureStreams = [];
     startedAt = Date.now(); timerHandle = setInterval(updateTimer, 1000);

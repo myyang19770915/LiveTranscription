@@ -4,6 +4,7 @@ Only system administrators (ADMIN_USERS) manage teams; being one grants no acces
 meetings. Meeting data is checked against the current membership on every request, and a
 non-member gets the same 404 as for a meeting that does not exist.
 """
+import asyncio
 import os
 import uuid
 from pathlib import Path
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field
 
 import auth
 import db
+import meeting_audio
 
 router = APIRouter()
 NOT_FOUND = "找不到會議"
@@ -155,12 +157,17 @@ async def create_meeting(body: NewMeeting, user: auth.CurrentUser):
 async def list_meetings(user: auth.CurrentUser):
     async with db.connect() as conn:
         rows = await (await conn.execute(
-            "SELECT m.id, m.team_id, t.name AS team_name, m.started_at, m.created_by, m.language, m.engine "
+            "SELECT m.id, m.team_id, t.name AS team_name, m.started_at, m.created_by, m.language, m.engine, m.audio_bytes, "
+            "count(s.seq) AS segments, count(s.seq) FILTER (WHERE s.state <> 'unreviewed') AS reviewed "
             "FROM meetings m JOIN teams t ON t.id = m.team_id "
-            "JOIN team_members tm ON tm.team_id = m.team_id AND tm.username = %s ORDER BY m.started_at DESC LIMIT 500",
+            "JOIN team_members tm ON tm.team_id = m.team_id AND tm.username = %s "
+            "LEFT JOIN segments s ON s.meeting_id = m.id "
+            "GROUP BY m.id, t.name ORDER BY m.started_at DESC LIMIT 500",
             (user.username,))).fetchall()
     return [{"id": str(row["id"]), "teamId": row["team_id"], "team": row["team_name"], "startedAt": row["started_at"].isoformat(),
-             "createdBy": row["created_by"], "language": row["language"], "engine": row["engine"]} for row in rows]
+             "createdBy": row["created_by"], "language": row["language"], "engine": row["engine"],
+             "durationMs": duration, "segments": row["segments"], "reviewed": row["reviewed"]}
+            for row, duration in zip(rows, await asyncio.to_thread(lambda: [recorded_ms(row, repair=False) for row in rows]))]
 
 
 @router.get("/api/meetings/{meeting_id}")
@@ -169,9 +176,38 @@ async def get_meeting(meeting_id: str, user: auth.CurrentUser):
         meeting = await require_member(conn, user, meeting_id)
         files = await (await conn.execute("SELECT kind, path, bytes FROM meeting_files WHERE meeting_id = %s ORDER BY kind",
                                           (meeting["id"],))).fetchall()
-    return {"id": str(meeting["id"]), "teamId": meeting["team_id"], "startedAt": meeting["started_at"].isoformat(),
+        team = await (await conn.execute("SELECT name FROM teams WHERE id = %s", (meeting["team_id"],))).fetchone()
+        segments = await (await conn.execute(
+            "SELECT seq, start_ms, end_ms, asr_text, source, live_target, target, detected, state, version "
+            "FROM segments WHERE meeting_id = %s ORDER BY seq", (meeting["id"],))).fetchall()
+    duration = await asyncio.to_thread(recorded_ms, meeting)
+    return {"id": str(meeting["id"]), "teamId": meeting["team_id"], "team": team["name"], "startedAt": meeting["started_at"].isoformat(),
             "createdBy": meeting["created_by"], "language": meeting["language"], "engine": meeting["engine"],
-            "files": [{"kind": f["kind"], "name": f["path"].rsplit("/", 1)[-1], "bytes": f["bytes"]} for f in files]}
+            "sourceLanguage": meeting["source_language"], "targetLanguage": meeting["target_language"],
+            "glossary": meeting["glossary"], "learned": meeting["learned_terms"],
+            "durationMs": duration, "hasRecording": duration > 0,
+            "files": [{"kind": f["kind"], "name": f["path"].rsplit("/", 1)[-1], "bytes": f["bytes"]} for f in files],
+            "segments": [segment_payload(row) for row in segments]}
+
+
+def recorded_ms(meeting: dict, repair: bool = True) -> int:
+    """Recording length; after an unclean stop audio_bytes was never written, so the file decides.
+
+    repair=False only reads the file size (for lists); the review page repairs the header it will play."""
+    if meeting["audio_bytes"]:
+        return meeting["audio_bytes"] // meeting_audio.BYTES_PER_MS
+    path = meeting_dir(meeting) / "audio.wav"
+    if not path.exists():
+        return 0
+    if repair:
+        return meeting_audio.duration_ms(path)
+    return max(0, path.stat().st_size - meeting_audio.HEADER_BYTES) // meeting_audio.BYTES_PER_MS
+
+
+def segment_payload(row: dict) -> dict:
+    return {"seq": row["seq"], "startMs": row["start_ms"], "endMs": row["end_ms"], "asrText": row["asr_text"], "source": row["source"],
+            "liveTarget": row["live_target"], "target": row["target"], "detected": row["detected"], "state": row["state"],
+            "version": row["version"]}
 
 
 RECORDING_TYPES = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a"}

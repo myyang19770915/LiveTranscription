@@ -282,6 +282,19 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 
 系統聲音由 `getDisplayMedia()` 的瀏覽器分享選擇器取得。Chrome 需要讓使用者明確挑選分頁／畫面與音訊；若選擇器沒有分享音訊，應改選可分享分頁音訊的分頁或重新選擇。即使畫面分享 API 同時回傳 video track，本專案只把音訊接入轉錄流程，不會上傳畫面影像。停止會議會關閉音訊串流；本專案不錄製或保留原始音訊。
 
+## 會後校對
+
+會議結束後，從頁首「會議紀錄」（`/meetings`）進入。列表只顯示你所屬團隊的會議，每場標示已校對幾段；按「校對」開啟 `/meetings/<會議 id>`。
+
+- **對照錄音**：轉錄、譯文、錄音三者用同一條時間軸。伺服器把送去辨識的同一份音訊存成 `audio.wav`，每個辨識事件附上當下的音訊位置（`audioMs`），每段因此知道自己在錄音的哪裡。點一段就播放那段；文字比聲音晚到，所以播放會往前多放 3 秒、往後 0.5 秒（`bench/lagcheck.py` 實測中日文落後中位 0.5–3.8 秒），還可以再「往前 2 秒」「往後 2 秒」。
+- **修正轉錄**：按「修改原文」，改完「儲存並重譯」。重譯和會議中的精修用同一份程式（`webapp/static/translation-context.js`）：前兩段原文與譯文作上下文、附後一段開頭、會議詞彙、自動學習詞彙，可勾選雲端精修，並套用相同的防重複檢查。完成後可「一併重譯下一段」（它的前文變了）。
+- **確認正確**：沒有錯的段落可直接確認，也會留下紀錄。
+- **修改紀錄**：每次修改、重譯、確認都新增一筆（誰、何時、前後原文與譯文），不會覆蓋；ASR 原文永遠保留。「歷程」可查看。
+- **同時修改**：兩人改同一段時，後送出的人會看到「這段已被其他人修改，已重新載入」。
+- **匯出 ASR 微調資料**：會議紀錄頁選團隊與日期區間，下載 zip：每個已確認或已修改的段落一個 WAV（16 kHz 單聲道，段落本身的區間），加上 `manifest.jsonl`，每行欄位為 `audio`、`text`（修正後）、`asr_text`（原始辨識）、`language`、`engine`、`meeting_id`、`seq`、`start_ms`、`end_ms`、`edited`、`reviewed_by`。
+
+**資料保存**：錄音在 `output/teams/<團隊 id>/<會議 id>/audio.wav`，每小時約 115 MB（16 kHz × 16 bit × 單聲道 = 32 KB/s）；段落、修改紀錄與會議詞彙在 Postgres（`segments`、`segment_history`）。本功能上線前的會議沒有段落資料，列表中顯示「沒有校對資料」。
+
 ## 設定參考
 
 | `.env` 變數 | 預設值 | 說明 |
@@ -306,6 +319,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `LDAP_DISPLAY_ATTR` | `displayName` | 頁首顯示的名稱欄位 |
 | `LDAP_CA_FILE` | 空 | ldaps 使用自簽 CA 時，容器內可讀到的 CA 憑證路徑 |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 前面有 HTTPS 反向代理時，填代理的 IP，app 才會相信它轉來的 `https` |
+| `MEETING_TIMEZONE` | `Asia/Taipei` | 匯出 ASR 微調資料時，日期區間以這個時區的會議開始日期計算 |
 | `SESSION_COOKIE_SECURE` | 空 | 以 HTTPS 對外提供時設 `1`，登入 cookie 一律加上 Secure，不會經由明文 HTTP 送出 |
 
 **辨識引擎**（頁面選單，預設本機）：
@@ -324,6 +338,12 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `POST /api/login`、`POST /api/logout`、`GET /api/me` | LDAP 登入、登出、目前使用者與所屬團隊 |
 | `GET /admin`、`/api/admin/teams…` | 團隊管理（限系統管理員） |
 | `POST /api/meetings`、`GET /api/meetings`、`GET /api/meetings/{id}` | 建立會議（需指定自己的團隊）、列出與讀取自己團隊的會議 |
+| `GET /meetings`、`GET /meetings/{id}` | 會議紀錄列表、會後校對頁 |
+| `PUT /api/meetings/{id}/segments` | 會議頁保存定稿段落（依序號更新，不覆蓋已校對的段落） |
+| `GET /api/meetings/{id}/audio?start=&end=` | 錄音區間（毫秒），回傳 WAV |
+| `POST /api/meetings/{id}/segments/{seq}/edit`、`/translation`、`/confirm` | 修改原文、寫入重譯結果、確認正確；都帶 `version`，過期回 409 |
+| `GET /api/meetings/{id}/segments/{seq}/history` | 段落的修改紀錄 |
+| `GET /api/teams/{team}/asr-export?from=&to=` | 匯出 ASR 微調資料 zip |
 | `PUT /api/meetings/{id}/files/{recording\|transcript}` | 儲存會議錄音或逐字稿到 `output/teams/<團隊>/<會議>/` |
 | `WS /ws/transcribe` | 瀏覽器至 app 的即時 PCM 音訊 WebSocket；首包需帶 `meeting_id`，非團隊成員以關閉碼 4404 拒絕 |
 | `POST /api/translate` | 請求 Gemma 文字翻譯；JSON 欄位為 `text`、`source`、`target` 和可選 `history` |

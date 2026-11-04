@@ -19,6 +19,8 @@ from starlette.websockets import WebSocketState
 import auth
 import db
 import mai_asr
+import meeting_audio
+import review
 import team_access
 from translation_quality import (TERMS_SCHEMA, apply_aliases, asr_context, consolidate_terms, glossary_entries, learned_replacements,
                                  parse_discovered_terms, policy, repair_asr, strip_context_echo, term_discovery_messages, violations)
@@ -98,6 +100,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="語橋 Live — 即時會議翻譯", lifespan=lifespan, dependencies=[Depends(auth.require_signed_in)])
 app.include_router(auth.router)
 app.include_router(team_access.router)
+app.include_router(review.router)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 
@@ -426,8 +429,8 @@ class TranscriptDisplay:
     """What the browser shows for either ASR engine: Traditional script for Chinese, the meeting glossary's
     corrections, and per-chunk zh/ja detection in 中日雙向 mode."""
 
-    def __init__(self, language: str, glossary: str):
-        self.glossary, self.bilingual = glossary, language == "zh_ja"
+    def __init__(self, language: str, glossary: str, audio: "meeting_audio.MeetingAudio | None" = None):
+        self.glossary, self.bilingual, self.audio = glossary, language == "zh_ja", audio
         self.chinese = language in ("auto", "zhen", "zh", "Chinese", "yue", "Cantonese")
         self.raw = self.pair_text = self.detected = ""
 
@@ -435,6 +438,9 @@ class TranscriptDisplay:
         return apply_aliases(repair_asr(strip_context_echo(text, self.glossary)), self.glossary)
 
     def annotate(self, payload: dict) -> None:
+        # Gateway audio clock when the event went out; the browser times its segments with it.
+        if self.audio is not None:
+            payload["audioMs"] = self.audio.position_ms
         msg = payload.get("msg")
         if not isinstance(msg, dict):
             return
@@ -459,26 +465,41 @@ class TranscriptDisplay:
             self.raw = self.raw[:start] + text
 
 
+async def finish_recording(audio: "meeting_audio.MeetingAudio", meeting_id) -> None:
+    """Close the WAV and record its length; shielded so a cancelled handler still finishes it."""
+    recorded = audio.close()
+    async with db.connect() as conn:
+        await conn.execute("UPDATE meetings SET audio_bytes = %s, ended_at = now() WHERE id = %s", (recorded, meeting_id))
+
+
 @app.websocket("/ws/transcribe")
 async def transcribe(browser: WebSocket):
     await browser.accept()
     if browser.state.user is None:
         await browser.close(code=4401, reason="請先登入")
         return
+    audio, meeting = None, None
     try:
         raw_header = await browser.receive_text()
         header = json.loads(raw_header)
         # The meeting must belong to one of the user's teams before any audio leaves for ASR or MAI.
         try:
             async with db.connect() as conn:
-                await team_access.require_member(conn, browser.state.user, header.get("meeting_id", ""))
+                meeting = await team_access.require_member(conn, browser.state.user, header.get("meeting_id", ""))
         except HTTPException:
             await browser.close(code=4404, reason="meeting not found")
+            return
+        # The recording is exactly the audio sent to ASR/MAI, so it shares the transcript's timeline.
+        # One connection per meeting: a second one must not truncate the first recording.
+        try:
+            audio = meeting_audio.MeetingAudio(team_access.meeting_dir(meeting) / "audio.wav")
+        except FileExistsError:
+            await browser.close(code=4409, reason="meeting already recorded")
             return
         glossary = str(header.get("system_prompt", ""))[:4000]
         language = header.get("language") if header.get("language") in ("auto", "zh_ja", *LANGUAGES) else "auto"
         bilingual = language == "zh_ja"
-        display = TranscriptDisplay(language, glossary)
+        display = TranscriptDisplay(language, glossary, audio)
         if asr_engine(str(header.get("engine", "")), language) == "mai":
             # Audio goes to Azure; text goes to the cloud text model only when 雲端精修 is on.
             cloud_marks = PUNCTUATE_MAI and bool(header.get("refine")) and language == "zh" and bool(REFINE_URL and REFINE_MODEL)
@@ -505,6 +526,7 @@ async def transcribe(browser: WebSocket):
                     if event.get("type") == "websocket.disconnect":
                         return
                     if event.get("bytes") is not None:
+                        audio.write(event["bytes"])
                         await upstream.send(event["bytes"])
                     elif event.get("text") is not None:
                         await upstream.send(event["text"])
@@ -541,3 +563,6 @@ async def transcribe(browser: WebSocket):
             await browser.send_json({"status": "error", "msg": str(exc)})
         except Exception:
             pass
+    finally:
+        if audio is not None:
+            await asyncio.shield(finish_recording(audio, meeting["id"]))

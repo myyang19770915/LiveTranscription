@@ -145,6 +145,8 @@ class MaiBridge:
                 return
             if event.get("bytes") is not None:
                 pcm = event["bytes"]
+                if self.display.audio is not None:
+                    self.display.audio.write(pcm)
                 await self.send({"type": "input_audio_buffer.append", "audio": base64.b64encode(pcm).decode("ascii")})
                 self.audio_since_commit += len(pcm)
                 if self.vad.feed(pcm) and self.language in PAUSE_COMMITS:

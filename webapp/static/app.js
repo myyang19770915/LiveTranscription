@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 const EOS = 'YOUDAO_ONETIME_ASR_STREAM_EOS';
 const translationEmptyMarkup = $('translation').innerHTML;
 let socket, stream, captureStreams = [], audioContext, sourceNodes = [], workletNode, startedAt, timerHandle, starting = false, stopping = false;
-let recorder, recordingChunks = [], recording, meetingStamp = '', meetingId = '';
+let recorder, recordingChunks = [], recording, meetingStamp = '', meetingId = '', meetingEpoch = -1;
 let testStream, testStreams = [], testAudioContext, testSources = [], testAnalyser, testAnimation;
 let transcript = '', translated = '', draftText = '', translationTimer, pauseTimer, activeTranslation;
 let translationOffset = 0, translationHistory = [], translationEpoch = 0, flushRequested = false, lastDraftSource = '';
@@ -10,6 +10,8 @@ let translationFinalNode, translationDraftNode;
 let direction = { source: 'auto', target: 'en' };
 const languageTags = {auto:'AUTO',zh_ja:'中⇄日',zh:'中',en:'EN',ja:'日',ko:'한',fr:'FR',de:'DE',it:'IT',pt:'PT',ru:'RU',es:'ES',ar:'AR'};
 const languageSpans=[],utteranceBoundaries=new Set();
+// Gateway audio clock (audioMs) at each transcript length, so finalized spans know their place in the recording.
+const timeMarks=[];
 let fixedTarget='en';
 let translationFailures=0;
 const segmentRecords=new Map();
@@ -220,18 +222,37 @@ let transcriptSaveTimer,saveTranscriptNow=null;
 // A new meeting starts empty: the previous one's text, translations and terms belong to its own
 // meeting (maybe another team) and must never be saved into the new meeting's transcript.
 function resetMeetingState(){
-  saveTranscriptNow?.();
+  saveTranscriptNow?.();saveSegmentsNow?.();
   transcript='';sourceRevision=0;finalizeRemaining=false;
-  segmentRecords.clear();languageSpans.length=0;utteranceBoundaries.clear();
-  updateTranslationDirection();resetLearnedTerms();render('transcript','');
+  segmentRecords.clear();languageSpans.length=0;utteranceBoundaries.clear();timeMarks.length=0;
+  updateTranslationDirection();meetingEpoch=translationEpoch;resetLearnedTerms();render('transcript','');
 }
 // Debounced; bound to the meeting it was scheduled for, and flushed at once if a new meeting starts first.
 function storeTranscript(){
-  clearTimeout(transcriptSaveTimer);saveTranscriptNow=null;
-  if(!meetingId||!transcript)return;
+  clearTimeout(transcriptSaveTimer);saveTranscriptNow=null;storeSegments();
+  if(!meetingId||!transcript||translationEpoch!==meetingEpoch)return;
   const id=meetingId,name=`meeting-${meetingStamp}.txt`;
   saveTranscriptNow=()=>{clearTimeout(transcriptSaveTimer);saveTranscriptNow=null;storeMeetingFile(transcriptFile(),'transcript',name,id)};
   transcriptSaveTimer=setTimeout(saveTranscriptNow,800);
+}
+// Finalized spans go to the meeting record for the review page: at most every 10 s while the meeting
+// runs, and shortly after it ends or a refinement changes a translation. Bound to their meeting too.
+let segmentSaveTimer=null,saveSegmentsNow=null;
+function storeSegments(){
+  // Changing the language after the meeting starts a new translation pass of the same text; it must not
+  // replace the meeting's stored segments (their seq would no longer match) or its language.
+  if(!meetingId||translationEpoch!==meetingEpoch||(segmentSaveTimer&&stream))return;
+  clearTimeout(segmentSaveTimer);
+  const id=meetingId;
+  saveSegmentsNow=()=>{clearTimeout(segmentSaveTimer);segmentSaveTimer=saveSegmentsNow=null;sendSegments(id)};
+  segmentSaveTimer=setTimeout(saveSegmentsNow,stream?10000:800);
+}
+function sendSegments(id){
+  const segments=finalizedRecords().map((s,i)=>({seq:i+1,startMs:s.startMs||0,endMs:s.endMs||0,source:s.source,target:s.target,detected:s.detected||''}));
+  if(!segments.length)return;
+  fetch(`/api/meetings/${id}/segments`,{method:'PUT',headers:{'content-type':'application/json'},
+    body:JSON.stringify({glossary:$('context').value.trim(),learned:learnedTerms,sourceLanguage:direction.source,targetLanguage:direction.target,segments})})
+    .then(response=>{if(!response.ok)console.warn('Segment save failed',response.status)}).catch(error=>console.warn('Segment save failed',error.message));
 }
 function updateTimer(){const sec=Math.floor((Date.now()-startedAt)/1000);$('timer').textContent=`${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;}
 function onMessage(event){
@@ -246,6 +267,7 @@ function onMessage(event){
   // displayText can re-punctuate the current item (MAI), so the utterance ends at the new end.
   markEnd();
   languageSpans.push({start,end:transcript.length,source:data.detectedLanguage||''});
+  if(Number.isFinite(data.audioMs))timeMarks.push({end:transcript.length,ms:data.audioMs});
   // ASR resets are decoding events, not proof of a complete semantic sentence.
   render('transcript',transcript); scheduleTranslation(false);
 }
@@ -276,14 +298,6 @@ function queueCorrections(forms){
 function queueRefinement(){
   const finals=finalizedRecords(),record=finals.at(-2);
   if(record&&!record.refined&&!correctionQueue.includes(record)){record.refined=true;correctionQueue.push(record)}
-}
-// The model sometimes translates the context as well: it repeated the previous span's translation or
-// absorbed the next span ("…before going to large scale…" in both [9] and [10]). Such a refinement is dropped.
-function plausibleRefinement(old,fresh,neighbours){
-  const norm=s=>s.replace(/^\[[^\]]*\]\n/u,'').replace(/[\s\p{P}]/gu,'');
-  const before=norm(old),after=norm(fresh);
-  if(after.length>before.length*1.5+15)return false;
-  return !neighbours.some(n=>{const t=norm(n);return t.length>=12&&[t.slice(0,12),t.slice(-12)].some(piece=>after.includes(piece)&&!before.includes(piece))});
 }
 function finalizedRecords(){
   const epoch=`${translationEpoch}:`;
@@ -321,19 +335,15 @@ async function correctNext(){
   if(activeTranslation||termRequest){if(!correctionTimer)correctionTimer=setTimeout(()=>{correctionTimer=null;correctNext()},500);return}
   const record=correctionQueue.shift(),epoch=translationEpoch,pair=direction.source==='zh_ja';correcting=true;
   const finals=finalizedRecords(),index=finals.indexOf(record);
-  const same=s=>!pair||!record.detected||s.detected===record.detected;
-  const history=finals.slice(Math.max(0,index-2),index).filter(same),next=finals[index+1];
-  const strip=target=>pair?target.replace(/^\[[^\]]*\]\n/u,''):target;
+  const {body,neighbours}=TranslationContext.refinementRequest(finals,index,{source:direction.source,target:direction.target,
+    glossary:$('context').value.trim(),learned:learnedTerms,refine:cloudRefineOn(),tail:transcript.slice(record.end,record.end+120)});
   try{
-    const result=await streamTranslation({text:record.source,source:direction.source,target:pair?'zh':direction.target,detected_language:record.detected||'',
-      history:history.map(s=>s.source).join('\n'),history_translation:history.map(s=>strip(s.target)).join('\n'),
-      following:next&&same(next)?next.source.slice(0,120):transcript.slice(record.end,record.end+120).trim(),glossary:$('context').value.trim(),learned:learnedTerms,refine:cloudRefineOn()});
+    const result=await streamTranslation(body);
     if(epoch!==translationEpoch||segmentRecords.get(record.id)!==record)return;
-    const neighbours=[...history,next].filter(Boolean).map(s=>s.target);
-    if(!plausibleRefinement(record.target,result.text,neighbours)){console.warn('Refinement repeated its context; kept the live translation',record.id);return}
-    record.target=pair?`[${result.source==='zh'?'中文 → 日文':'日文 → 中文'}]\n${result.text}`:result.text;record.version++;
+    if(!TranslationContext.plausibleRefinement(record.target,result.text,neighbours)){console.warn('Refinement repeated its context; kept the live translation',record.id);return}
+    record.target=TranslationContext.labelled(result.text,result.source,pair);record.version++;
     translated=[...segmentRecords.values()].filter(s=>s.id.startsWith(`${epoch}:`)&&s.state==='finalized').map(s=>s.target).join('\n\n');renderTranslation();
-    if(!stream)storeTranscript();
+    if(stream)storeSegments();else storeTranscript();
   }catch(error){console.warn('Correction failed',error.message)}
   finally{correcting=false;setTimeout(correctNext,300)}
 }
@@ -360,21 +370,8 @@ function scheduleTranslation(force=false){
   if(!activeTranslation&&!translationTimer&&transcript.length-translationOffset>=6)translationTimer=setTimeout(()=>{translationTimer=null;runTranslation()},250);
   pauseTimer=setTimeout(()=>{pauseTimer=null;runTranslation()},1000);
 }
-async function streamTranslation(body,signal){
-  const response=await fetch('/api/translate/stream',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body),signal});
-  if(!response.ok)throw new Error((await response.json()).detail||'翻譯失敗');
-  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',result='',source=body.source,target=body.target;
-  while(true){
-    const {value,done}=await reader.read();if(done)break;
-    buffer=(buffer+decoder.decode(value,{stream:true})).replace(/\r\n/g,'\n');
-    let end;while((end=buffer.indexOf('\n\n'))>=0){
-      const event=buffer.slice(0,end);buffer=buffer.slice(end+2);
-      for(const line of event.split('\n')){if(!line.startsWith('data: '))continue;const data=JSON.parse(line.slice(6));if(data.error)throw new Error(data.error);if(typeof data.text==='string')result=data.text;if(data.source)source=data.source;if(data.target)target=data.target}
-    }
-  }
-  if(!result.trim())throw new Error('翻譯服務沒有回傳內容');
-  return {text:result.trim(),source,target};
-}
+// replay_inject.js wraps this to time every request.
+async function streamTranslation(body,signal){return TranslationContext.translateStream(body,signal)}
 async function runTranslation(){
   if(activeTranslation||transcript.length<=translationOffset)return;
   const plan=segmentPlan(flushRequested||finalizeRemaining),segmentEnd=plan.end,final=plan.final;
@@ -406,8 +403,10 @@ async function runTranslation(){
     translationFailures=0;
     const next=pair?`[${result.source==='zh'?'中文 → 日文':'日文 → 中文'}]\n${result.text}`:result.text;
     const id=`${epoch}:${translationOffset}`,previous=segmentRecords.get(id);
-    segmentRecords.set(id,{id,start:translationOffset,end:segmentEnd,source:segment,target:next,detected,version:(previous?.version||0)+1,state:final?'finalized':'tentative'});
-    if(final){translated=[...segmentRecords.values()].filter(s=>s.id.startsWith(`${epoch}:`)&&s.state==='finalized').map(s=>s.target).join('\n\n');translationOffset=segmentEnd;translationHistory.push({source:segment,target:result.text,sourceLanguage:result.source});draftText='';lastDraftSource='';clearTimeout(pauseTimer);renderTranslation();$('translateState').textContent='LIVE';if(!stream&&translationOffset>=transcript.trim().length)storeTranscript();queueRefinement();queueMicrotask(()=>{learnTerms();correctNext()})}
+    // A span starts where the previous one ended and ends at the event that completed its text.
+    const startMs=finalizedRecords().at(-1)?.endMs||0,endMs=Math.max(startMs,MeetingTimeline.endMsAt(timeMarks,segmentEnd,startMs));
+    segmentRecords.set(id,{id,start:translationOffset,end:segmentEnd,source:segment,target:next,detected,startMs,endMs,version:(previous?.version||0)+1,state:final?'finalized':'tentative'});
+    if(final){translated=[...segmentRecords.values()].filter(s=>s.id.startsWith(`${epoch}:`)&&s.state==='finalized').map(s=>s.target).join('\n\n');translationOffset=segmentEnd;translationHistory.push({source:segment,target:result.text,sourceLanguage:result.source});draftText='';lastDraftSource='';clearTimeout(pauseTimer);renderTranslation();$('translateState').textContent='LIVE';if(!stream&&translationOffset>=transcript.trim().length)storeTranscript();storeSegments();queueRefinement();queueMicrotask(()=>{learnTerms();correctNext()})}
     else{draftText=next.replace(/\s*(?:\.{2,}|…+|～)\s*$/u,'');renderTranslation();$('translateState').textContent='暫譯'}
     mayContinue=true;
   }catch(error){

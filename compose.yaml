@@ -91,6 +91,8 @@ services:
       # Behind an HTTPS reverse proxy: trust its X-Forwarded-Proto (uvicorn reads this) and/or force Secure cookies.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
+      # Local dates for the ASR training export's date range.
+      MEETING_TIMEZONE: ${MEETING_TIMEZONE:-Asia/Taipei}
     ports:
       - "${APP_PORT:-18082}:8080"
     depends_on:
