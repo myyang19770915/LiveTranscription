@@ -9,20 +9,36 @@ code { padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); fon
 .meeting-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 10px 0 0; color: var(--muted); font-size: 14px; }
 
 /* Meeting list */
-.export { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; padding: 18px 20px; margin-bottom: 16px; }
-.export-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
-.export-fields label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
-.export-fields .input { min-width: 140px; }
-.export-fields select.input { appearance: auto; }
+.filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 16px 20px; margin-bottom: 18px; }
+.filters label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
+.filters .input { flex: none; width: 150px; }        /* .input grows along a row; here it sits in a column */
+.filters .filter-search { flex: 1 1 220px; }
+.filters .filter-search .input { width: 100%; }
+.filters select.input { appearance: auto; }
+.filters .text-button { height: 40px; }
+.export { padding: 0; margin-top: 24px; }
+.export summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 16px 20px; cursor: pointer; }
+.export summary .hint { margin: 0; }
+.export .filters { margin: 0; padding-top: 0; }
 .meeting-list { display: grid; gap: 10px; }
+.group-title { margin: 14px 0 0; color: var(--muted); font-size: 13px; font-weight: 700; letter-spacing: .08em; }
+.group-title:first-child { margin-top: 0; }
 .meeting { display: flex; align-items: center; gap: 20px; padding: 16px 20px; }
 .meeting-main { flex: 1; min-width: 0; }
-.meeting-when { font-size: 16px; }
+.meeting-title { display: block; font-size: 17px; overflow-wrap: anywhere; }
 .meeting .meeting-meta { margin-top: 6px; }
+.meeting-meta { font-variant-numeric: tabular-nums; }
 .meeting-progress { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; color: var(--muted); }
 
 /* Review */
 .review-page { width: min(1240px, 100%); }
+.title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.title-row h1 { overflow-wrap: anywhere; }
+.rename-title { margin: 10px 0 2px; }
+.rename-title .input { flex: 1 1 320px; font-size: 20px; font-weight: 600; }
+.back-link { display: inline-flex; align-items: center; gap: 4px; margin: -12px 0 18px -6px; padding: 6px 10px 6px 4px; border-radius: 999px; color: var(--muted); font-size: 14px; font-weight: 600; text-decoration: none; }
+.back-link:hover { color: var(--text); background: var(--accent-soft); }
+.back-link svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .review-progress { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; color: var(--muted); }
 .review-progress .bar { width: 200px; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 24px; padding: 14px 20px; margin-bottom: 16px; }
@@ -64,6 +80,8 @@ code { padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); fon
   .seg .chip { display: inline-block; grid-column: 2; grid-row: 1; }   /* admin.css hides chips on phones */
   .seg-source, .seg-target, .edit-form { grid-column: 1 / -1; }
   .meeting { flex-wrap: wrap; }
+  .filters label { flex: 1 1 140px; }
+  .filters .input { width: 100%; }
   .meeting-progress { align-items: flex-start; }
   .review-progress { align-items: flex-start; }
 }

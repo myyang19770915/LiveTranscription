@@ -848,6 +848,98 @@ class AsrExportTests(ReviewApiTests):
         self.assertEqual(old.read("manifest.jsonl"), b"")
 
 
+class MeetingCatalogTests(AccountTestCase):
+    """Topics, filters and creators of the meeting list (spec meeting-catalog)."""
+
+    def setUp(self):
+        super().setUp()
+        self.ldap.add("carol", "pw-carol")
+        self.rd = self.team("研發", "alice", "bob")
+        self.sales = self.team("業務", "alice")
+        self.hr = self.team("人資", "carol")
+
+    def create(self, username, team_id, title="", started=None):
+        response = self.signed_in(username).post("/api/meetings", json={"team_id": team_id, "language": "zh", "title": title})
+        if started and response.status_code == 201:
+            with psycopg.connect(TEST_DATABASE_URL) as conn:
+                conn.execute("UPDATE meetings SET started_at = %s WHERE id = %s", (started, response.json()["id"]))
+        return response
+
+    def titles(self, client, **params):
+        return sorted(m["title"] for m in client.get("/api/meetings", params=params).json())
+
+    def test_topic_input_is_trimmed_optional_and_limited(self):
+        self.assertEqual(self.create("alice", self.rd, "  週會  ").status_code, 201)
+        self.assertEqual(self.create("alice", self.rd, "").status_code, 201)
+        self.assertEqual(self.create("alice", self.rd, "長" * 101).status_code, 422)
+        self.assertEqual(self.create("alice", self.rd, " " + "長" * 100 + " ").status_code, 201)  # trimmed first
+        self.assertEqual(sorted(r[0] for r in self.query("SELECT title FROM meetings")), ["", "週會", "長" * 100])
+        meeting = self.query("SELECT id::text FROM meetings WHERE title = '週會'")[0][0]
+        self.assertEqual(self.signed_in("alice").get(f"/api/meetings/{meeting}").json()["title"], "週會")
+
+    def test_member_renames_and_clears_the_topic(self):
+        meeting = self.create("alice", self.rd, "週會").json()["id"]
+        bob = self.signed_in("bob")
+        self.assertEqual(bob.patch(f"/api/meetings/{meeting}", json={"title": " Q4 規劃 "}).json(), {"id": meeting, "title": "Q4 規劃"})
+        self.assertEqual(self.titles(bob), ["Q4 規劃"])
+        bob.patch(f"/api/meetings/{meeting}", json={"title": ""})
+        self.assertEqual(self.titles(bob), [""])
+        self.assertEqual(bob.patch(f"/api/meetings/{meeting}", json={"title": "長" * 101}).status_code, 422)
+
+    def test_member_of_another_team_cannot_rename(self):
+        meeting = self.create("alice", self.rd, "週會").json()["id"]
+        self.assertEqual(self.signed_in("carol").patch(f"/api/meetings/{meeting}", json={"title": "改掉"}).status_code, 404)
+        self.assertEqual(self.query("SELECT title FROM meetings"), [("週會",)])
+
+    def test_keyword_matches_topics_case_insensitively(self):
+        for title in ("研發週會", "業務週會", "客戶訪談", "Weekly Sync"):
+            self.create("alice", self.rd, title)
+        alice = self.signed_in("alice")
+        self.assertEqual(self.titles(alice, q="週會"), ["業務週會", "研發週會"])
+        self.assertEqual(self.titles(alice, q="weekly"), ["Weekly Sync"])
+
+    def test_keyword_wildcards_are_literal(self):
+        for title in ("成長 50%", "成長 50 倍", "a_b", "axb"):
+            self.create("alice", self.rd, title)
+        alice = self.signed_in("alice")
+        self.assertEqual(self.titles(alice, q="50%"), ["成長 50%"])
+        self.assertEqual(self.titles(alice, q="a_b"), ["a_b"])
+
+    def test_combined_filters(self):
+        self.create("alice", self.rd, "研發 1101", "2026-11-01 10:00+08")
+        self.create("bob", self.rd, "研發週會", "2026-11-03 10:00+08")
+        self.create("alice", self.sales, "業務 1104", "2026-11-04 10:00+08")
+        self.create("carol", self.hr, "人資週會", "2026-11-02 10:00+08")
+        alice = self.signed_in("alice")
+        self.assertEqual(self.titles(alice, team=self.rd), ["研發 1101", "研發週會"])
+        self.assertEqual(self.titles(alice, **{"from": "2026-11-01", "to": "2026-11-03"}), ["研發 1101", "研發週會"])
+        self.assertEqual(self.titles(alice, creator="bob", q="週會"), ["研發週會"])
+        self.assertEqual(alice.get("/api/meetings", params={"team": self.hr}).status_code, 404)
+
+    def test_local_date_boundary(self):
+        self.create("alice", self.rd, "跨日", "2026-11-03 23:30+08")  # 15:30 UTC, still 11/03 in Taipei
+        self.assertEqual(self.titles(self.signed_in("alice"), **{"from": "2026-11-03", "to": "2026-11-03"}), ["跨日"])
+
+    def test_filters_apply_before_the_500_limit(self):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("INSERT INTO meetings (team_id, created_by, language, engine, title, started_at) "
+                         "SELECT %s, 'alice', 'zh', 'local', 'old ' || g, timestamptz '2026-01-01 10:00+08' + g * interval '1 hour' "
+                         "FROM generate_series(1, 10) g", (self.rd,))
+            conn.execute("INSERT INTO meetings (team_id, created_by, language, engine, title, started_at) "
+                         "SELECT %s, 'alice', 'zh', 'local', 'new ' || g, timestamptz '2026-06-01 10:00+08' + g * interval '1 hour' "
+                         "FROM generate_series(1, 500) g", (self.rd,))
+        alice = self.signed_in("alice")
+        self.assertFalse(any(m["title"].startswith("old") for m in alice.get("/api/meetings").json()))
+        self.assertEqual(len(self.titles(alice, **{"from": "2026-01-01", "to": "2026-01-31"})), 10)
+
+    def test_creators_are_only_from_the_users_teams(self):
+        self.create("bob", self.rd, "a")
+        self.create("alice", self.sales, "b")
+        self.create("carol", self.hr, "c")
+        creators = self.signed_in("alice").get("/api/meetings/creators").json()
+        self.assertEqual([c["username"] for c in creators], ["alice", "bob"])
+
+
 class DatabaseTests(DatabaseTestCase):
     def test_migrations_apply_once(self):
         with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
@@ -864,7 +956,7 @@ class DatabaseTests(DatabaseTestCase):
         self.assertLessEqual({"users", "teams", "team_members", "sessions", "login_failures", "meetings", "meeting_files",
                               "segments", "segment_history"}, tables)
         columns = {row[0] for row in self.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'meetings'")}
-        self.assertLessEqual({"source_language", "target_language", "glossary", "learned_terms", "audio_bytes", "ended_at"}, columns)
+        self.assertLessEqual({"source_language", "target_language", "glossary", "learned_terms", "audio_bytes", "ended_at", "title"}, columns)
 
 
 class SignInTests(AccountTestCase):

@@ -7,13 +7,14 @@ non-member gets the same 404 as for a meeting that does not exist.
 import asyncio
 import os
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
 from psycopg.errors import UniqueViolation
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 import auth
 import db
@@ -22,6 +23,8 @@ import meeting_audio
 router = APIRouter()
 NOT_FOUND = "找不到會議"
 TEAM_NOT_FOUND = "找不到團隊"
+# Local dates for date filters and the ASR training export.
+MEETING_TIMEZONE = os.getenv("MEETING_TIMEZONE", "Asia/Taipei")
 # Meeting files land in output/teams/<team id>/<meeting id>/ (compose mounts the project's output/ folder).
 OUTPUT_DIR = Path(os.getenv("MEETING_OUTPUT_DIR", "/output"))
 MAX_MEETING_BYTES = 1 << 30
@@ -136,10 +139,20 @@ async def require_member(conn, user: auth.User, meeting_id: str) -> dict:
     return row
 
 
+TITLE_MAX = 100
+# Surrounding spaces are removed before the length is checked.
+Title = Annotated[str, StringConstraints(strip_whitespace=True, max_length=TITLE_MAX)]
+
+
 class NewMeeting(BaseModel):
     team_id: int
     language: str = Field(min_length=1, max_length=16)
     engine: str = Field(default="local", pattern="^(local|hybrid|mai)$")
+    title: Title = ""
+
+
+class MeetingTitle(BaseModel):
+    title: Title
 
 
 @router.post("/api/meetings", status_code=201)
@@ -148,26 +161,72 @@ async def create_meeting(body: NewMeeting, user: auth.CurrentUser):
         if not await is_member(conn, user.username, body.team_id):
             raise HTTPException(status_code=404, detail=TEAM_NOT_FOUND)
         row = await (await conn.execute(
-            "INSERT INTO meetings (team_id, created_by, language, engine) VALUES (%s, %s, %s, %s) RETURNING id",
-            (body.team_id, user.username, body.language, body.engine))).fetchone()
+            "INSERT INTO meetings (team_id, created_by, language, engine, title) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (body.team_id, user.username, body.language, body.engine, body.title.strip()))).fetchone()
     return {"id": str(row["id"])}
 
 
+def like_pattern(keyword: str) -> str:
+    """Substring pattern for ILIKE ... ESCAPE '\\': the keyword's own % _ \\ match literally."""
+    return "%" + keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
 @router.get("/api/meetings")
-async def list_meetings(user: auth.CurrentUser):
+async def list_meetings(user: auth.CurrentUser, team: int | None = None, start: date | None = Query(None, alias="from"),
+                        end: date | None = Query(None, alias="to"), creator: str = Query("", max_length=256),
+                        q: str = Query("", max_length=TITLE_MAX)):
+    """The user's teams' meetings, newest first; every filter applies before the 500-meeting limit."""
+    where, params = [], {"user": user.username, "tz": MEETING_TIMEZONE}
+    if team is not None:
+        where.append("m.team_id = %(team)s")
+        params["team"] = team
+    if start:
+        where.append("(m.started_at AT TIME ZONE %(tz)s)::date >= %(start)s")
+        params["start"] = start
+    if end:
+        where.append("(m.started_at AT TIME ZONE %(tz)s)::date <= %(end)s")
+        params["end"] = end
+    if creator.strip():
+        where.append("m.created_by = %(creator)s")
+        params["creator"] = creator.strip().lower()
+    if q.strip():
+        where.append("m.title ILIKE %(q)s ESCAPE '\\'")
+        params["q"] = like_pattern(q.strip())
     async with db.connect() as conn:
+        if team is not None and not await is_member(conn, user.username, team):
+            raise HTTPException(status_code=404, detail=TEAM_NOT_FOUND)
         rows = await (await conn.execute(
-            "SELECT m.id, m.team_id, t.name AS team_name, m.started_at, m.created_by, m.language, m.engine, m.audio_bytes, "
+            "SELECT m.id, m.team_id, t.name AS team_name, m.started_at, m.created_by, m.language, m.engine, m.audio_bytes, m.title, "
             "count(s.seq) AS segments, count(s.seq) FILTER (WHERE s.state <> 'unreviewed') AS reviewed "
             "FROM meetings m JOIN teams t ON t.id = m.team_id "
-            "JOIN team_members tm ON tm.team_id = m.team_id AND tm.username = %s "
+            "JOIN team_members tm ON tm.team_id = m.team_id AND tm.username = %(user)s "
             "LEFT JOIN segments s ON s.meeting_id = m.id "
-            "GROUP BY m.id, t.name ORDER BY m.started_at DESC LIMIT 500",
-            (user.username,))).fetchall()
+            + "".join(f"{'WHERE' if i == 0 else 'AND'} {condition} " for i, condition in enumerate(where))
+            + "GROUP BY m.id, t.name ORDER BY m.started_at DESC LIMIT 500", params)).fetchall()
     return [{"id": str(row["id"]), "teamId": row["team_id"], "team": row["team_name"], "startedAt": row["started_at"].isoformat(),
-             "createdBy": row["created_by"], "language": row["language"], "engine": row["engine"],
+             "title": row["title"], "createdBy": row["created_by"], "language": row["language"], "engine": row["engine"],
              "durationMs": duration, "segments": row["segments"], "reviewed": row["reviewed"]}
             for row, duration in zip(rows, await asyncio.to_thread(lambda: [recorded_ms(row, repair=False) for row in rows]))]
+
+
+@router.get("/api/meetings/creators")
+async def meeting_creators(user: auth.CurrentUser):
+    """Who created meetings in the user's own teams (for the list's creator filter)."""
+    async with db.connect() as conn:
+        rows = await (await conn.execute(
+            "SELECT DISTINCT m.created_by, coalesce(nullif(u.display_name, ''), m.created_by) AS display_name FROM meetings m "
+            "JOIN team_members tm ON tm.team_id = m.team_id AND tm.username = %s LEFT JOIN users u ON u.username = m.created_by "
+            "ORDER BY m.created_by", (user.username,))).fetchall()
+    return [{"username": r["created_by"], "displayName": r["display_name"]} for r in rows]
+
+
+@router.patch("/api/meetings/{meeting_id}")
+async def rename_meeting(meeting_id: str, body: MeetingTitle, user: auth.CurrentUser):
+    """Any member of the meeting's team may change or clear its topic."""
+    async with db.connect() as conn:
+        meeting = await require_member(conn, user, meeting_id)
+        await conn.execute("UPDATE meetings SET title = %s WHERE id = %s", (body.title.strip(), meeting["id"]))
+    return {"id": str(meeting["id"]), "title": body.title.strip()}
 
 
 @router.get("/api/meetings/{meeting_id}")
@@ -182,6 +241,7 @@ async def get_meeting(meeting_id: str, user: auth.CurrentUser):
             "FROM segments WHERE meeting_id = %s ORDER BY seq", (meeting["id"],))).fetchall()
     duration = await asyncio.to_thread(recorded_ms, meeting)
     return {"id": str(meeting["id"]), "teamId": meeting["team_id"], "team": team["name"], "startedAt": meeting["started_at"].isoformat(),
+            "title": meeting["title"],
             "createdBy": meeting["created_by"], "language": meeting["language"], "engine": meeting["engine"],
             "sourceLanguage": meeting["source_language"], "targetLanguage": meeting["target_language"],
             "glossary": meeting["glossary"], "learned": meeting["learned_terms"],

@@ -186,9 +186,6 @@ async def segment_history(meeting_id: str, seq: int, user: auth.CurrentUser):
 
 # --- ASR training export --------------------------------------------------------------------------
 
-MEETING_TIMEZONE = os.getenv("MEETING_TIMEZONE", "Asia/Taipei")
-
-
 @router.get("/api/teams/{team_id}/asr-export")
 async def asr_export(team_id: int, user: auth.CurrentUser, start: date = Query(alias="from"), end: date = Query(alias="to")):
     """Zip of every confirmed or edited segment of the team's meetings started in [from, to] (local dates):
@@ -201,7 +198,7 @@ async def asr_export(team_id: int, user: auth.CurrentUser, start: date = Query(a
             "(SELECT h.username FROM segment_history h WHERE h.meeting_id = s.meeting_id AND h.seq = s.seq ORDER BY h.id DESC LIMIT 1) AS reviewed_by "
             "FROM segments s JOIN meetings m ON m.id = s.meeting_id "
             "WHERE m.team_id = %s AND (m.started_at AT TIME ZONE %s)::date BETWEEN %s AND %s AND s.state <> 'unreviewed' "
-            "ORDER BY m.started_at, s.seq", (team_id, MEETING_TIMEZONE, start, end))).fetchall()
+            "ORDER BY m.started_at, s.seq", (team_id, team_access.MEETING_TIMEZONE, start, end))).fetchall()
     archive = await asyncio.to_thread(build_export, rows)
     name = f"asr-export-team{team_id}-{start:%Y%m%d}-{end:%Y%m%d}.zip"
     return FileResponse(archive, media_type="application/zip", filename=name, background=BackgroundTask(os.unlink, archive))

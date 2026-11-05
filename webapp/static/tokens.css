@@ -40,3 +40,9 @@
   --danger-soft: #b2442f14;
   --warn: #8a5a00;
 }
+
+/* One typeface everywhere: form controls and code otherwise fall back to the browser's own fonts,
+   and inputs inside a bold label would inherit its weight. */
+button, input, select, textarea { font: inherit; }
+input, select, textarea { font-weight: 400; }
+code, kbd { font-family: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono", monospace; font-size: .88em; }

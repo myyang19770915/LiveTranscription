@@ -76,12 +76,14 @@ select { padding-top: 9px; }
 /* The audio hint, learned terms and the cloud switch share the hint cell, stacked. */
 .hint-stack { grid-area: hint !important; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 /* The page-wide select/input rule is width:100%; these sit inline in a hint line (also in the mobile dialog). */
-#cloudRefineRow, #asrEngineRow, #teamRow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#cloudRefineRow, #asrEngineRow, #teamRow, #topicRow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 #cloudRefineRow { cursor: pointer; }
 #cloudRefineRow input { width: auto; margin: 0; padding: 0; accent-color: #58d893; }
 #asrEngineRow select, #teamRow select { width: auto; max-width: 100%; padding: 1px 6px; font-size: inherit; color: inherit;
   border: 1px solid var(--line, #29302d); border-radius: 6px; background: transparent; }
 #cloudRefineRow span, #asrEngineRow span, #teamRow span { opacity: .75; }
+#topicRow input { width: min(22em, 100%); padding: 2px 8px; font-size: inherit; color: inherit;
+  border: 1px solid var(--line, #29302d); border-radius: 6px; background: transparent; }
 .source-hint {
   grid-area: hint !important;
   padding: 1px 4px 2px;

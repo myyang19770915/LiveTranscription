@@ -6,7 +6,6 @@ body {
   color: var(--text);
   background: radial-gradient(ellipse 60% 30% at 50% -10%, var(--glow), transparent 70%), var(--page);
 }
-button, input { font: inherit; }
 [hidden] { display: none !important; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 

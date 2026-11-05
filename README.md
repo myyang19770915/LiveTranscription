@@ -284,7 +284,10 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 
 ## 會後校對
 
-會議結束後，從頁首「會議紀錄」（`/meetings`）進入。列表只顯示你所屬團隊的會議，每場標示已校對幾段；按「校對」開啟 `/meetings/<會議 id>`。
+會議結束後，從頁首「會議紀錄」（`/meetings`）進入。列表只顯示你所屬團隊的會議，每場標示已校對幾段；按「校對」開啟 `/meetings/<會議 id>`，「返回會議紀錄」會回到原本的列表（篩選條件保留）。
+
+- **會議主題**：開始會議前可在「團隊」旁填主題（選填，最多 100 字）；沒填時顯示「MM/DD HH:mm 的會議」。會後在校對頁按「修改主題」可改或清空，團隊成員都能改。
+- **找會議**：列表可依團隊、建立者、開始日期區間篩選，並以關鍵字搜尋主題（不分大小寫；逐字稿內容不在搜尋範圍內）。結果依「今天」「本週」（週一起算）「更早」分組；篩選條件會寫進網址，重新整理或分享連結都會保留。
 
 - **對照錄音**：轉錄、譯文、錄音三者用同一條時間軸。伺服器把送去辨識的同一份音訊存成 `audio.wav`，每個辨識事件附上當下的音訊位置（`audioMs`），每段因此知道自己在錄音的哪裡。點一段就播放那段；文字比聲音晚到，所以播放會往前多放 3 秒、往後 0.5 秒（`bench/lagcheck.py` 實測中日文落後中位 0.5–3.8 秒），還可以再「往前 2 秒」「往後 2 秒」。
 - **修正轉錄**：按「修改原文」，改完「儲存並重譯」。重譯和會議中的精修用同一份程式（`webapp/static/translation-context.js`）：前兩段原文與譯文作上下文、附後一段開頭、會議詞彙、自動學習詞彙，可勾選雲端精修，並套用相同的防重複檢查。完成後可「一併重譯下一段」（它的前文變了）。
@@ -319,7 +322,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `LDAP_DISPLAY_ATTR` | `displayName` | 頁首顯示的名稱欄位 |
 | `LDAP_CA_FILE` | 空 | ldaps 使用自簽 CA 時，容器內可讀到的 CA 憑證路徑 |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 前面有 HTTPS 反向代理時，填代理的 IP，app 才會相信它轉來的 `https` |
-| `MEETING_TIMEZONE` | `Asia/Taipei` | 匯出 ASR 微調資料時，日期區間以這個時區的會議開始日期計算 |
+| `MEETING_TIMEZONE` | `Asia/Taipei` | 會議列表的日期篩選與 ASR 微調資料匯出，都以這個時區的會議開始日期計算 |
 | `SESSION_COOKIE_SECURE` | 空 | 以 HTTPS 對外提供時設 `1`，登入 cookie 一律加上 Secure，不會經由明文 HTTP 送出 |
 
 **辨識引擎**（頁面選單，預設本機）：
@@ -339,6 +342,9 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `GET /admin`、`/api/admin/teams…` | 團隊管理（限系統管理員） |
 | `POST /api/meetings`、`GET /api/meetings`、`GET /api/meetings/{id}` | 建立會議（需指定自己的團隊）、列出與讀取自己團隊的會議 |
 | `GET /meetings`、`GET /meetings/{id}` | 會議紀錄列表、會後校對頁 |
+| `GET /api/meetings?team=&from=&to=&creator=&q=` | 會議列表（自己團隊）；參數皆選填：團隊 id、開始日期區間（`YYYY-MM-DD`，`MEETING_TIMEZONE` 當地日期）、建立者帳號、主題關鍵字 |
+| `GET /api/meetings/creators` | 自己團隊中建立過會議的人（篩選選單用） |
+| `PATCH /api/meetings/{id}` | 修改主題 `{title}`（最多 100 字，空字串＝清除） |
 | `PUT /api/meetings/{id}/segments` | 會議頁保存定稿段落（依序號更新，不覆蓋已校對的段落） |
 | `GET /api/meetings/{id}/audio?start=&end=` | 錄音區間（毫秒），回傳 WAV |
 | `POST /api/meetings/{id}/segments/{seq}/edit`、`/translation`、`/confirm` | 修改原文、寫入重譯結果、確認正確；都帶 `version`，過期回 409 |

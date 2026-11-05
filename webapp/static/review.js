@@ -144,8 +144,7 @@ function render(){
 async function load(){
   meeting=await call('GET',`/api/meetings/${meetingId}`);
   segments=meeting.segments;
-  const d=new Date(meeting.startedAt);
-  $('title').textContent=`${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())} 的會議`;
+  showTitle();
   const source=meeting.sourceLanguage||meeting.language,target=meeting.targetLanguage;
   $('meta').replaceChildren(el('span',{className:'count',textContent:meeting.team}),
     el('span',{textContent:meeting.hasRecording?`錄音 ${clock(meeting.durationMs)}`:'沒有錄音'}),
@@ -154,6 +153,26 @@ async function load(){
   if(!segments.length)$('segments').replaceChildren(el('div',{className:'card empty'},el('b',{textContent:'這場會議沒有段落'}),el('p',{textContent:'會議中定稿的段落才會出現在這裡。'})));
   else render();
 }
+// Back to the list the reviewer came from (keeps its scroll position); a direct link falls back to /meetings.
+// The list keeps its filters in its address, so the referrer is the list exactly as the reviewer left it.
+$('back').onclick=event=>{
+  try{
+    const from=document.referrer&&new URL(document.referrer);
+    if(!from||from.origin!==location.origin||from.pathname!=='/meetings')return;
+    event.preventDefault();
+    if(history.length>1)history.back();else location.href=from.href;
+  }catch{}
+};
+// 主題: any team member can change or clear it; a cleared topic shows the start time again.
+function showTitle(){$('title').textContent=MeetingCatalog.displayTitle(meeting);document.title=`${$('title').textContent} — 語橋 Live`}
+function renaming(on){$('titleRow').hidden=on;$('renameForm').hidden=!on;if(on){$('titleInput').value=meeting.title||'';$('titleInput').focus()}}
+$('renameButton').onclick=()=>renaming(true);
+$('renameCancel').onclick=()=>renaming(false);
+$('renameForm').onsubmit=async event=>{
+  event.preventDefault();const button=event.submitter;button.disabled=true;
+  try{meeting.title=(await call('PATCH',`/api/meetings/${meetingId}`,{title:$('titleInput').value})).title;showTitle();renaming(false)}
+  catch(error){notice(error.message)}finally{button.disabled=false}
+};
 fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine})=>{$('refineRow').hidden=!cloudRefine}).catch(()=>{});
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
 load().catch(error=>notice(error.message));
