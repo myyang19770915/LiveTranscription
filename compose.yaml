@@ -93,6 +93,10 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
       # Local dates for the ASR training export's date range.
       MEETING_TIMEZONE: ${MEETING_TIMEZONE:-Asia/Taipei}
+      # Minutes model (OpenAI-compatible, large context); unset = the 雲端精修 model above.
+      MINUTES_URL: ${MINUTES_URL:-}
+      MINUTES_MODEL: ${MINUTES_MODEL:-}
+      MINUTES_KEY: ${MINUTES_KEY:-}
     ports:
       - "${APP_PORT:-18082}:8080"
     depends_on:

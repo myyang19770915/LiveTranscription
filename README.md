@@ -298,6 +298,19 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 
 **資料保存**：錄音在 `output/teams/<團隊 id>/<會議 id>/audio.wav`，每小時約 115 MB（16 kHz × 16 bit × 單聲道 = 32 KB/s）；段落、修改紀錄與會議詞彙在 Postgres（`segments`、`segment_history`）。本功能上線前的會議沒有段落資料，列表中顯示「沒有校對資料」。
 
+## 會議紀要
+
+會議紀錄列表或校對頁按「紀要」，進入 `/meetings/<會議 id>/minutes`。
+
+- **產生紀要**：整場逐字稿（校對後的原文）一次送給紀要模型，不分段；模型整理出摘要與四類條目：決議、待辦、待確認問題、風險。15 段的會議實測約 9 秒（deepseek-v4-flash）。產生時整場逐字稿會傳送到外部模型服務，頁面會註明。
+- **每條都有證據**：條目必須引用逐字稿的段落編號，點時間點會開啟校對頁的那一段（可播放錄音）；引用不存在段落的條目一律不採用，頁面會顯示略過幾條。
+- **負責人與到期日**：負責人只能是會議所屬團隊的成員；模型提到但不在團隊裡的人名會顯示為「模型提到『小王』，不是團隊成員」，負責人保持「未指派」。到期日依會議日期換算（例如會議在 11/04 週三，「下週五」為 11/13），並保留原話。
+- **人工確認**：AI 條目一開始是「待確認」。團隊成員可以改內容、類型、負責人、到期日，按「確認」或「駁回」，也可以手動新增（手動新增視為已確認）。摘要可編輯。兩人同時修改時，後送出的人會看到「這個條目已被其他人修改，已重新載入」。
+- **重新產生**：只替換仍「待確認」的 AI 條目；已確認、已駁回、手動新增的條目與編輯過的摘要都保留，也不會重複產生相同內容。
+- **下載 Markdown**：只包含已確認的條目，待辦附負責人與到期日，每條附錄音時間點。
+
+**紀要模型**：`MINUTES_URL`、`MINUTES_MODEL`、`MINUTES_KEY`（OpenAI 相容），沒設定時沿用雲端精修的 `TRANSLATE_REFINE_*`。之後改用 context 更大的模型，或指向本機部署的大模型，只需修改這三個設定並 `docker compose up -d app`。
+
 ## 設定參考
 
 | `.env` 變數 | 預設值 | 說明 |
@@ -322,7 +335,8 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `LDAP_DISPLAY_ATTR` | `displayName` | 頁首顯示的名稱欄位 |
 | `LDAP_CA_FILE` | 空 | ldaps 使用自簽 CA 時，容器內可讀到的 CA 憑證路徑 |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 前面有 HTTPS 反向代理時，填代理的 IP，app 才會相信它轉來的 `https` |
-| `MEETING_TIMEZONE` | `Asia/Taipei` | 會議列表的日期篩選與 ASR 微調資料匯出，都以這個時區的會議開始日期計算 |
+| `MEETING_TIMEZONE` | `Asia/Taipei` | 會議列表的日期篩選、紀要的會議日期與 ASR 微調資料匯出，都以這個時區計算 |
+| `MINUTES_URL` / `_MODEL` / `_KEY` | 空（沿用 `TRANSLATE_REFINE_*`） | 產生會議紀要的模型（OpenAI 相容，整場一次送出，需足夠的 context） |
 | `SESSION_COOKIE_SECURE` | 空 | 以 HTTPS 對外提供時設 `1`，登入 cookie 一律加上 Secure，不會經由明文 HTTP 送出 |
 
 **辨識引擎**（頁面選單，預設本機）：
@@ -350,6 +364,10 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `POST /api/meetings/{id}/segments/{seq}/edit`、`/translation`、`/confirm` | 修改原文、寫入重譯結果、確認正確；都帶 `version`，過期回 409 |
 | `GET /api/meetings/{id}/segments/{seq}/history` | 段落的修改紀錄 |
 | `GET /api/teams/{team}/asr-export?from=&to=` | 匯出 ASR 微調資料 zip |
+| `GET /meetings/{id}/minutes` | 會議紀要頁 |
+| `GET /api/meetings/{id}/minutes`、`POST …/minutes/generate` | 紀要內容與狀態；在背景產生（執行中 409、模型未設定 400、沒有段落 422） |
+| `PATCH …/minutes/summary`、`POST …/minutes/items`、`PATCH …/minutes/items/{itemId}`、`POST …/items/{itemId}/confirm`、`…/reject` | 編輯摘要、新增、修改、確認、駁回條目（皆帶 `version`，過期回 409） |
+| `GET /api/meetings/{id}/minutes.md` | 下載 Markdown 會議紀錄（只含已確認條目） |
 | `PUT /api/meetings/{id}/files/{recording\|transcript}` | 儲存會議錄音或逐字稿到 `output/teams/<團隊>/<會議>/` |
 | `WS /ws/transcribe` | 瀏覽器至 app 的即時 PCM 音訊 WebSocket；首包需帶 `meeting_id`，非團隊成員以關閉碼 4404 拒絕 |
 | `POST /api/translate` | 請求 Gemma 文字翻譯；JSON 欄位為 `text`、`source`、`target` 和可選 `history` |

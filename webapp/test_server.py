@@ -11,10 +11,11 @@ import time
 import wave
 import zipfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import psycopg
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
@@ -25,6 +26,7 @@ import auth
 import db
 import mai_asr
 import meeting_audio
+import minutes
 from server import (TO_TRADITIONAL, TranscriptDisplay, TranslationRequest, app, asr_engine, detect_pair_language,
                     resolve_translation_direction, translation_backend, translation_payload)
 from translation_quality import consolidate_terms, parse_discovered_terms, policy
@@ -940,6 +942,235 @@ class MeetingCatalogTests(AccountTestCase):
         self.assertEqual([c["username"] for c in creators], ["alice", "bob"])
 
 
+MEMBERS = [{"username": "alice", "display_name": "王愛麗"}, {"username": "bob", "display_name": "bob"}]
+
+
+class MinutesRulesTests(unittest.TestCase):
+    """Pure validation rules of meeting-minutes (the spec's example tables)."""
+
+    def item(self, **kw):
+        return {"kind": "action", "content": "整理報價", "owner": "", "due_text": "", "due_date": "", "evidence": [3], **kw}
+
+    def test_evidence_filtering(self):
+        seqs = set(range(1, 21))
+        for cited, stored in (([3, 7], [3, 7]), ([7, 99], [7]), ([99], None), ([], None)):
+            items, dropped = minutes.clean_items([self.item(evidence=cited)], seqs, MEMBERS)
+            self.assertEqual(items[0]["evidence"] if items else None, stored, cited)
+            self.assertEqual(dropped, 0 if stored else 1, cited)
+
+    def test_owner_matching(self):
+        for name, owner, hint in (("Alice", "alice", ""), ("王愛麗", "alice", ""), ("小王", None, "小王"), ("", None, "")):
+            self.assertEqual(minutes.match_owner(name, MEMBERS), (owner, hint), name)
+
+    def test_due_dates_keep_the_phrase(self):
+        for due_text, due_date, stored in (("下週五", "2026-11-13", date(2026, 11, 13)), ("月底前", "2026-11-31", None)):
+            items, _ = minutes.clean_items([self.item(due_text=due_text, due_date=due_date)], {3}, MEMBERS)
+            self.assertEqual((items[0]["due_date"], items[0]["due_text"]), (stored, due_text))
+
+    def test_same_item_twice_is_stored_once_with_merged_evidence(self):
+        items, _ = minutes.clean_items([self.item(content="整理報價。", evidence=[3]), self.item(content="整理 報價", evidence=[5]),
+                                        self.item(kind="risk", content="整理報價", evidence=[5]), {"kind": "memo", "content": "x", "evidence": [3]}],
+                                       {3, 5}, MEMBERS)
+        self.assertEqual([(i["kind"], i["evidence"]) for i in items], [("action", [3, 5]), ("risk", [5])])
+
+    def test_prompt_sends_the_whole_meeting_once(self):
+        meeting = {"started_at": datetime(2026, 11, 4, 15, 37, tzinfo=timezone.utc), "title": "週會"}
+        segments = [{"seq": i, "source": f"第{i}句"} for i in range(1, 43)]
+        messages = minutes.build_messages(meeting, segments, MEMBERS)
+        user = messages[-1]["content"]
+        self.assertEqual(len(messages), 2)
+        self.assertIn("會議日期：2026-11-04（星期三）", user)
+        self.assertIn("- alice（王愛麗）", user)
+        self.assertEqual([line for line in user.splitlines() if line.startswith("[")], [f"[{i}] 第{i}句" for i in range(1, 43)])
+
+    def test_answer_in_a_code_fence_is_read(self):
+        self.assertEqual(minutes.parse_answer('```json\n{"summary": "s", "items": []}\n```'), {"summary": "s", "items": []})
+
+
+class MinutesApiTests(ReviewTestCase):
+    def setUp(self):
+        super().setUp()
+        self.ldap.add("carol", "pw-carol")
+        self.alice, self.meeting = self.signed_in("alice"), self.meeting_id()
+        self.team_id = self.query("SELECT team_id FROM meetings")[0][0]
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("INSERT INTO team_members (team_id, username, added_by) VALUES (%s, 'bob', 'admin')", (self.team_id,))
+        self.save(self.alice, self.meeting, [(f"第{i}句", f"S{i}") for i in range(1, 21)])
+        for name, value in (("minutes.MINUTES_URL", "http://model"), ("minutes.MINUTES_MODEL", "m")):
+            p = patch(name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def answer(self, items, summary="本次討論報價。"):
+        return json.dumps({"summary": summary, "items": items}, ensure_ascii=False)
+
+    def generate(self, answer, client=None, observe=None):
+        """Start generation with a fake model and wait for it inside a running client.
+
+        observe(client) runs while the model call is still in progress."""
+        calls, release = [], asyncio.Event() if observe else None
+
+        async def model(messages):
+            calls.append(messages)
+            if release:
+                for _ in range(500):
+                    if release.is_set():
+                        break
+                    await asyncio.sleep(0.01)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        with patch("minutes.call_model", model), (client or self.signed_in("alice")) as running:
+            response = running.post(f"/api/meetings/{self.meeting}/minutes/generate")
+            if observe:
+                observe(running)
+                release.set()
+            for _ in range(100):
+                state = running.get(f"/api/meetings/{self.meeting}/minutes").json()
+                if state["status"] != "running":
+                    break
+                time.sleep(0.02)
+        return response, state, calls
+
+    def items(self):
+        return self.alice.get(f"/api/meetings/{self.meeting}/minutes").json()["items"]
+
+    def test_generation_sends_all_segments_once_and_finishes(self):
+        seen = []
+
+        def while_running(client):
+            seen.append(client.get(f"/api/meetings/{self.meeting}/minutes").json()["status"])
+            second = client.post(f"/api/meetings/{self.meeting}/minutes/generate")
+            seen.append((second.status_code, second.json()["detail"]))
+            seen.append(client.get(f"/api/meetings/{self.meeting}/minutes").json()["status"])
+        response, state, calls = self.generate(observe=while_running, answer=self.answer([
+            {"kind": "decision", "content": "採用新報價", "evidence": [2]},
+            {"kind": "action", "content": "寄出報價", "owner": "王愛麗", "due_text": "下週五", "due_date": "2026-11-13", "evidence": [4, 99]},
+            {"kind": "risk", "content": "沒有證據的風險", "evidence": [99]}]))
+        self.assertEqual(response.status_code, 202)
+        # Running until the model answers; a second start is refused and the first one carries on.
+        self.assertEqual(seen, ["running", (409, "紀要正在產生中"), "running"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(sum(1 for line in calls[0][-1]["content"].splitlines() if line.startswith("[")), 20)
+        self.assertEqual((state["status"], state["dropped"], state["summary"]), ("done", 1, "本次討論報價。"))
+        action = next(i for i in state["items"] if i["kind"] == "action")
+        self.assertEqual((action["owner"], action["ownerName"], action["dueDate"], action["dueText"], action["state"]),
+                         ("alice", "王愛麗", "2026-11-13", "下週五", "proposed"))
+        self.assertEqual([e["seq"] for e in action["evidence"]], [4])
+
+    def test_second_start_while_running_is_409(self):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("INSERT INTO minutes (meeting_id, status) VALUES (%s, 'running')", (self.meeting,))
+        response = self.alice.post(f"/api/meetings/{self.meeting}/minutes/generate")
+        self.assertEqual((response.status_code, response.json()["detail"]), (409, "紀要正在產生中"))
+        self.assertEqual(self.query("SELECT status FROM minutes"), [("running",)])
+
+    def test_failed_model_keeps_existing_items(self):
+        self.alice.post(f"/api/meetings/{self.meeting}/minutes/items", json={"kind": "decision", "content": "手動決議", "evidence": [1]})
+        _, state, _ = self.generate(httpx.ConnectError("refused"))
+        self.assertEqual(state["status"], "failed")
+        self.assertIn("產生失敗", state["message"])
+        self.assertEqual([i["content"] for i in state["items"]], ["手動決議"])
+
+    def test_model_not_configured_is_400(self):
+        with patch("minutes.MINUTES_URL", ""):
+            response = self.alice.post(f"/api/meetings/{self.meeting}/minutes/generate")
+        self.assertEqual((response.status_code, response.json()["detail"]), (400, "紀要模型未設定"))
+        self.assertEqual(self.query("SELECT count(*) FROM minutes"), [(0,)])
+
+    def test_meeting_without_segments_is_422(self):
+        empty = self.alice.post("/api/meetings", json={"team_id": self.team_id, "language": "zh"}).json()["id"]
+        self.assertEqual(self.alice.post(f"/api/meetings/{empty}/minutes/generate").status_code, 422)
+
+    def test_interrupted_generation_is_failed_after_restart(self):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("INSERT INTO minutes (meeting_id, status) VALUES (%s, 'running')", (self.meeting,))
+        asyncio.run(minutes.recover_interrupted())
+        self.assertEqual(self.query("SELECT status, message FROM minutes"), [("failed", "產生中斷，請重新產生")])
+
+    def test_regenerating_keeps_human_decisions(self):
+        self.generate(self.answer([{"kind": "decision", "content": "採用新報價", "evidence": [2]},
+                                   {"kind": "risk", "content": "供應延遲", "evidence": [3]},
+                                   {"kind": "action", "content": "寄出報價", "evidence": [4]},
+                                   {"kind": "action", "content": "安排會議", "evidence": [5]}]))
+        by = {i["content"]: i for i in self.items()}
+        base = f"/api/meetings/{self.meeting}/minutes/items"
+        self.alice.post(f"{base}/{by['採用新報價']['id']}/confirm", json={"version": 1})
+        self.alice.post(f"{base}/{by['供應延遲']['id']}/reject", json={"version": 1})
+        self.alice.patch(f"/api/meetings/{self.meeting}/minutes/summary", json={"version": 2, "summary": "人寫的摘要"})
+        _, state, _ = self.generate(self.answer([{"kind": "decision", "content": "採用新報價。", "evidence": [2]},
+                                                 {"kind": "action", "content": "更新合約", "evidence": [6]}], summary="新摘要"))
+        self.assertEqual(sorted((i["content"], i["state"]) for i in state["items"]),
+                         [("供應延遲", "rejected"), ("採用新報價", "confirmed"), ("更新合約", "proposed")])
+        self.assertEqual(state["summary"], "人寫的摘要")
+
+    def test_confirming_an_edited_proposal(self):
+        self.generate(self.answer([{"kind": "action", "content": "寄出報價", "owner": "小王", "evidence": [4]}]))
+        item = self.items()[0]
+        self.assertEqual((item["owner"], item["ownerHint"]), (None, "小王"))
+        base = f"/api/meetings/{self.meeting}/minutes/items/{item['id']}"
+        changed = self.alice.patch(base, json={"version": 1, "owner": "bob", "dueDate": "2026-11-20"}).json()
+        self.assertEqual((changed["owner"], changed["ownerHint"], changed["dueDate"], changed["state"]), ("bob", "", "2026-11-20", "proposed"))
+        confirmed = self.alice.post(f"{base}/confirm", json={"version": 2}).json()
+        self.assertEqual((confirmed["state"], confirmed["confirmedBy"]), ("confirmed", "王愛麗"))
+        self.assertEqual(self.query("SELECT confirmed_at IS NOT NULL FROM minute_items"), [(True,)])
+
+    def test_owner_outside_the_team_is_422(self):
+        added = self.alice.post(f"/api/meetings/{self.meeting}/minutes/items", json={"kind": "action", "content": "x", "evidence": [1]}).json()
+        response = self.alice.patch(f"/api/meetings/{self.meeting}/minutes/items/{added['id']}", json={"version": 1, "owner": "carol"})
+        self.assertEqual((response.status_code, response.json()["detail"]), (422, "負責人必須是團隊成員"))
+        self.assertEqual(self.query("SELECT owner FROM minute_items"), [(None,)])
+
+    def test_stale_edit_is_409_with_the_current_item(self):
+        added = self.alice.post(f"/api/meetings/{self.meeting}/minutes/items", json={"kind": "action", "content": "原本", "evidence": [1]}).json()
+        base = f"/api/meetings/{self.meeting}/minutes/items/{added['id']}"
+        self.assertEqual(self.signed_in("bob").patch(base, json={"version": 1, "content": "bob 改的"}).status_code, 200)
+        refused = self.alice.patch(base, json={"version": 1, "content": "alice 改的"})
+        self.assertEqual((refused.status_code, refused.json()["item"]["content"]), (409, "bob 改的"))
+
+    def test_hand_added_item_is_confirmed(self):
+        added = self.alice.post(f"/api/meetings/{self.meeting}/minutes/items",
+                                json={"kind": "question", "content": "  預算誰批？ ", "evidence": [2, 99]}).json()
+        self.assertEqual((added["content"], added["state"], added["origin"], [e["seq"] for e in added["evidence"]]),
+                         ("預算誰批？", "confirmed", "manual", [2]))
+
+    def test_markdown_lists_only_confirmed_items(self):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE meetings SET title = '週會', started_at = '2026-11-04 23:37+08'")
+            conn.execute("UPDATE segments SET start_ms = seq * 61000, end_ms = seq * 61000 + 1000")
+        self.generate(self.answer([{"kind": "decision", "content": "待確認的決議", "evidence": [1]},
+                                   {"kind": "risk", "content": "被駁回的風險", "evidence": [2]}]))
+        base = f"/api/meetings/{self.meeting}/minutes/items"
+        risk = next(i for i in self.items() if i["kind"] == "risk")
+        self.alice.post(f"{base}/{risk['id']}/reject", json={"version": 1})
+        self.alice.post(base, json={"kind": "action", "content": "寄出報價。", "owner": "alice", "dueDate": "2026-11-13", "dueText": "下週五", "evidence": [3]})
+        self.alice.post(base, json={"kind": "action", "content": "安排驗收", "evidence": [4, 5]})
+        response = self.alice.get(f"/api/meetings/{self.meeting}/minutes.md")
+        self.assertIn("text/markdown", response.headers["content-type"])
+        self.assertIn("attachment", response.headers["content-disposition"])
+        self.assertEqual(response.text, "\n".join([
+            "# 週會", "", "- 日期：2026/11/04 23:37（星期三）", "- 團隊：測試團隊", "", "## 摘要", "", "本次討論報價。", "", "## 待辦", "",
+            "- 寄出報價；負責人：王愛麗；到期：2026-11-13（下週五）；錄音 03:03",
+            "- 安排驗收；負責人：未指派；到期：未定；錄音 04:04、05:05"]) + "\n")
+
+    def test_every_minutes_api_is_404_for_another_team(self):
+        added = self.alice.post(f"/api/meetings/{self.meeting}/minutes/items", json={"kind": "decision", "content": "x", "evidence": [1]}).json()
+        carol, base = self.signed_in("carol"), f"/api/meetings/{self.meeting}/minutes"
+        calls = [("GET", base, None), ("POST", f"{base}/generate", None), ("PATCH", f"{base}/summary", {"version": 1, "summary": "x"}),
+                 ("POST", f"{base}/items", {"kind": "risk", "content": "y"}), ("PATCH", f"{base}/items/{added['id']}", {"version": 1, "content": "z"}),
+                 ("POST", f"{base}/items/{added['id']}/confirm", {"version": 1}), ("POST", f"{base}/items/{added['id']}/reject", {"version": 1}),
+                 ("GET", f"/api/meetings/{self.meeting}/minutes.md", None), ("GET", f"/meetings/{self.meeting}/minutes", None)]
+        for method, path, body in calls:
+            self.assertEqual(carol.request(method, path, json=body, follow_redirects=False).status_code, 404, f"{method} {path}")
+        self.assertEqual(self.query("SELECT count(*), max(version) FROM minute_items"), [(1, 1)])
+        self.assertEqual(self.query("SELECT count(*) FROM minutes"), [(0,)])
+
+    def test_item_of_another_meeting_is_404(self):
+        other = self.alice.post("/api/meetings", json={"team_id": self.team_id, "language": "zh"}).json()["id"]
+        added = self.alice.post(f"/api/meetings/{self.meeting}/minutes/items", json={"kind": "decision", "content": "x"}).json()
+        self.assertEqual(self.alice.patch(f"/api/meetings/{other}/minutes/items/{added['id']}", json={"version": 1, "content": "z"}).status_code, 404)
+
+
 class DatabaseTests(DatabaseTestCase):
     def test_migrations_apply_once(self):
         with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
@@ -954,7 +1185,7 @@ class DatabaseTests(DatabaseTestCase):
         self.assertEqual(versions, [version for version, _ in db.migration_files()])
         tables = {row[0] for row in self.query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")}
         self.assertLessEqual({"users", "teams", "team_members", "sessions", "login_failures", "meetings", "meeting_files",
-                              "segments", "segment_history"}, tables)
+                              "segments", "segment_history", "minutes", "minute_items"}, tables)
         columns = {row[0] for row in self.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'meetings'")}
         self.assertLessEqual({"source_language", "target_language", "glossary", "learned_terms", "audio_bytes", "ended_at", "title"}, columns)
 

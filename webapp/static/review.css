@@ -28,6 +28,7 @@ code { padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); fon
 .meeting-title { display: block; font-size: 17px; overflow-wrap: anywhere; }
 .meeting .meeting-meta { margin-top: 6px; }
 .meeting-meta { font-variant-numeric: tabular-nums; }
+.meeting-actions { display: flex; gap: 8px; }
 .meeting-progress { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; color: var(--muted); }
 
 /* Review */

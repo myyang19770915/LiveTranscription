@@ -1,0 +1,42 @@
+/* Meeting minutes page. Builds on tokens.css, admin.css and review.css. */
+.crumbs { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: -12px 0 18px -6px; }
+.crumbs .back-link { margin: 0; }
+.head-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.head-actions .link-button { height: 46px; padding: 0 18px; }
+.status-line { margin: 0; font-size: 14px; font-weight: 600; color: var(--muted); }
+.status-line.running { color: var(--accent); }
+.status-line.failed { color: var(--danger); }
+.summary-card { padding: 18px 20px; margin-bottom: 20px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.section-head h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 18px; }
+.summary-text { margin: 0; font-size: 16px; line-height: 1.8; white-space: pre-wrap; }
+.kind-section { margin-bottom: 24px; }
+.kind-section > .item + .item { margin-top: 8px; }
+.empty-kind { margin: 0; padding: 4px 2px; }
+.item { display: grid; gap: 10px; padding: 14px 18px; }
+.item.proposed { border-left: 4px solid var(--warn); }
+.item.confirmed { border-left: 4px solid var(--accent); }
+.item.rejected { opacity: .62; }
+.item.rejected .item-content { text-decoration: line-through; }
+.item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.item .chip { border: 1px solid var(--border); color: var(--muted); text-decoration: none; }
+.item .chip.state-proposed { border-color: color-mix(in srgb, var(--warn) 55%, transparent); color: var(--warn); }
+.item .chip.state-confirmed { border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
+.item-content { margin: 0; font-size: 16px; line-height: 1.65; overflow-wrap: anywhere; }
+.item-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+.item-fields label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; }
+.item-fields .input { flex: none; width: 190px; }
+.item-fields select.input { appearance: auto; }
+.hint-name { color: var(--warn); font-size: 13px; font-weight: 600; }
+.evidence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.evidence .chip { font-variant-numeric: tabular-nums; }
+.evidence .chip:hover { color: var(--accent); border-color: var(--accent); }
+.item-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.item .edit-form, .add-form { grid-column: auto; }
+.add-form { margin-bottom: 8px; border-style: dashed; }
+@media (max-width: 640px) {
+  .item-fields label { flex: 1 1 140px; }
+  .item-fields .input { width: 100%; }
+  .head-actions { width: 100%; }
+  .head-actions > * { flex: 1; justify-content: center; }
+}

@@ -20,6 +20,7 @@ import auth
 import db
 import mai_asr
 import meeting_audio
+import minutes
 import review
 import team_access
 from translation_quality import (TERMS_SCHEMA, apply_aliases, asr_context, consolidate_terms, glossary_entries, learned_replacements,
@@ -93,6 +94,7 @@ logger = logging.getLogger("uvicorn.error")
 async def lifespan(_app: FastAPI):
     # An unreachable database or a failed migration stops the app instead of failing on first sign-in.
     await db.check()
+    await minutes.recover_interrupted()
     logger.info("system administrators (ADMIN_USERS): %s", ", ".join(sorted(auth.ADMIN_USERS)) or "none")
     yield
 
@@ -101,6 +103,7 @@ app = FastAPI(title="語橋 Live — 即時會議翻譯", lifespan=lifespan, dep
 app.include_router(auth.router)
 app.include_router(team_access.router)
 app.include_router(review.router)
+app.include_router(minutes.router)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 

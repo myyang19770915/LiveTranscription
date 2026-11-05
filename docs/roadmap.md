@@ -26,7 +26,7 @@
 | 階段 | 內容 | 狀態 |
 |---|---|---|
 | **P1 資料基礎＋會後校對** | ① `team-accounts`：LDAP 登入、團隊權限、Postgres（2026-11-04 完成）<br>② `meeting-review`：段落時間軸、伺服器端錄音、會後校對頁（聽段落、改轉錄、自動重譯、修改紀錄、匯出微調資料） | ① 完成（公司 LDAP 連線驗證待補）、② 完成（2026-11-04） |
-| P2 會後抽取＋確認 | 本機 Gemma 抽決議／待辦／負責人／到期日，附證據句；人工確認後才是正式紀錄；匯出會議紀錄 | 待辦 |
+| P2 會後抽取＋確認 | `meeting-minutes`：整場一次送給紀要模型（`MINUTES_*`，預設沿用雲端模型），抽出摘要與決議／待辦／問題／風險，每條附證據段落；負責人只對應團隊成員、到期日換算並保留原話；人工確認後才是正式紀錄；Markdown 匯出 | 完成（2026-11-05） |
 | P3 追蹤閉環 | 待辦看板、系列會議、會前帶出未完成事項、會中偵測進度更新（需確認） | 待辦 |
 | P4 查詢 | 條件篩選、FTS5 全文、本機 embedding 語意問答（一定附出處） | 待辦 |
 | P5 整合 | 說話者辨識（pyannote＋與會者名單）、寄送、外部工具同步 | 待辦 |
@@ -74,6 +74,8 @@
 - 轉錄修改率（每百字修改數），可依引擎、語言比較
 
 ## 後續事項
+
+- **P3 承接**：`minute_items` 已預留 `status`（目前一律 `open`）與 `external_ref`（議題追蹤平台的編號），P3 用來追蹤待辦狀態、逾期與外部同步。
 
 - **公司 LDAP 切換驗證**（原 team-accounts 任務 5.3）：把公司 LDAP 參數填入 `.env`（`LDAP_URL`、`LDAP_BASE_DN`、`LDAP_BIND_DN`／`LDAP_BIND_PASSWORD` 或 `LDAP_USER_DN_TEMPLATE`、`LDAP_USER_FILTER`、需要時 `LDAP_CA_FILE`），`docker compose up -d app`，執行 `docker exec -it asr_confucius4-r2t2-app-1 python -m auth check-ldap <帳號>`，再以瀏覽器實際登入一次；完成後移除 `dev-ldap` 測試目錄。
 

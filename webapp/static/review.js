@@ -152,9 +152,13 @@ async function load(){
     el('span',{textContent:`建立者 ${meeting.createdBy}`}));
   if(!segments.length)$('segments').replaceChildren(el('div',{className:'card empty'},el('b',{textContent:'這場會議沒有段落'}),el('p',{textContent:'會議中定稿的段落才會出現在這裡。'})));
   else render();
+  // A minutes evidence link (#seg-N) opens that segment, scrolled into view; playback waits for a click.
+  const linked=Number(location.hash.match(/^#seg-(\d+)$/)?.[1]);
+  if(segments.some(s=>s.seq===linked)){selected=linked;render();$(`seg-${linked}`).scrollIntoView({block:'center'})}
 }
 // Back to the list the reviewer came from (keeps its scroll position); a direct link falls back to /meetings.
 // The list keeps its filters in its address, so the referrer is the list exactly as the reviewer left it.
+$('minutesLink').href=`/meetings/${meetingId}/minutes`;
 $('back').onclick=event=>{
   try{
     const from=document.referrer&&new URL(document.referrer);
