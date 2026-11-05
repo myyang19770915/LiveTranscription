@@ -128,4 +128,4 @@ POST／PUT／PATCH／DELETE 與 WebSocket 握手，若有 `Origin` 且其 host �
 
 ## Open Questions
 
-- 公司 LDAP 的實際參數（URL、Base DN、使用者過濾條件、是否有服務帳號、是否需 ldaps 與 CA）需由使用者提供；在提供前以 MOCK 測試開發，正式連線驗證列為最後一項任務。
+- 公司 LDAP 的實際參數（URL、Base DN、使用者過濾條件、是否有服務帳號、是否需 ldaps 與 CA）需由使用者提供。開發期間以 MOCK 與 compose profile `dev-ldap` 的測試目錄驗證；正式連線驗證原為任務 5.3，2026-11-05 使用者要求歸檔時移出，改列為後續事項「公司 LDAP 切換驗證」（見 docs/roadmap.md），程式不需修改，只需填 `.env` 並執行 `python -m auth check-ldap`。

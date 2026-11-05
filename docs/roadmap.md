@@ -73,6 +73,10 @@
 - AI 抽取條目被人工修改或刪除的比例
 - 轉錄修改率（每百字修改數），可依引擎、語言比較
 
+## 後續事項
+
+- **公司 LDAP 切換驗證**（原 team-accounts 任務 5.3）：把公司 LDAP 參數填入 `.env`（`LDAP_URL`、`LDAP_BASE_DN`、`LDAP_BIND_DN`／`LDAP_BIND_PASSWORD` 或 `LDAP_USER_DN_TEMPLATE`、`LDAP_USER_FILTER`、需要時 `LDAP_CA_FILE`），`docker compose up -d app`，執行 `docker exec -it asr_confucius4-r2t2-app-1 python -m auth check-ldap <帳號>`，再以瀏覽器實際登入一次；完成後移除 `dev-ldap` 測試目錄。
+
 ## 已決定（2026-11-04）
 
 1. **團隊使用，多個團隊**：需要登入與權限；不同團隊的會議紀錄互相看不到。因此資料庫改用 Postgres（多人同時寫入、權限、P4 可用 pgvector），每筆會議都屬於一個團隊。

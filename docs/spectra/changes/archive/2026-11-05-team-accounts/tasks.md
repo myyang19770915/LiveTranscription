@@ -27,4 +27,3 @@
 
 - [x] 5.1 自動化腳本以「容器內發 session」取代密碼：新增 `python -m auth issue-session <username> [--hours N]` 與 `python -m auth check-ldap <username>`（密碼以不回顯方式輸入）；webapp/replay_asr.py、webapp/replay_browser.py、webapp/ab_history.py、smoke_test.py、bench/probe.py 讀 `YUQIAO_SESSION`（與 `YUQIAO_TEAM`）帶入 cookie 並先建會議。驗證：用發出的 token 跑 `smoke_test.py` 與一段 `replay_asr.py` 成功取得逐字稿 [after: 4.5]
 - [x] 5.2 文件：README.md 新增登入、團隊管理、部署設定與 `issue-session` 說明，bench/README.md 說明 `YUQIAO_SESSION`／`YUQIAO_TEAM`，docs/roadmap.md 標註本變更完成。驗證：內容檢查，文件中不出現任何真實密碼或金鑰 [after: 5.1]
-- [ ] 5.3 正式 LDAP 連線驗證：使用者提供公司 LDAP 參數寫入 `.env` 後，以 `python -m auth check-ldap` 驗證，再由使用者在瀏覽器實際登入一次。驗證：使用者確認登入成功、頁首顯示正確顯示名稱 [after: 5.1]
