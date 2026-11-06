@@ -13,6 +13,14 @@
   function playWindow(startMs,endMs,totalMs=Infinity){
     return {start:Math.max(0,startMs-PLAY_LEAD_MS),end:Math.min(totalMs,endMs+PLAY_TAIL_MS)};
   }
-  root.MeetingTimeline={PLAY_LEAD_MS,PLAY_TAIL_MS,endMsAt,playWindow};
+  // Minutes evidence panel: the cited segments with one neighbour each side, in timeline order.
+  // Returns [{segment, cited, gapBefore}]; gapBefore marks a jump over segments that are not shown.
+  function evidenceContext(segments,citedSeqs){
+    const cited=new Set(citedSeqs),shown=new Set();
+    segments.forEach((s,i)=>{if(cited.has(s.seq))for(const j of [i-1,i,i+1])if(segments[j])shown.add(j)});
+    let last=-1;
+    return [...shown].sort((a,b)=>a-b).map(i=>{const row={segment:segments[i],cited:cited.has(segments[i].seq),gapBefore:last>=0&&i>last+1};last=i;return row});
+  }
+  root.MeetingTimeline={PLAY_LEAD_MS,PLAY_TAIL_MS,endMsAt,playWindow,evidenceContext};
   if(typeof module!=='undefined')module.exports=root.MeetingTimeline;
 })(typeof globalThis!=='undefined'?globalThis:this);

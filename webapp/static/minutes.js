@@ -40,7 +40,7 @@ function evidence(item){
   const source=seq=>meeting?.segments.find(s=>s.seq===seq)?.source;
   return item.evidence.length?el('div',{className:'evidence'},el('span',{className:'muted small',textContent:'證據'}),
     ...item.evidence.map(e=>el('a',{className:'chip',href:`/meetings/${meetingId}#seg-${e.seq}`,textContent:`▸ ${clock(e.startMs)}`,
-      title:source(e.seq)||`第 ${e.seq} 段`,onclick:event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey)return;event.preventDefault();openPeek(item.id,e.seq)}}))):null;
+      title:source(e.seq)||`第 ${e.seq} 段`,onclick:event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();openPeek(item.id,e.seq)}}))):null;
 }
 
 // --- Evidence side panel: the cited segments with one segment of context each side, playable in place ---
@@ -55,13 +55,8 @@ function renderPeek(){
   $('peekKind').textContent=`${Object.fromEntries(KINDS)[item.kind]}的證據`;
   $('peekTitle').textContent=item.content;
   if(!meeting){$('peekList').replaceChildren(el('p',{className:'muted small',textContent:'載入逐字稿中…'}));return}
-  const cited=new Set(item.evidence.map(e=>e.seq)),all=meeting.segments,shown=new Set();
-  all.forEach((s,i)=>{if(cited.has(s.seq))for(const j of [i-1,i,i+1])if(all[j])shown.add(j)});
-  const rows=[];let last=-2;
-  for(const i of [...shown].sort((a,b)=>a-b)){
-    if(last>=0&&i>last+1)rows.push(el('div',{className:'peek-gap',textContent:'⋯'}));
-    rows.push(peekRow(all[i],cited.has(all[i].seq)));last=i;
-  }
+  const rows=MeetingTimeline.evidenceContext(meeting.segments,item.evidence.map(e=>e.seq)).flatMap(({segment,cited,gapBefore})=>
+    [gapBefore?el('div',{className:'peek-gap',textContent:'⋯'}):null,peekRow(segment,cited)].filter(Boolean));
   $('peekList').replaceChildren(...rows);
   $(`peek-${peeking.focusSeq}`)?.scrollIntoView({block:'nearest'});
 }

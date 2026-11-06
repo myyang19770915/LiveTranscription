@@ -77,6 +77,8 @@ try {
   check('evidence opens the side panel, not another page', page.url().endsWith(`/meetings/${meeting}/minutes`) && await page.locator(`#peek-${seq}.cited.focus`).count() === 1, `#peek-${seq}`);
   check('panel shows context around the cited segment', await page.locator('#peek .peek-seg').count() > await page.locator('#peek .peek-seg.cited').count());
   const playable = await page.locator('#peek .peek-play').count();
+  const {hasRecording} = await (await page.request.get(`${app}/api/meetings/${meeting}`)).json();
+  if (!hasRecording) check('without a recording the panel shows times and no play control', playable === 0 && await page.locator('#peek .peek-time').count() > 0);
   if (playable) {
     const [audio] = await Promise.all([page.waitForResponse(r => r.url().includes('/audio?')), page.locator(`#peek-${seq} .peek-play`).click()]);
     check('panel plays the segment audio', audio.status() === 200, audio.status());
@@ -85,21 +87,69 @@ try {
   await page.keyboard.press('Escape');
   check('Esc closes the panel', await page.locator('#peek').isHidden());
 
-  // Tabs switch views in place of the current history entry; 返回會議紀錄 leads to the list.
+  // Tabs switch views in place of the current history entry; 返回會議紀錄 leads to the list as it was filtered.
+  const {teamId} = await (await page.request.get(`${app}/api/meetings/${meeting}`)).json();
+  const filtered = `/meetings?team=${teamId}`;
+  await page.goto(app + filtered); await page.waitForSelector('.meeting');
+  const [minutesButton, reviewButton] = [page.locator(`a[href="/meetings/${meeting}/minutes"]`), page.locator(`a[href="/meetings/${meeting}"]`)];
+  check('list buttons are named like the tabs', await minutesButton.textContent() === '會議紀要' && await reviewButton.textContent() === '逐字稿校對');
+  check('list buttons have the same height', (await minutesButton.boundingBox()).height === (await reviewButton.boundingBox()).height,
+    [(await minutesButton.boundingBox()).height, (await reviewButton.boundingBox()).height]);
+  await minutesButton.click(); await page.waitForSelector('.item');
+  const header = () => page.evaluate(() => [document.querySelector('#title').textContent, ...[...document.querySelectorAll('#meta span')].map(s => s.textContent)]);
+  await page.waitForFunction(() => document.querySelectorAll('#meta span').length === 5);
+  const minutesHeader = await header();
   const depth = await page.evaluate(() => history.length);
+  const [opened] = await Promise.all([context.waitForEvent('page'), page.click('#tabReview', {modifiers: ['Control']})]);
+  await opened.waitForLoadState();
+  await opened.waitForURL(url => new URL(url).pathname === `/meetings/${meeting}`).catch(() => {});
+  check('Ctrl-click on a tab opens a new browser tab and leaves this one', new URL(opened.url()).pathname === `/meetings/${meeting}` && page.url().endsWith(`/meetings/${meeting}/minutes`), [opened.url(), page.url()]);
+  await opened.close();
   await page.click('#tabReview'); await page.waitForSelector('.seg');
   check('tab opens the transcript', page.url().endsWith(`/meetings/${meeting}`) && await page.getAttribute('#tabReview', 'aria-current') === 'page');
-  check('header is the same on both tabs', (await page.textContent('#title')).trim().length > 0 && await page.locator('#meta span').count() === 5);
+  await page.waitForFunction(() => document.querySelectorAll('#meta span').length === 5);
+  const reviewHeader = await header(), {team} = await (await page.request.get(`${app}/api/meetings/${meeting}`)).json();
+  check('header is the same on both tabs', JSON.stringify(reviewHeader) === JSON.stringify(minutesHeader) && reviewHeader.length === 6 && reviewHeader[1] === team, reviewHeader);
   await page.click('#tabMinutes'); await page.waitForSelector('.item');
   check('tab switch adds no history entries', await page.evaluate(() => history.length) === depth);
+  await page.click('#tabReview'); await page.waitForSelector('.seg');
   await page.click('#back'); await page.waitForURL(url => new URL(url).pathname === '/meetings');
-  check('back link returns to the list', true);
+  check('after switching tabs, back returns to the filtered list', page.url().endsWith(filtered), page.url());
+
+  // Opened from a pasted address: back opens the plain list.
+  const direct = await context.newPage();
+  await direct.goto(`${app}/meetings/${meeting}/minutes`); await direct.waitForSelector('.item');
+  await direct.click('#back'); await direct.waitForURL(url => new URL(url).pathname === '/meetings');
+  check('opened directly, back opens the meeting list', new URL(direct.url()).search === '', direct.url());
+  await direct.close();
 
   // 到校對頁修正 opens that segment on the review page.
   await page.goto(`${app}/meetings/${meeting}/minutes`); await page.waitForSelector('.item .evidence .chip');
   await page.locator('.item .evidence .chip').first().click();
   await page.locator('#peek .peek-seg.cited a').first().click(); await page.waitForSelector(`.seg.open`);
   check('panel link opens the segment on the review page', /#seg-\d+$/.test(page.url()));
+
+  // Without the Navigation API and sessionStorage, back still opens the meeting list.
+  const bare = await context.newPage();
+  await bare.addInitScript(() => {
+    try { delete window.navigation; Object.defineProperty(window, 'navigation', {value: undefined}); } catch {}
+    Object.defineProperty(window, 'sessionStorage', {get() { throw new Error('blocked'); }});
+  });
+  await bare.goto(`${app}/meetings/${meeting}/minutes`); await bare.waitForSelector('.item');
+  check('fallback back link is /meetings', await bare.getAttribute('#back', 'href') === '/meetings');
+  await bare.click('#back'); await bare.waitForURL(url => new URL(url).pathname === '/meetings');
+  check('fallback back link opens the list', true);
+  await bare.close();
+
+  // A regeneration that replaces the item shown in the panel closes the panel.
+  await page.goto(`${app}/meetings/${meeting}/minutes`); await page.waitForSelector('.item.proposed .evidence .chip');
+  await page.locator('.item.proposed .evidence .chip').first().click(); await page.waitForSelector('#peek:not([hidden])');
+  await page.click('#generate');
+  await page.waitForFunction(() => document.querySelector('#status').classList.contains('running'), null, {timeout: 10000});
+  await page.waitForFunction(() => /產生完成|失敗/.test(document.querySelector('#status').textContent), null, {timeout: 300000});
+  const regenerated = await page.textContent('#status');
+  check('regeneration done', regenerated.includes('產生完成'), regenerated);
+  check('panel closes when its item is regenerated', await page.locator('#peek').isHidden());
 
   // 400 px.
   await page.setViewportSize({width: 400, height: 860});
