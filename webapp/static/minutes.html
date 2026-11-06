@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>會議紀要 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261105a"><link rel="stylesheet" href="/assets/review.css?v=20261105c"><link rel="stylesheet" href="/assets/minutes.css?v=20261105a"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>會議紀要 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261106a"><link rel="stylesheet" href="/assets/review.css?v=20261106a"><link rel="stylesheet" href="/assets/minutes.css?v=20261106a"></head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>會議紀要</small></span></a>
+  <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>會議紀錄</small></span></a>
   <div class="topbar-actions">
     <a class="ghost-button" href="/meetings">會議紀錄</a>
     <div id="account" class="account"></div>
@@ -11,11 +11,10 @@
 </header>
 
 <main class="page review-page">
-  <nav class="crumbs"><a id="back" class="back-link" href="/meetings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>返回會議紀錄</a><a id="reviewLink" class="back-link" href="#">逐字稿校對</a></nav>
+  <nav class="crumbs"><a id="back" class="back-link" href="/meetings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>返回會議紀錄</a></nav>
   <div class="page-head">
     <div>
-      <p class="eyebrow">MINUTES</p>
-      <h1 id="title">會議紀要</h1>
+      <h1 id="title">&nbsp;</h1>
       <p id="meta" class="meeting-meta"></p>
     </div>
     <div class="head-actions">
@@ -23,6 +22,7 @@
       <a id="download" class="secondary-button link-button" href="#" download>下載 Markdown</a>
     </div>
   </div>
+  <nav class="view-tabs" aria-label="會議檢視"><a id="tabReview" class="view-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>逐字稿校對</a><a id="tabMinutes" class="view-tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>會議紀要</a></nav>
 
   <section class="card toolbar">
     <p class="hint">AI 會從整場逐字稿整理摘要、決議、待辦、待確認問題與風險，每條附上證據段落；<b>確認後才算正式紀錄</b>，下載的 Markdown 只包含已確認的條目。<span id="modelNote"></span></p>
@@ -41,7 +41,19 @@
   <div id="sections"></div>
 </main>
 
+<aside id="peek" class="peek" aria-labelledby="peekTitle" hidden>
+  <div class="peek-head">
+    <div><p id="peekKind" class="peek-kind"></p><h2 id="peekTitle" class="peek-title"></h2></div>
+    <button id="peekClose" class="icon-button" type="button" aria-label="關閉證據" title="關閉（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <p class="peek-hint">引用的段落以綠色標示，前後各附一段上下文。按 ▶ 聽那段錄音。</p>
+  <div id="peekList" class="peek-list"></div>
+</aside>
+<audio id="player" preload="none"></audio>
+
 <script src="/assets/account.js?v=20261104b"></script>
 <script src="/assets/meeting-catalog.js?v=20261105a"></script>
-<script src="/assets/minutes.js?v=20261105d"></script>
+<script src="/assets/timeline.js?v=20261104a"></script>
+<script src="/assets/meeting-nav.js?v=20261106a"></script>
+<script src="/assets/minutes.js?v=20261106a"></script>
 </body></html>

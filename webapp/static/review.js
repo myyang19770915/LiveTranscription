@@ -3,14 +3,13 @@
 const $=id=>document.getElementById(id);
 const meetingId=location.pathname.split('/').filter(Boolean).pop();
 const STATE={unreviewed:'未校對',confirmed:'已確認',edited:'已修改'};
-const LANG={zh:'中文',en:'英文',ja:'日文',zh_ja:'中日雙向',auto:'中英自動',ko:'韓文',yue:'粵語',id:'印尼文'};
 const EXTEND_MS=2000;
 let meeting=null,segments=[],selected=null,extra={lead:0,tail:0},audioUrl=null;
 const notes=new Map();     // seq -> {text, retry, next}: per-segment status line after an action
 
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
 const pad=n=>String(n).padStart(2,'0');
-function clock(ms){const s=Math.floor(ms/1000);return `${pad(Math.floor(s/60))}:${pad(s%60)}`}
+const clock=MeetingNav.clock;
 function notice(message){$('notice').textContent=message;$('notice').hidden=!message;if(message)setTimeout(()=>{if($('notice').textContent===message)$('notice').hidden=true},6000)}
 async function call(method,url,body){
   const response=await fetch(url,{method,headers:body?{'content-type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
@@ -144,37 +143,20 @@ function render(){
 async function load(){
   meeting=await call('GET',`/api/meetings/${meetingId}`);
   segments=meeting.segments;
-  showTitle();
-  const source=meeting.sourceLanguage||meeting.language,target=meeting.targetLanguage;
-  $('meta').replaceChildren(el('span',{className:'count',textContent:meeting.team}),
-    el('span',{textContent:meeting.hasRecording?`錄音 ${clock(meeting.durationMs)}`:'沒有錄音'}),
-    el('span',{textContent:source==='zh_ja'?'中日雙向':`${LANG[source]||source} → ${LANG[target]||target||''}`}),
-    el('span',{textContent:`建立者 ${meeting.createdBy}`}));
+  MeetingNav.show(meeting);
   if(!segments.length)$('segments').replaceChildren(el('div',{className:'card empty'},el('b',{textContent:'這場會議沒有段落'}),el('p',{textContent:'會議中定稿的段落才會出現在這裡。'})));
   else render();
   // A minutes evidence link (#seg-N) opens that segment, scrolled into view; playback waits for a click.
   const linked=Number(location.hash.match(/^#seg-(\d+)$/)?.[1]);
   if(segments.some(s=>s.seq===linked)){selected=linked;render();$(`seg-${linked}`).scrollIntoView({block:'center'})}
 }
-// Back to the list the reviewer came from (keeps its scroll position); a direct link falls back to /meetings.
-// The list keeps its filters in its address, so the referrer is the list exactly as the reviewer left it.
-$('minutesLink').href=`/meetings/${meetingId}/minutes`;
-$('back').onclick=event=>{
-  try{
-    const from=document.referrer&&new URL(document.referrer);
-    if(!from||from.origin!==location.origin||from.pathname!=='/meetings')return;
-    event.preventDefault();
-    if(history.length>1)history.back();else location.href=from.href;
-  }catch{}
-};
 // 主題: any team member can change or clear it; a cleared topic shows the start time again.
-function showTitle(){$('title').textContent=MeetingCatalog.displayTitle(meeting);document.title=`${$('title').textContent} — 語橋 Live`}
 function renaming(on){$('titleRow').hidden=on;$('renameForm').hidden=!on;if(on){$('titleInput').value=meeting.title||'';$('titleInput').focus()}}
 $('renameButton').onclick=()=>renaming(true);
 $('renameCancel').onclick=()=>renaming(false);
 $('renameForm').onsubmit=async event=>{
   event.preventDefault();const button=event.submitter;button.disabled=true;
-  try{meeting.title=(await call('PATCH',`/api/meetings/${meetingId}`,{title:$('titleInput').value})).title;showTitle();renaming(false)}
+  try{meeting.title=(await call('PATCH',`/api/meetings/${meetingId}`,{title:$('titleInput').value})).title;MeetingNav.show(meeting);renaming(false)}
   catch(error){notice(error.message)}finally{button.disabled=false}
 };
 fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine})=>{$('refineRow').hidden=!cloudRefine}).catch(()=>{});

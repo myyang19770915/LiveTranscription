@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>會議紀錄 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261105a"><link rel="stylesheet" href="/assets/review.css?v=20261105c"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>會議紀錄 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261106a"><link rel="stylesheet" href="/assets/review.css?v=20261105c"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>會議紀錄</small></span></a>
@@ -15,7 +15,7 @@
     <div>
       <p class="eyebrow">MEETINGS</p>
       <h1>會議紀錄</h1>
-      <p class="lead">你所屬團隊的會議。點「校對」可以逐段聽錄音、修正轉錄，修正後會自動重譯，所有修改都會留下紀錄。</p>
+      <p class="lead">你所屬團隊的會議。點「逐字稿校對」可以逐段聽錄音、修正轉錄（修正後自動重譯，所有修改都留紀錄）；「會議紀要」整理決議與待辦。</p>
     </div>
     <p id="summary" class="summary" aria-live="polite"></p>
   </div>
@@ -60,8 +60,8 @@ let creators={},latest=0;
 function meetingRow(m){
   const percent=m.segments?Math.round(m.reviewed/m.segments*100):0;
   const action=m.segments?el('div',{className:'meeting-actions'},
-      el('a',{className:'secondary-button compact link-button',href:`/meetings/${m.id}/minutes`,textContent:'紀要'}),
-      el('a',{className:'primary-button compact link-button',href:`/meetings/${m.id}`,textContent:'校對'}))
+      el('a',{className:'secondary-button compact link-button',href:`/meetings/${m.id}/minutes`,textContent:'會議紀要'}),
+      el('a',{className:'primary-button compact link-button',href:`/meetings/${m.id}`,textContent:'逐字稿校對'}))
     :el('span',{className:'muted small',textContent:'沒有校對資料'});
   return el('article',{className:'card meeting'},
     el('div',{className:'meeting-main'},

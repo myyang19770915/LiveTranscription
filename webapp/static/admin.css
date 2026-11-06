@@ -99,7 +99,7 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
 }
 .primary-button { border: 0; background: var(--accent); color: var(--accent-ink); }
 .primary-button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 22px var(--accent-soft); }
-.primary-button.compact { height: 40px; padding: 0 16px; font-size: 14px; }
+.primary-button.compact, .secondary-button.compact { height: 40px; padding: 0 16px; font-size: 14px; }
 .secondary-button { border: 1.5px solid var(--accent); background: transparent; color: var(--accent); }
 .secondary-button:hover:not(:disabled) { background: var(--accent-soft); }
 button:disabled { opacity: .6; cursor: wait; }

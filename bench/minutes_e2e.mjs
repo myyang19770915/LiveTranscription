@@ -70,11 +70,36 @@ try {
   check('markdown leaves out rejected and proposed items', !markdown.includes(rejected), rejected);
   console.log('---- markdown ----\n' + markdown + '------------------');
 
-  // Evidence opens the segment on the review page.
+  // Evidence opens a side panel on the minutes page: cited segments with context, playable in place.
   const chip = page.locator('.item .evidence .chip').first();
   const seq = (await chip.getAttribute('href')).split('#seg-')[1];
-  await chip.click(); await page.waitForSelector(`#seg-${seq}.open`);
-  check('evidence opens the segment', true, `#seg-${seq}`);
+  await chip.click(); await page.waitForSelector('#peek:not([hidden]) .peek-seg.cited');
+  check('evidence opens the side panel, not another page', page.url().endsWith(`/meetings/${meeting}/minutes`) && await page.locator(`#peek-${seq}.cited.focus`).count() === 1, `#peek-${seq}`);
+  check('panel shows context around the cited segment', await page.locator('#peek .peek-seg').count() > await page.locator('#peek .peek-seg.cited').count());
+  const playable = await page.locator('#peek .peek-play').count();
+  if (playable) {
+    const [audio] = await Promise.all([page.waitForResponse(r => r.url().includes('/audio?')), page.locator(`#peek-${seq} .peek-play`).click()]);
+    check('panel plays the segment audio', audio.status() === 200, audio.status());
+  }
+  await page.screenshot({path: join(out, 'minutes-evidence.png')});
+  await page.keyboard.press('Escape');
+  check('Esc closes the panel', await page.locator('#peek').isHidden());
+
+  // Tabs switch views in place of the current history entry; 返回會議紀錄 leads to the list.
+  const depth = await page.evaluate(() => history.length);
+  await page.click('#tabReview'); await page.waitForSelector('.seg');
+  check('tab opens the transcript', page.url().endsWith(`/meetings/${meeting}`) && await page.getAttribute('#tabReview', 'aria-current') === 'page');
+  check('header is the same on both tabs', (await page.textContent('#title')).trim().length > 0 && await page.locator('#meta span').count() === 5);
+  await page.click('#tabMinutes'); await page.waitForSelector('.item');
+  check('tab switch adds no history entries', await page.evaluate(() => history.length) === depth);
+  await page.click('#back'); await page.waitForURL(url => new URL(url).pathname === '/meetings');
+  check('back link returns to the list', true);
+
+  // 到校對頁修正 opens that segment on the review page.
+  await page.goto(`${app}/meetings/${meeting}/minutes`); await page.waitForSelector('.item .evidence .chip');
+  await page.locator('.item .evidence .chip').first().click();
+  await page.locator('#peek .peek-seg.cited a').first().click(); await page.waitForSelector(`.seg.open`);
+  check('panel link opens the segment on the review page', /#seg-\d+$/.test(page.url()));
 
   // 400 px.
   await page.setViewportSize({width: 400, height: 860});

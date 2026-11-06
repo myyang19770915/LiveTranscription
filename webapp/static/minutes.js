@@ -4,10 +4,11 @@ const meetingId=location.pathname.split('/').filter(Boolean).at(-2);
 const KINDS=[['decision','決議'],['action','待辦'],['question','待確認問題'],['risk','風險']];
 const STATE={proposed:'待確認',confirmed:'已確認',rejected:'已駁回'};
 let data=null,editing=null,adding=null,summaryEditing=false,poll=null;
+let meeting=null,peeking=null,audioUrl=null;   // meeting: /api/meetings/<id> (header and evidence segments)
 
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
 const pad=n=>String(n).padStart(2,'0');
-const clock=ms=>{const s=Math.floor(ms/1000);return `${pad(Math.floor(s/60))}:${pad(s%60)}`};
+const clock=MeetingNav.clock;
 function notice(message){$('notice').textContent=message;$('notice').hidden=!message}
 async function call(method,url,body){
   const response=await fetch(url,{method,headers:body?{'content-type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
@@ -36,9 +37,57 @@ function dueInput(item){
   return input;
 }
 function evidence(item){
+  const source=seq=>meeting?.segments.find(s=>s.seq===seq)?.source;
   return item.evidence.length?el('div',{className:'evidence'},el('span',{className:'muted small',textContent:'證據'}),
-    ...item.evidence.map(e=>el('a',{className:'chip',href:`/meetings/${meetingId}#seg-${e.seq}`,textContent:clock(e.startMs),title:`第 ${e.seq} 段`}))):null;
+    ...item.evidence.map(e=>el('a',{className:'chip',href:`/meetings/${meetingId}#seg-${e.seq}`,textContent:`▸ ${clock(e.startMs)}`,
+      title:source(e.seq)||`第 ${e.seq} 段`,onclick:event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey)return;event.preventDefault();openPeek(item.id,e.seq)}}))):null;
 }
+
+// --- Evidence side panel: the cited segments with one segment of context each side, playable in place ---
+function openPeek(itemId,focusSeq){peeking={itemId,focusSeq};renderPeek();render()}
+function closePeek(){peeking=null;$('player').pause();renderPeek();render()}
+function renderPeek(){
+  const item=peeking&&data.items.find(i=>i.id===peeking.itemId);
+  // Below the sticky top bar, so the account and theme buttons stay reachable.
+  document.documentElement.style.setProperty('--peek-top',`${document.querySelector('.topbar').offsetHeight}px`);
+  document.body.classList.toggle('peeking',!!item);$('peek').hidden=!item;
+  if(!item){peeking=null;return}
+  $('peekKind').textContent=`${Object.fromEntries(KINDS)[item.kind]}的證據`;
+  $('peekTitle').textContent=item.content;
+  if(!meeting){$('peekList').replaceChildren(el('p',{className:'muted small',textContent:'載入逐字稿中…'}));return}
+  const cited=new Set(item.evidence.map(e=>e.seq)),all=meeting.segments,shown=new Set();
+  all.forEach((s,i)=>{if(cited.has(s.seq))for(const j of [i-1,i,i+1])if(all[j])shown.add(j)});
+  const rows=[];let last=-2;
+  for(const i of [...shown].sort((a,b)=>a-b)){
+    if(last>=0&&i>last+1)rows.push(el('div',{className:'peek-gap',textContent:'⋯'}));
+    rows.push(peekRow(all[i],cited.has(all[i].seq)));last=i;
+  }
+  $('peekList').replaceChildren(...rows);
+  $(`peek-${peeking.focusSeq}`)?.scrollIntoView({block:'nearest'});
+}
+function peekRow(segment,cited){
+  return el('div',{className:`peek-seg${cited?' cited':''}${segment.seq===peeking.focusSeq?' focus':''}`,id:`peek-${segment.seq}`},
+    el('div',{className:'peek-seg-head'},
+      meeting.hasRecording?el('button',{type:'button',className:'peek-play',title:'播放這段錄音',onclick:event=>play(segment,event.currentTarget)},`▶ ${clock(segment.startMs)}`)
+        :el('span',{className:'peek-time',textContent:clock(segment.startMs)}),
+      cited?el('a',{className:'text-button',href:`/meetings/${meetingId}#seg-${segment.seq}`,textContent:'到校對頁修正'}):null),
+    el('p',{className:'peek-source',textContent:segment.source}),
+    segment.target?el('p',{className:'peek-target',textContent:segment.target}):null);
+}
+async function play(segment,button){
+  const span=MeetingTimeline.playWindow(segment.startMs,segment.endMs,meeting.durationMs||Infinity);
+  document.querySelectorAll('.peek-play.playing').forEach(b=>b.classList.remove('playing'));
+  try{
+    const response=await fetch(`/api/meetings/${meetingId}/audio?start=${span.start}&end=${span.end}`);
+    if(!response.ok)throw new Error((await response.json().catch(()=>({}))).detail||'無法載入錄音');
+    if(audioUrl)URL.revokeObjectURL(audioUrl);
+    audioUrl=URL.createObjectURL(await response.blob());
+    $('player').src=audioUrl;await $('player').play();button.classList.add('playing');
+  }catch(error){notice(error.message)}
+}
+$('player').onended=$('player').onpause=()=>document.querySelectorAll('.peek-play.playing').forEach(b=>b.classList.remove('playing'));
+$('peekClose').onclick=closePeek;
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&peeking)closePeek()});
 function editor(item){
   const kind=el('select',{className:'input compact',ariaLabel:'類型'},...KINDS.map(([k,l])=>el('option',{value:k,textContent:l})));kind.value=item.kind;
   const text=el('textarea',{className:'input editor',value:item.content,rows:2,maxLength:500,ariaLabel:'內容'});
@@ -64,7 +113,7 @@ function card(item){
     item.state!=='confirmed'?el('button',{type:'button',className:'secondary-button compact',textContent:'確認',onclick:()=>decide('confirm')}):null,
     item.state!=='rejected'?el('button',{type:'button',className:'text-button danger',textContent:'駁回',onclick:()=>decide('reject')}):null,
     editing===item.id?null:el('button',{type:'button',className:'text-button',textContent:'修改',onclick:()=>{editing=item.id;render()}}));
-  return el('article',{className:`card item ${item.state}`},head,body,fields,evidence(item),actions);
+  return el('article',{className:`card item ${item.state}${peeking?.itemId===item.id?' peeked':''}`},head,body,fields,evidence(item),actions);
 }
 function addForm(kind){
   const text=el('textarea',{className:'input editor',rows:2,maxLength:500,placeholder:'內容',ariaLabel:'新條目內容'});
@@ -107,20 +156,19 @@ function render(){
   }));
   const fields=draftFields();
   if(fields.length===drafts.length)fields.forEach((field,i)=>{field.value=drafts[i]});
+  // The panel follows its item: closed when a regeneration replaced it, retitled after an edit.
+  if(peeking){const item=data.items.find(i=>i.id===peeking.itemId);if(item)$('peekTitle').textContent=item.content;else closePeek()}
 }
 async function load(){
   const polling=data?.status==='running';
   data=await call('GET',`/api/meetings/${meetingId}/minutes`);
   // While generating, polls only refresh the status: redrawing the items would wipe an open editor.
   if(polling&&data.status==='running'){renderStatus();poll=setTimeout(()=>load().catch(error=>notice(error.message)),2000);return}
-  $('title').textContent=MeetingCatalog.displayTitle(data.meeting);document.title=`${$('title').textContent} 紀要 — 語橋 Live`;
-  $('meta').replaceChildren(el('span',{className:'count',textContent:data.meeting.team}),el('span',{textContent:new Date(data.meeting.startedAt).toLocaleString('zh-TW',{hour12:false})}));
   $('modelNote').textContent=data.modelAvailable?` 產生時整場逐字稿會傳送到外部模型服務${data.model?`（${data.model}）`:''}。`:'';
   render();
   clearTimeout(poll);if(data.status==='running')poll=setTimeout(()=>load().catch(error=>notice(error.message)),2000);
 }
 
-$('reviewLink').href=`/meetings/${meetingId}`;
 $('download').href=`/api/meetings/${meetingId}/minutes.md`;
 // Someone else may already be generating (409): either way, show the current state and keep polling.
 $('generate').onclick=()=>act(async()=>{try{await call('POST',`/api/meetings/${meetingId}/minutes/generate`)}finally{await load()}});
@@ -135,3 +183,5 @@ $('summaryForm').onsubmit=event=>{event.preventDefault();act(async()=>{
 })};
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
 load().catch(error=>notice(error.message));
+// The header and the evidence panel come from the meeting itself (same as the review page).
+call('GET',`/api/meetings/${meetingId}`).then(result=>{meeting=result;MeetingNav.show(meeting);if(data)render();if(peeking)renderPeek()}).catch(error=>notice(error.message));
