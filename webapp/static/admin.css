@@ -118,10 +118,12 @@ button:disabled { opacity: .6; cursor: wait; }
 .team h2 { margin: 0; font-size: 19px; overflow-wrap: anywhere; }
 .count { flex: none; padding: 2px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; }
 .members { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
-.member { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; }
+.member { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 10px 10px 12px; }
 .member + .member { border-top: 1px solid var(--border); }
 .avatar { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
-.member-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.avatar.photo { object-fit: cover; background: var(--field); }
+.member-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; }
+.member-text { flex: 1 1 140px; min-width: 0; display: flex; flex-direction: column; }
 .member-text b { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .member-text small { color: var(--muted); font-size: 13px; }
 .chip { flex: none; padding: 3px 9px; border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); border-radius: 999px; color: var(--warn); font-size: 12px; }

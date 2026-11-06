@@ -14,10 +14,16 @@ const store={get(k){try{return localStorage.getItem(k)}catch{return null}},set(k
 function setParam(key,value){if(value)params.set(key,value);else params.delete(key);history.replaceState(null,'',params.toString()?`/actions?${params}`:'/actions')}
 
 // --- Pieces ---
+// A person's photo (member-avatars) when they have one in people, otherwise, or if it fails to load, the initial.
 function avatarFor(username,name,size=''){
   if(!username)return el('span',{className:`avatar-mini empty ${size}`,title:'未指派',ariaLabel:'未指派'});
   const {initial,color}=ActionBoard.avatar(username,name);
-  return el('span',{className:`avatar-mini c${color} ${size}`,title:name||username,textContent:initial});
+  const letter=()=>el('span',{className:`avatar-mini c${color} ${size}`,title:name||username,textContent:initial});
+  const url=data?.people.find(p=>p.username===username)?.avatarUrl;
+  if(!url)return letter();
+  const img=el('img',{className:`avatar-mini photo ${size}`,src:url,alt:name||username,title:name||username,draggable:false});
+  img.onerror=()=>img.replaceWith(letter());
+  return img;
 }
 function dueChip(item){
   const tone=ActionBoard.dueTone(item,today());

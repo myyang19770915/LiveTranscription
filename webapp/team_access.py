@@ -10,6 +10,7 @@ import uuid
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
@@ -72,10 +73,12 @@ async def list_teams(_admin: Admin):
     async with db.connect() as conn:
         teams = await (await conn.execute("SELECT id, name FROM teams ORDER BY name")).fetchall()
         members = await (await conn.execute(
-            "SELECT m.team_id, m.username, coalesce(u.display_name, '') AS display_name, u.username IS NOT NULL AS signed_in "
-            "FROM team_members m LEFT JOIN users u USING (username) ORDER BY m.username")).fetchall()
+            "SELECT m.team_id, m.username, coalesce(u.display_name, '') AS display_name, u.username IS NOT NULL AS signed_in, "
+            "a.updated_at AS avatar_at FROM team_members m LEFT JOIN users u USING (username) "
+            "LEFT JOIN user_avatars a USING (username) ORDER BY m.username")).fetchall()
     return [{"id": team["id"], "name": team["name"],
-             "members": [{"username": m["username"], "displayName": m["display_name"], "signedIn": m["signed_in"]}
+             "members": [{"username": m["username"], "displayName": m["display_name"], "signedIn": m["signed_in"],
+                          "avatarUrl": avatar_url(m["username"], m["avatar_at"])}
                          for m in members if m["team_id"] == team["id"]]} for team in teams]
 
 
@@ -342,3 +345,60 @@ async def remove_member(team_id: int, username: str, _admin: Admin):
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="找不到這位成員")
     return Response(status_code=204)
+
+
+# Member profile photos (member-avatars). The browser crops and scales to 160x160 before upload; the server only
+# checks the type against the leading bytes and the size. SVG is never accepted (it can carry script).
+AVATAR_MAX_BYTES = 256 * 1024
+AVATAR_SIGNATURES = {"image/png": lambda b: b.startswith(b"\x89PNG\r\n\x1a\n"),
+                     "image/jpeg": lambda b: b.startswith(b"\xff\xd8\xff"),
+                     "image/webp": lambda b: b[:4] == b"RIFF" and b[8:12] == b"WEBP"}
+
+
+def avatar_url(username: str, updated_at) -> str | None:
+    """The photo's address, versioned by its update time so a new photo gets a new (long-cached) address."""
+    if updated_at is None:
+        return None
+    return f"/api/users/{quote(username, safe='')}/avatar?v={int(updated_at.timestamp() * 1000)}"
+
+
+@router.put("/api/admin/users/{username}/avatar")
+async def set_avatar(username: str, request: Request, admin: Admin):
+    username = username.strip().lower()
+    media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > AVATAR_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="照片太大，請選 256 KB 以內的圖片")
+    if not body:
+        raise HTTPException(status_code=422, detail="沒有收到圖片")
+    if media_type not in AVATAR_SIGNATURES or not AVATAR_SIGNATURES[media_type](bytes(body[:12])):
+        raise HTTPException(status_code=415, detail="只接受 PNG、JPEG 或 WebP 圖片")
+    async with db.connect() as conn:
+        row = await (await conn.execute(
+            "INSERT INTO user_avatars (username, image, content_type, updated_by) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (username) DO UPDATE SET image = excluded.image, content_type = excluded.content_type, "
+            "updated_at = now(), updated_by = excluded.updated_by RETURNING updated_at",
+            (username, bytes(body), media_type, admin.username))).fetchone()
+    return {"username": username, "avatarUrl": avatar_url(username, row["updated_at"])}
+
+
+@router.delete("/api/admin/users/{username}/avatar", status_code=204)
+async def remove_avatar(username: str, _admin: Admin):
+    async with db.connect() as conn:
+        result = await conn.execute("DELETE FROM user_avatars WHERE username = %s", (username.strip().lower(),))
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="這位成員沒有照片")
+    return Response(status_code=204)
+
+
+@router.get("/api/users/{username}/avatar")
+async def get_avatar(username: str, _user: auth.CurrentUser):
+    async with db.connect() as conn:
+        row = await (await conn.execute("SELECT image, content_type FROM user_avatars WHERE username = %s",
+                                        (username.strip().lower(),))).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="沒有照片")
+    return Response(bytes(row["image"]), media_type=row["content_type"],
+                    headers={"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"})

@@ -241,7 +241,7 @@ docker compose logs -f asr translate app
    ```powershell
    docker exec -it asr_confucius4-r2t2-app-1 python -m auth check-ldap <帳號>
    ```
-4. 系統管理員登入後，從頁首「團隊管理」（`/admin`）建立團隊、加入成員。成員可以在對方第一次登入前先用帳號加入。
+4. 系統管理員登入後，從頁首「團隊管理」（`/admin`）建立團隊、加入成員。成員可以在對方第一次登入前先用帳號加入。每位成員旁的「設定照片」可上傳頭像（PNG、JPEG、WebP；瀏覽器自動裁成中央正方形並縮成 160×160），團隊管理與待辦看板會顯示照片，沒有照片時顯示名字首字。
 5. 一般使用者登入後，在「團隊」選單選擇這場會議所屬的團隊再開始。沒有任何團隊的帳號無法開始會議。
 
 權限規則：
@@ -381,6 +381,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `GET /api/health` | FastAPI 簡易健康檢查（不需登入） |
 | `POST /api/login`、`POST /api/logout`、`GET /api/me` | LDAP 登入、登出、目前使用者與所屬團隊 |
 | `GET /admin`、`/api/admin/teams…` | 團隊管理（限系統管理員） |
+| `PUT`／`DELETE /api/admin/users/{帳號}/avatar`、`GET /api/users/{帳號}/avatar` | 成員頭像照片（設定與移除限系統管理員，讀取需登入） |
 | `POST /api/meetings`、`GET /api/meetings`、`GET /api/meetings/{id}` | 建立會議（需指定自己的團隊）、列出與讀取自己團隊的會議 |
 | `GET /meetings`、`GET /meetings/{id}` | 會議紀錄列表、會後校對頁 |
 | `GET /api/meetings?team=&from=&to=&creator=&q=` | 會議列表（自己團隊）；參數皆選填：團隊 id、開始日期區間（`YYYY-MM-DD`，`MEETING_TIMEZONE` 當地日期）、建立者帳號、主題關鍵字 |

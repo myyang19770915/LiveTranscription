@@ -1814,6 +1814,66 @@ class CrossSiteTests(AccountTestCase):
 
 
 
+class AvatarTests(AccountTestCase):
+    """member-avatars: photos keyed by account, set by administrators, read by anyone signed in."""
+    PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 2000
+    JPEG = b"\xff\xd8\xff\xe0" + b"\0" * 100
+    WEBP = b"RIFF\0\0\0\0WEBPVP8 " + b"\0" * (20 * 1024)
+
+    def put(self, client, username, body, content_type):
+        return client.put(f"/api/admin/users/{username}/avatar", content=body, headers={"content-type": content_type})
+
+    def test_administrator_sets_reads_and_removes_a_photo(self):
+        admin = self.signed_in("admin")
+        response = self.put(admin, " Bob ", self.PNG, "image/png")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["avatarUrl"].startswith("/api/users/bob/avatar?v="))
+        photo = self.signed_in("alice").get("/api/users/bob/avatar")
+        self.assertEqual((photo.status_code, photo.content, photo.headers["content-type"]), (200, self.PNG, "image/png"))
+        self.assertEqual(photo.headers["x-content-type-options"], "nosniff")
+        self.assertIn("immutable", photo.headers["cache-control"])
+        self.assertEqual(self.put(admin, "bob", self.WEBP, "image/webp").status_code, 200)
+        self.assertEqual(self.signed_in("alice").get("/api/users/bob/avatar").content, self.WEBP)
+        self.assertEqual(admin.delete("/api/admin/users/bob/avatar").status_code, 204)
+        self.assertEqual(self.signed_in("alice").get("/api/users/bob/avatar").status_code, 404)
+        self.assertEqual(admin.delete("/api/admin/users/bob/avatar").status_code, 404)
+
+    def test_only_administrators_change_photos(self):
+        alice = self.signed_in("alice")
+        self.assertEqual(self.put(alice, "alice", self.PNG, "image/png").status_code, 403)
+        self.put(self.signed_in("admin"), "alice", self.PNG, "image/png")
+        self.assertEqual(alice.delete("/api/admin/users/alice/avatar").status_code, 403)
+        self.assertEqual(self.query("SELECT count(*) FROM user_avatars"), [(1,)])
+
+    def test_unsafe_or_oversized_images_are_refused(self):
+        admin = self.signed_in("admin")
+        cases = [(b"<svg xmlns='http://www.w3.org/2000/svg'/>", "image/svg+xml", 415), (self.JPEG, "image/png", 415),
+                 (b"\xff\xd8\xff" + b"\0" * (300 * 1024), "image/jpeg", 413), (b"", "image/png", 422),
+                 (self.PNG, "text/html", 415)]
+        for body, content_type, status in cases:
+            self.assertEqual(self.put(admin, "bob", body, content_type).status_code, status, content_type)
+        self.assertEqual(self.query("SELECT count(*) FROM user_avatars"), [(0,)])
+        self.assertEqual(self.put(admin, "bob", self.JPEG, "image/jpeg").status_code, 200)
+
+    def test_people_lists_carry_the_photo_address(self):
+        admin = self.signed_in("admin")
+        team = admin.post("/api/admin/teams", json={"name": "研發"}).json()
+        for name in ("alice", "bob"):
+            admin.post(f"/api/admin/teams/{team['id']}/members", json={"username": name})
+        url = self.put(admin, "bob", self.PNG, "image/png").json()["avatarUrl"]
+        members = {m["username"]: m["avatarUrl"] for m in admin.get("/api/admin/teams").json()[0]["members"]}
+        self.assertEqual(members, {"alice": None, "bob": url})
+        people = {p["username"]: p["avatarUrl"] for p in self.signed_in("alice").get("/api/actions").json()["people"]}
+        self.assertEqual(people, {"alice": None, "bob": url})
+        admin.delete("/api/admin/users/bob/avatar")
+        people = {p["username"]: p["avatarUrl"] for p in self.signed_in("alice").get("/api/actions").json()["people"]}
+        self.assertIsNone(people["bob"])
+
+    def test_signed_out_cannot_read_photos(self):
+        self.put(self.signed_in("admin"), "bob", self.PNG, "image/png")
+        self.assertEqual(TestClient(app).get("/api/users/bob/avatar").status_code, 401)
+
+
 class TeamAdminTests(AccountTestCase):
     def test_non_administrator_cannot_manage_teams(self):
         client = self.signed_in("alice")
@@ -1841,7 +1901,7 @@ class TeamAdminTests(AccountTestCase):
         team = admin.post("/api/admin/teams", json={"name": "研發"}).json()
         self.assertEqual(admin.post(f"/api/admin/teams/{team['id']}/members", json={"username": " Bob "}).status_code, 201)
         listed = admin.get("/api/admin/teams").json()
-        self.assertEqual(listed[0]["members"], [{"username": "bob", "displayName": "", "signedIn": False}])
+        self.assertEqual(listed[0]["members"], [{"username": "bob", "displayName": "", "signedIn": False, "avatarUrl": None}])
         bob = TestClient(app).post("/api/login", json={"username": "bob", "password": "pw-bob"}).json()
         self.assertEqual(bob["teams"], [{"id": team["id"], "name": "研發"}])
 

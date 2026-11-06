@@ -27,6 +27,7 @@
 .avatar-more { margin-left: 4px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .avatar-mini { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; line-height: 1; }
 .avatar-mini.large { width: 32px; height: 32px; font-size: 14px; }
+.avatar-mini.photo { object-fit: cover; background: color-mix(in srgb, var(--text) 9%, transparent); }
 .avatar-mini.empty { border: 1.5px dashed var(--muted); background: transparent; }
 .avatar-mini.c0 { background: #0b6e4f; } .avatar-mini.c1 { background: #2f5fb3; } .avatar-mini.c2 { background: #a1471c; }
 .avatar-mini.c3 { background: #7a3fa0; } .avatar-mini.c4 { background: #9c2f4f; } .avatar-mini.c5 { background: #4f6b1a; }

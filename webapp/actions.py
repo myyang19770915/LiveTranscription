@@ -112,12 +112,14 @@ async def board(user: auth.CurrentUser, team: int | None = None, owner: str = Qu
             (user.username,))).fetchall()
         # Each person with the teams they share with the user: the detail panel offers only the item's team's members.
         people = await (await conn.execute(
-            "SELECT tm.username, coalesce(nullif(u.display_name, ''), tm.username) AS display_name, array_agg(tm.team_id ORDER BY tm.team_id) AS teams "
-            "FROM team_members tm JOIN team_members mine ON mine.team_id = tm.team_id AND mine.username = %s "
-            "LEFT JOIN users u ON u.username = tm.username GROUP BY tm.username, u.display_name ORDER BY tm.username", (user.username,))).fetchall()
+            "SELECT tm.username, coalesce(nullif(u.display_name, ''), tm.username) AS display_name, array_agg(tm.team_id ORDER BY tm.team_id) AS teams, "
+            "a.updated_at AS avatar_at FROM team_members tm JOIN team_members mine ON mine.team_id = tm.team_id AND mine.username = %s "
+            "LEFT JOIN users u ON u.username = tm.username LEFT JOIN user_avatars a ON a.username = tm.username "
+            "GROUP BY tm.username, u.display_name, a.updated_at ORDER BY tm.username", (user.username,))).fetchall()
     # today: the server's calendar (MEETING_TIMEZONE), so "due soon" and "recently done" agree with overdue days.
     return {"items": items, "today": minutes.local_today().isoformat(), "teams": [{"id": t["id"], "name": t["name"]} for t in teams],
-            "people": [{"username": p["username"], "displayName": p["display_name"], "teams": p["teams"]} for p in people]}
+            "people": [{"username": p["username"], "displayName": p["display_name"], "teams": p["teams"],
+                        "avatarUrl": team_access.avatar_url(p["username"], p["avatar_at"])} for p in people]}
 
 
 async def action_rows(conn, user: auth.User, where: list[str], params: dict) -> list[dict]:

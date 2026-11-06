@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261106c"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261107a"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>團隊管理</small></span></a>
@@ -44,20 +44,57 @@ async function call(method,url,body){
 }
 async function act(work,button){showError('');if(button)button.disabled=true;try{await work();await load()}catch(error){showError(error.message)}finally{if(button)button.disabled=false}}
 function initial(member){return [...(member.displayName||member.username)][0].toUpperCase()}
+// A button that asks once more ("確定…？") before doing its work; the question goes away after 4 s.
+function confirmButton(label,question,work){
+  const button=el('button',{type:'button',className:'text-button danger',textContent:label});
+  button.onclick=()=>{
+    if(button.dataset.confirm){act(work,button);return}
+    button.dataset.confirm='1';button.textContent=question;
+    setTimeout(()=>{if(button.isConnected){delete button.dataset.confirm;button.textContent=label}},4000);
+  };
+  return button;
+}
+
+// Profile photos (member-avatars): the centre square of the chosen image, scaled to 160x160 in the browser.
+const PHOTO_SIZE=160;
+async function squarePhoto(file){
+  if(!file.type.startsWith('image/')||file.type==='image/svg+xml')throw new Error('請選 PNG、JPEG 或 WebP 圖片');
+  let bitmap;
+  try{bitmap=await createImageBitmap(file)}catch{throw new Error('讀不到這張圖片，請換一張')}
+  const side=Math.min(bitmap.width,bitmap.height);
+  const canvas=Object.assign(document.createElement('canvas'),{width:PHOTO_SIZE,height:PHOTO_SIZE});
+  canvas.getContext('2d').drawImage(bitmap,(bitmap.width-side)/2,(bitmap.height-side)/2,side,side,0,0,PHOTO_SIZE,PHOTO_SIZE);
+  bitmap.close();
+  const encode=type=>new Promise(resolve=>canvas.toBlob(resolve,type,.85));
+  const webp=await encode('image/webp');
+  return webp?.type==='image/webp'?webp:encode('image/jpeg');
+}
+async function uploadPhoto(username,file){
+  const photo=await squarePhoto(file);
+  const response=await fetch(`/api/admin/users/${encodeURIComponent(username)}/avatar`,{method:'PUT',headers:{'content-type':photo.type},body:photo});
+  if(!response.ok){const detail=(await response.json().catch(()=>({}))).detail;throw new Error(typeof detail==='string'?detail:'照片上傳失敗，請再試一次')}
+}
+function avatar(member){
+  const fallback=()=>el('span',{className:'avatar',textContent:initial(member),ariaHidden:'true'});
+  if(!member.avatarUrl)return fallback();
+  const img=el('img',{className:'avatar photo',src:member.avatarUrl,alt:'',width:34,height:34});
+  img.onerror=()=>img.replaceWith(fallback());
+  return img;
+}
 
 function memberRow(team,member){
-  const remove=el('button',{type:'button',className:'text-button danger',textContent:'移除'});
-  remove.onclick=()=>{
-    if(remove.dataset.confirm){act(()=>call('DELETE',`/api/admin/teams/${team.id}/members/${encodeURIComponent(member.username)}`),remove);return}
-    remove.dataset.confirm='1';remove.textContent='確定移除？';
-    setTimeout(()=>{if(remove.isConnected){delete remove.dataset.confirm;remove.textContent='移除'}},4000);
-  };
+  const remove=confirmButton('移除','確定移除？',()=>call('DELETE',`/api/admin/teams/${team.id}/members/${encodeURIComponent(member.username)}`));
   const named=member.displayName&&member.displayName!==member.username;
+  const name=named?member.displayName:member.username;
+  const picker=el('input',{type:'file',accept:'image/png,image/jpeg,image/webp',hidden:true,ariaLabel:`${name}的照片`});
+  const choose=el('button',{type:'button',className:'text-button',textContent:member.avatarUrl?'更換照片':'設定照片',onclick:()=>picker.click()});
+  picker.onchange=()=>{const file=picker.files[0];picker.value='';if(file)act(()=>uploadPhoto(member.username,file),choose)};
+  const clear=member.avatarUrl?confirmButton('移除照片','確定移除照片？',()=>call('DELETE',`/api/admin/users/${encodeURIComponent(member.username)}/avatar`)):null;
   return el('li',{className:'member'},
-    el('span',{className:'avatar',textContent:initial(member),ariaHidden:'true'}),
-    el('span',{className:'member-text'},el('b',{textContent:named?member.displayName:member.username}),named?el('small',{textContent:member.username}):null),
+    avatar(member),
+    el('span',{className:'member-text'},el('b',{textContent:name}),named?el('small',{textContent:member.username}):null),
     member.signedIn?null:el('span',{className:'chip',textContent:'尚未登入過',title:'帳號已加入，對方第一次登入時生效'}),
-    remove);
+    el('span',{className:'member-actions'},picker,choose,clear,remove));
 }
 
 function teamCard(team){
