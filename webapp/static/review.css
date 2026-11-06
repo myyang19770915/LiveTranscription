@@ -84,6 +84,8 @@ code { padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); fon
   .seg .chip { display: inline-block; grid-column: 2; grid-row: 1; }   /* admin.css hides chips on phones */
   .seg-source, .seg-target, .edit-form { grid-column: 1 / -1; }
   .meeting { flex-wrap: wrap; }
+  .meeting-actions { width: 100%; }
+  .meeting-actions .link-button { flex: 1; width: auto; }   /* admin.css makes phone buttons 100% wide */
   .filters label { flex: 1 1 140px; }
   .filters .input { width: 100%; }
   .meeting-progress { align-items: flex-start; }

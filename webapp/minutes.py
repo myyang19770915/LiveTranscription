@@ -237,12 +237,26 @@ async def generate(meeting_id: str, user: auth.CurrentUser):
 
 # --- Reading, editing, confirming -----------------------------------------------------------------
 
-def item_payload(row: dict, members: dict, times: dict) -> dict:
+OPEN_STATUSES = ("todo", "doing")
+
+
+def local_today() -> date:
+    """Today in the meeting time zone: overdue is judged by the server's calendar, not the viewer's."""
+    return datetime.now(ZoneInfo(team_access.MEETING_TIMEZONE)).date()
+
+
+def overdue_days(status: str, due: date | None, today: date) -> int:
+    return (today - due).days if status in OPEN_STATUSES and due and due < today else 0
+
+
+def item_payload(row: dict, members: dict, times: dict, today: date | None = None) -> dict:
     return {"id": row["id"], "kind": row["kind"], "content": row["content"], "owner": row["owner"],
             "ownerName": members.get(row["owner"], row["owner"]) if row["owner"] else None, "ownerHint": row["owner_hint"],
             "dueDate": row["due_date"].isoformat() if row["due_date"] else None, "dueText": row["due_text"],
             "evidence": [{"seq": n, "startMs": times[n]} for n in row["evidence"] if n in times],
             "origin": row["origin"], "state": row["state"], "version": row["version"],
+            "status": row["status"], "statusNote": row["status_note"],
+            "overdueDays": overdue_days(row["status"], row["due_date"], today or local_today()),
             "confirmedBy": members.get(row["confirmed_by"], row["confirmed_by"]) if row["confirmed_by"] else None}
 
 

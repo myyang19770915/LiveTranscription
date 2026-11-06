@@ -1171,6 +1171,158 @@ class MinutesApiTests(ReviewTestCase):
         self.assertEqual(self.alice.patch(f"/api/meetings/{other}/minutes/items/{added['id']}", json={"version": 1, "content": "z"}).status_code, 404)
 
 
+class ActionTrackingTests(ReviewTestCase):
+    """action-tracking: alice and bob share 測試團隊; carol is in no team; today is 2026-11-06 (Asia/Taipei)."""
+    TODAY = date(2026, 11, 6)
+
+    def setUp(self):
+        super().setUp()
+        self.ldap.add("carol", "pw-carol")
+        self.alice, self.meeting = self.signed_in("alice"), self.meeting_id()
+        self.team_id = self.query("SELECT team_id FROM meetings")[0][0]
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("INSERT INTO team_members (team_id, username, added_by) VALUES (%s, 'bob', 'admin')", (self.team_id,))
+        self.save(self.alice, self.meeting, [(f"第{i}句", f"S{i}") for i in range(1, 6)])
+        today = patch("minutes.local_today", lambda: self.TODAY)
+        today.start()
+        self.addCleanup(today.stop)
+
+    def item(self, content="寄合約", kind="action", state="confirmed", status="todo", owner=None, due=None, meeting=None, version=1):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            return conn.execute(
+                "INSERT INTO minute_items (meeting_id, kind, content, origin, state, status, owner, due_date, evidence, version) "
+                "VALUES (%s, %s, %s, 'ai', %s, %s, %s, %s, '{1}', %s) RETURNING id",
+                (meeting or self.meeting, kind, content, state, status, owner, due, version)).fetchone()[0]
+
+    def change(self, item_id, status, note="", version=None, client=None, meeting=None):
+        if version is None:
+            version = self.query("SELECT version FROM minute_items WHERE id = %s", (item_id,))[0][0]
+        return (client or self.alice).post(f"/api/meetings/{meeting or self.meeting}/minutes/items/{item_id}/status",
+                                           json={"version": version, "status": status, "note": note})
+
+    def test_starting_work_increments_the_version(self):
+        item_id = self.item(version=3)
+        response = self.change(item_id, "doing", version=3)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((response.json()["status"], response.json()["version"]), ("doing", 4))
+        self.assertEqual(self.query("SELECT status, status_by FROM minute_items"), [("doing", "alice")])
+
+    def test_status_change_rules(self):
+        rows = [  # spec example "status change rules"
+            (("action", "confirmed", "todo"), "doing", "", 200, None),
+            (("action", "confirmed", "doing"), "done", "已寄出", 200, None),
+            (("action", "confirmed", "todo"), "cancelled", "", 422, "取消待辦請填寫原因"),
+            (("action", "confirmed", "todo"), "cancelled", "客戶取消訂單", 200, None),
+            (("action", "confirmed", "doing"), "doing", "", 422, "狀態沒有改變"),
+            (("action", "proposed", "todo"), "doing", "", 409, "只有已確認的待辦可以更新狀態"),
+            (("decision", "confirmed", "todo"), "done", "", 409, "只有已確認的待辦可以更新狀態"),
+        ]
+        for (kind, state, current), requested, note, code, detail in rows:
+            with self.subTest(kind=kind, state=state, current=current, requested=requested, note=note):
+                item_id = self.item(kind=kind, state=state, status=current)
+                response = self.change(item_id, requested, note)
+                self.assertEqual(response.status_code, code, response.text)
+                stored = self.query("SELECT status, status_note FROM minute_items WHERE id = %s", (item_id,))[0]
+                if code == 200:
+                    self.assertEqual(stored, (requested, note))
+                    self.assertEqual(response.json()["statusNote"], note)
+                else:
+                    self.assertEqual(response.json()["detail"], detail)
+                    self.assertEqual(stored, (current, ""))
+                    self.assertEqual(self.query("SELECT count(*) FROM item_updates WHERE item_id = %s", (item_id,)), [(0,)])
+
+    def test_stale_status_change(self):
+        item_id = self.item(version=3)
+        bob = self.signed_in("bob")
+        self.assertEqual(self.change(item_id, "doing", version=3).status_code, 200)
+        response = self.change(item_id, "done", version=3, client=bob)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual((response.json()["item"]["status"], response.json()["item"]["version"]), ("doing", 4))
+        self.assertEqual(self.query("SELECT status FROM minute_items"), [("doing",)])
+
+    def test_another_team_gets_404(self):
+        item_id = self.item()
+        carol = self.signed_in("carol")
+        self.assertEqual(self.change(item_id, "doing", client=carol).status_code, 404)
+        self.assertEqual(carol.get(f"/api/meetings/{self.meeting}/minutes/items/{item_id}/updates").status_code, 404)
+        self.assertEqual(self.query("SELECT status FROM minute_items"), [("todo",)])
+
+    def test_history_newest_first(self):
+        item_id = self.item()
+        self.assertEqual(self.change(item_id, "doing").status_code, 200)
+        self.assertEqual(self.change(item_id, "done", "已寄出", client=self.signed_in("bob")).status_code, 200)
+        history = self.alice.get(f"/api/meetings/{self.meeting}/minutes/items/{item_id}/updates").json()
+        self.assertEqual([(h["from"], h["to"], h["note"], h["by"]) for h in history],
+                         [("doing", "done", "已寄出", "bob"), ("todo", "doing", "", "王愛麗")])
+        self.assertEqual(history[0]["meetingId"], None)
+        self.assertEqual(self.alice.get(f"/api/meetings/{self.meeting}/minutes/items/999999/updates").status_code, 404)
+
+    def test_overdue_days(self):
+        rows = [("todo", date(2026, 11, 4), 2), ("doing", date(2026, 11, 5), 1), ("todo", date(2026, 11, 6), 0),
+                ("done", date(2026, 11, 1), 0), ("cancelled", date(2026, 11, 1), 0), ("todo", None, 0)]  # spec "overdue on 2026-11-06"
+        ids = {self.item(content=f"事項{i}", status=status, due=due): want for i, (status, due, want) in enumerate(rows)}
+        minutes_items = {i["id"]: i["overdueDays"] for i in self.alice.get(f"/api/meetings/{self.meeting}/minutes").json()["items"]}
+        board = {i["id"]: i["overdueDays"] for i in self.alice.get("/api/actions?status=todo,doing,done,cancelled").json()["items"]}
+        self.assertEqual(minutes_items, ids)
+        self.assertEqual(board, ids)
+
+    def board(self, query="", client=None):
+        response = (client or self.alice).get(f"/api/actions{query}")
+        self.assertEqual(response.status_code, 200, response.text)
+        return [i["content"] for i in response.json()["items"]]
+
+    def test_board_shows_both_teams_and_no_other(self):
+        sales = self.team("業務部", "alice")
+        sales_meeting = self.alice.post("/api/meetings", json={"team_id": sales, "language": "zh"}).json()["id"]
+        other = self.team("財務部", "carol")
+        other_meeting = self.signed_in("carol").post("/api/meetings", json={"team_id": other, "language": "zh"}).json()["id"]
+        self.item("研發待辦")
+        self.item("業務待辦", meeting=sales_meeting)
+        self.item("財務待辦", meeting=other_meeting)
+        self.item("未確認", state="proposed")
+        self.item("已駁回", state="rejected")
+        self.item("一個決議", kind="decision")
+        self.assertEqual(sorted(self.board()), ["業務待辦", "研發待辦"])
+        body = self.alice.get("/api/actions").json()
+        self.assertEqual(sorted(t["name"] for t in body["teams"]), ["業務部", "測試團隊"])
+        self.assertEqual([p["username"] for p in body["people"]], ["alice", "bob"])
+        self.assertEqual(self.board(f"?team={sales}"), ["業務待辦"])
+        self.assertEqual(self.alice.get(f"/api/actions?team={other}").status_code, 404)
+
+    def test_board_filters(self):
+        # spec example "filtering on 2026-11-06"
+        self.item("A", owner="alice", status="todo", due=date(2026, 11, 4))
+        self.item("B", owner="alice", status="doing", due=date(2026, 11, 10))
+        self.item("C", owner="bob", status="todo", due=date(2026, 11, 13))
+        self.item("D", status="todo")
+        self.item("E", owner="alice", status="done", due=date(2026, 11, 1))
+        self.assertEqual(sorted(self.board("?owner=me")), ["A", "B", "E"])
+        self.assertEqual(self.board("?due=overdue"), ["A"])
+        self.assertEqual(sorted(self.board("?due=week")), ["B", "C"])
+        self.assertEqual(self.board("?due=none"), ["D"])
+        self.assertEqual(self.board("?owner=none"), ["D"])
+        self.assertEqual(self.board("?owner=bob"), ["C"])
+        self.assertEqual(self.board("?owner=nobody"), [])
+        self.assertEqual(self.board("?owner=me&due=overdue"), ["A"])  # "My overdue items"
+        self.assertEqual(self.board("?status=done"), ["E"])
+        self.assertEqual(self.alice.get("/api/actions?status=open").status_code, 422)
+        self.assertEqual(self.alice.get("/api/actions?due=later").status_code, 422)
+
+    def test_board_order_and_keyword(self):
+        self.item("晚一點", due=date(2026, 11, 20))
+        self.item("沒有日期")
+        self.item("逾期一天", due=date(2026, 11, 5))
+        self.item("逾期三天", due=date(2026, 11, 3))
+        self.item("100% 完成報表", due=date(2026, 11, 8))
+        self.assertEqual(self.board(), ["逾期三天", "逾期一天", "100% 完成報表", "晚一點", "沒有日期"])
+        self.assertEqual(self.board("?q=%25"), ["100% 完成報表"])
+        self.assertEqual(self.board("?q=逾期"), ["逾期三天", "逾期一天"])
+
+    def test_board_page_requires_sign_in(self):
+        self.assertEqual(self.alice.get("/actions").status_code, 200)
+        self.assertNotEqual(TestClient(app).get("/actions", follow_redirects=False).status_code, 200)
+
+
 class DatabaseTests(DatabaseTestCase):
     def test_migrations_apply_once(self):
         with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
@@ -1185,9 +1337,33 @@ class DatabaseTests(DatabaseTestCase):
         self.assertEqual(versions, [version for version, _ in db.migration_files()])
         tables = {row[0] for row in self.query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")}
         self.assertLessEqual({"users", "teams", "team_members", "sessions", "login_failures", "meetings", "meeting_files",
-                              "segments", "segment_history", "minutes", "minute_items"}, tables)
+                              "segments", "segment_history", "minutes", "minute_items", "item_updates"}, tables)
         columns = {row[0] for row in self.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'meetings'")}
         self.assertLessEqual({"source_language", "target_language", "glossary", "learned_terms", "audio_bytes", "ended_at", "title"}, columns)
+
+
+class ActionMigrationTests(DatabaseTestCase):
+    def test_existing_items_start_as_todo_and_status_is_checked(self):
+        with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
+            conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+        before = [entry for entry in db.migration_files() if entry[0] < 5]
+
+        async def migrate(files):
+            async with await psycopg.AsyncConnection.connect(TEST_DATABASE_URL) as conn:
+                with patch("db.migration_files", lambda: files):
+                    return await db.migrate(conn)
+        asyncio.run(migrate(before))
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            team = conn.execute("INSERT INTO teams (name, name_key) VALUES ('研發部', '研發部') RETURNING id").fetchone()[0]
+            meeting = conn.execute("INSERT INTO meetings (team_id, created_by, language, engine) VALUES (%s, 'alice', 'zh', 'local') RETURNING id",
+                                   (team,)).fetchone()[0]
+            conn.execute("INSERT INTO minute_items (meeting_id, kind, content, origin, state) VALUES (%s, 'action', '寄合約', 'ai', 'confirmed')",
+                         (meeting,))
+        self.assertEqual(asyncio.run(migrate(db.migration_files())), [5])
+        self.assertEqual(self.query("SELECT status, status_note FROM minute_items"), [("todo", "")])
+        with self.assertRaises(psycopg.errors.CheckViolation):
+            self.query("UPDATE minute_items SET status = 'open'")
+        self.assertEqual(self.query("SELECT count(*) FROM item_updates"), [(0,)])
 
 
 class SignInTests(AccountTestCase):

@@ -20,6 +20,7 @@ import auth
 import db
 import mai_asr
 import meeting_audio
+import actions
 import minutes
 import review
 import team_access
@@ -103,6 +104,8 @@ app = FastAPI(title="語橋 Live — 即時會議翻譯", lifespan=lifespan, dep
 app.include_router(auth.router)
 app.include_router(team_access.router)
 app.include_router(review.router)
+# Before minutes: its /items/{id}/{action} would otherwise take /items/{id}/status.
+app.include_router(actions.router)
 app.include_router(minutes.router)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 

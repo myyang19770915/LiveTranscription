@@ -36,6 +36,7 @@
 .add-form { margin-bottom: 8px; border-style: dashed; }
 .evidence .chip { cursor: pointer; }
 .item.peeked { box-shadow: 0 0 0 2px var(--accent); }
+.item.linked { box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent); }
 
 /* Evidence side panel: read and listen to the cited segments without leaving the minutes. */
 .peek { position: fixed; z-index: 30; top: var(--peek-top, 0); right: 0; bottom: 0; width: min(440px, 100vw); display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--panel); box-shadow: -18px 0 48px rgba(0, 0, 0, .18); animation: peek-in .18s ease-out; }

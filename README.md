@@ -311,6 +311,15 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 
 **紀要模型**：`MINUTES_URL`、`MINUTES_MODEL`、`MINUTES_KEY`（OpenAI 相容），沒設定時沿用雲端精修的 `TRANSLATE_REFINE_*`。之後改用 context 更大的模型，或指向本機部署的大模型，只需修改這三個設定並 `docker compose up -d app`。
 
+## 待辦追蹤
+
+紀要中**已確認的待辦**會進入追蹤；每頁頂部都有「待辦看板」（`/actions`）。
+
+- **狀態**：未開始、進行中、已完成、已取消。同團隊的成員都可以在看板或紀要頁改狀態；改成「已取消」必須填原因。兩人同時更改時，後送出的人會看到最新狀態並重新操作。
+- **歷程**：每次改狀態都記下從什麼狀態到什麼狀態、備註、誰、何時；卡片上按「歷程」查看，新的在前。
+- **逾期**：到期日早於今天（`MEETING_TIMEZONE` 的日期）且還是未開始或進行中，就以紅字標示「逾期 N 天」；完成或取消後不再算逾期。
+- **看板**：所屬團隊的待辦依狀態分成未開始、進行中、已完成三欄（勾「顯示已取消」多一欄），逾期越久排越前面，沒有到期日的排最後。可依團隊、負責人（我的、未指派、成員）、到期（逾期、7 天內到期、沒有到期日）與內容關鍵字篩選，條件保留在網址中，可直接分享或加入書籤。卡片連到來源會議的紀要並標示該條目。
+
 ## 設定參考
 
 | `.env` 變數 | 預設值 | 說明 |
@@ -368,6 +377,9 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `GET /api/meetings/{id}/minutes`、`POST …/minutes/generate` | 紀要內容與狀態；在背景產生（執行中 409、模型未設定 400、沒有段落 422） |
 | `PATCH …/minutes/summary`、`POST …/minutes/items`、`PATCH …/minutes/items/{itemId}`、`POST …/items/{itemId}/confirm`、`…/reject` | 編輯摘要、新增、修改、確認、駁回條目（皆帶 `version`，過期回 409） |
 | `GET /api/meetings/{id}/minutes.md` | 下載 Markdown 會議紀錄（只含已確認條目） |
+| `GET /actions` | 待辦看板 |
+| `GET /api/actions?team=&owner=&status=&due=&q=` | 所屬團隊已確認的待辦（`owner`：帳號、`me`、`none`；`status`：逗號分隔的 `todo,doing,done,cancelled`，預設前三種；`due`：`overdue`、`week`、`none`），附團隊與成員清單 |
+| `POST /api/meetings/{id}/minutes/items/{itemId}/status`、`GET …/updates` | 改待辦狀態（帶 `version`；取消需 `note`）、讀狀態歷程 |
 | `PUT /api/meetings/{id}/files/{recording\|transcript}` | 儲存會議錄音或逐字稿到 `output/teams/<團隊>/<會議>/` |
 | `WS /ws/transcribe` | 瀏覽器至 app 的即時 PCM 音訊 WebSocket；首包需帶 `meeting_id`，非團隊成員以關閉碼 4404 拒絕 |
 | `POST /api/translate` | 請求 Gemma 文字翻譯；JSON 欄位為 `text`、`source`、`target` 和可選 `history` |

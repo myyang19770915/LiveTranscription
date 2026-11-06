@@ -4,7 +4,8 @@ const meetingId=location.pathname.split('/').filter(Boolean).at(-2);
 const KINDS=[['decision','決議'],['action','待辦'],['question','待確認問題'],['risk','風險']];
 const STATE={proposed:'待確認',confirmed:'已確認',rejected:'已駁回'};
 let data=null,editing=null,adding=null,summaryEditing=false,poll=null;
-let meeting=null,peeking=null,audioUrl=null;   // meeting: /api/meetings/<id> (header and evidence segments)
+let meeting=null,peeking=null,audioUrl=null,linkedShown=false;   // meeting: /api/meetings/<id> (header and evidence segments)
+const linkedId=Number(location.hash.match(/^#item-(\d+)$/)?.[1]);   // from the board (#item-N): that item stays marked
 
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
 const pad=n=>String(n).padStart(2,'0');
@@ -128,7 +129,9 @@ function card(item){
     item.state!=='confirmed'?el('button',{type:'button',className:'secondary-button compact',textContent:'確認',onclick:()=>decide('confirm')}):null,
     item.state!=='rejected'?el('button',{type:'button',className:'text-button danger',textContent:'駁回',onclick:()=>decide('reject')}):null,
     editing===item.id?null:el('button',{type:'button',className:'text-button',textContent:'修改',onclick:()=>{editing=item.id;render()}}));
-  return el('article',{className:`card item ${item.state}${peeking?.itemId===item.id?' peeked':''}`},head,body,fields,evidence(item),actions);
+  // A confirmed action is tracked (action-tracking): status, overdue days and history.
+  const tracking=item.kind==='action'&&item.state==='confirmed'?ActionStatus.control(item,{meetingId,onChange:(next,message)=>{replaceItem(next);notice(message)},onError:notice}):null;
+  return el('article',{className:`card item ${item.state}${peeking?.itemId===item.id?' peeked':''}${item.id===linkedId?' linked':''}`,id:`item-${item.id}`},head,body,fields,tracking,evidence(item),actions);
 }
 function addForm(kind){
   const text=el('textarea',{className:'input editor',rows:2,maxLength:500,placeholder:'內容',ariaLabel:'新條目內容'});
@@ -181,6 +184,9 @@ async function load(){
   if(polling&&data.status==='running'){renderStatus();poll=setTimeout(()=>load().catch(error=>notice(error.message)),2000);return}
   $('modelNote').textContent=data.modelAvailable?` 產生時整場逐字稿會傳送到外部模型服務${data.model?`（${data.model}）`:''}。`:'';
   render();
+  // From the board (#item-N): bring that item into view once.
+  const linked=!linkedShown&&linkedId&&$(`item-${linkedId}`);
+  if(linked){linkedShown=true;linked.scrollIntoView({block:'center'})}
   clearTimeout(poll);if(data.status==='running')poll=setTimeout(()=>load().catch(error=>notice(error.message)),2000);
 }
 
