@@ -66,26 +66,46 @@ function renderPeek(){
   $(`peek-${peeking.focusSeq}`)?.scrollIntoView({block:'nearest'});
 }
 function peekRow(segment,cited){
-  return el('div',{className:`peek-seg${cited?' cited':''}${segment.seq===peeking.focusSeq?' focus':''}`,id:`peek-${segment.seq}`},
+  let playButton=null;
+  if(meeting.hasRecording){
+    playButton=el('button',{type:'button',className:'peek-play',title:'播放／暫停這段錄音',onclick:()=>togglePlay(segment)});
+    playButton.dataset.play=segment.seq;
+  }
+  const row=el('div',{className:`peek-seg${cited?' cited':''}${segment.seq===peeking.focusSeq?' focus':''}`,id:`peek-${segment.seq}`},
     el('div',{className:'peek-seg-head'},
-      meeting.hasRecording?el('button',{type:'button',className:'peek-play',title:'播放這段錄音',onclick:event=>play(segment,event.currentTarget)},`▶ ${clock(segment.startMs)}`)
-        :el('span',{className:'peek-time',textContent:clock(segment.startMs)}),
+      playButton||el('span',{className:'peek-time',textContent:clock(segment.startMs)}),
       cited?el('a',{className:'text-button',href:`/meetings/${meetingId}#seg-${segment.seq}`,textContent:'到校對頁修正'}):null),
     el('p',{className:'peek-source',textContent:segment.source}),
     segment.target?el('p',{className:'peek-target',textContent:segment.target}):null);
+  if(playButton)syncButton(playButton);
+  return row;
 }
-async function play(segment,button){
+// Playback: the button plays, pauses and resumes its segment; another segment, or a finished clip, loads afresh.
+let clip=null;   // {seq, span} loaded in the player
+function togglePlay(segment){
+  const player=$('player');
+  if(clip?.seq!==segment.seq||player.ended)return play(segment);
+  if(player.paused)player.play().catch(error=>notice(error.message));else player.pause();
+  syncPlayer();
+}
+function syncButton(button){
+  const player=$('player'),seq=Number(button.dataset.play),segment=meeting.segments.find(s=>s.seq===seq);
+  const loaded=clip?.seq===seq&&!player.ended,playing=loaded&&!player.paused;
+  button.textContent=playing?`❚❚ ${clock(clip.span.start+player.currentTime*1000)}`:loaded&&player.currentTime>0?`▶ 繼續 ${clock(clip.span.start+player.currentTime*1000)}`:`▶ ${clock(segment.startMs)}`;
+  button.classList.toggle('playing',playing);
+}
+function syncPlayer(){document.querySelectorAll('.peek-play').forEach(syncButton)}
+async function play(segment){
   const span=MeetingTimeline.playWindow(segment.startMs,segment.endMs,meeting.durationMs||Infinity);
-  document.querySelectorAll('.peek-play.playing').forEach(b=>b.classList.remove('playing'));
   try{
     const response=await fetch(`/api/meetings/${meetingId}/audio?start=${span.start}&end=${span.end}`);
     if(!response.ok)throw new Error((await response.json().catch(()=>({}))).detail||'無法載入錄音');
     if(audioUrl)URL.revokeObjectURL(audioUrl);
     audioUrl=URL.createObjectURL(await response.blob());
-    $('player').src=audioUrl;await $('player').play();button.classList.add('playing');
+    clip={seq:segment.seq,span};$('player').src=audioUrl;await $('player').play();
   }catch(error){notice(error.message)}
 }
-$('player').onended=$('player').onpause=()=>document.querySelectorAll('.peek-play.playing').forEach(b=>b.classList.remove('playing'));
+for(const event of ['play','pause','ended','timeupdate'])$('player').addEventListener(event,syncPlayer);
 $('peekClose').onclick=closePeek;
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&peeking)closePeek()});
 function editor(item){

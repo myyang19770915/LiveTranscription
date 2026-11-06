@@ -4,7 +4,7 @@ const $=id=>document.getElementById(id);
 const meetingId=location.pathname.split('/').filter(Boolean).pop();
 const STATE={unreviewed:'未校對',confirmed:'已確認',edited:'已修改'};
 const EXTEND_MS=2000;
-let meeting=null,segments=[],selected=null,extra={lead:0,tail:0},audioUrl=null;
+let meeting=null,segments=[],selected=null,extra={lead:0,tail:0},audioUrl=null,clip=null;   // clip: {seq, span} loaded in the player
 const notes=new Map();     // seq -> {text, retry, next}: per-segment status line after an action
 
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
@@ -30,14 +30,38 @@ async function play(seq){
     if(!response.ok)throw new Error((await response.json().catch(()=>({}))).detail||'無法載入錄音');
     if(audioUrl)URL.revokeObjectURL(audioUrl);
     audioUrl=URL.createObjectURL(await response.blob());
-    $('player').src=audioUrl;await $('player').play();
-    notes.set(seq,{...notes.get(seq),playing:`播放 ${clock(span.start)}–${clock(span.end)}`});render();
+    clip={seq,span};$('player').src=audioUrl;await $('player').play();
   }catch(error){notice(error.message)}
 }
+// The play button pauses and resumes the loaded clip; another segment, or a finished clip, loads afresh.
+function togglePlay(seq){
+  const player=$('player');
+  if(clip?.seq!==seq||player.ended)return play(seq);
+  if(player.paused)player.play().catch(error=>notice(error.message));else player.pause();
+  syncPlayer();
+}
+// Buttons and the position read update in place, so a redraw never interrupts an open editor.
+function syncPlayer(){
+  const player=$('player');
+  for(const button of document.querySelectorAll('[data-play]')){
+    const seq=Number(button.dataset.play),loaded=clip?.seq===seq&&!player.ended,playing=loaded&&!player.paused;
+    button.textContent=playing?'❚❚ 暫停':loaded&&player.currentTime>0?'▶ 繼續':'▶ 播放';
+    button.classList.toggle('playing',playing);
+    const time=$(`playtime-${seq}`);
+    if(time)time.textContent=clip?.seq===seq?`${clock(clip.span.start+player.currentTime*1000)} / ${clock(clip.span.end)}`:'';
+  }
+}
+for(const event of ['play','pause','ended','timeupdate'])$('player').addEventListener(event,syncPlayer);
+// Space plays or pauses the open segment (except while typing or on a focused button).
+document.addEventListener('keydown',event=>{
+  if(event.key!==' '||selected==null||!meeting?.hasRecording||event.target.closest('input,textarea,select,button,a'))return;
+  event.preventDefault();togglePlay(selected);
+});
 function select(seq){
   if(selected!==seq){selected=seq;extra={lead:0,tail:0}}
   render();play(seq);
 }
+
 
 // --- Corrections ---
 function finals(){return segments.map(s=>({source:s.source,target:s.target,detected:s.detected}))}
@@ -90,13 +114,16 @@ function actions(segment){
   const seq=segment.seq,note=notes.get(seq)||{};
   const button=(text,onclick,cls='text-button')=>el('button',{type:'button',className:cls,textContent:text,onclick:event=>{event.stopPropagation();onclick()}});
   const bar=el('div',{className:'seg-actions'},
-    meeting.hasRecording?button('▶ 重播',()=>play(seq)):el('span',{className:'muted small',textContent:'這場會議沒有錄音'}),
+    meeting.hasRecording?Object.assign(button('▶ 播放',()=>togglePlay(seq),'text-button play-button'),{title:'播放／暫停（空白鍵）'}):el('span',{className:'muted small',textContent:'這場會議沒有錄音'}),
     meeting.hasRecording?button('往前 2 秒',()=>{extra.lead+=EXTEND_MS;play(seq)}):null,
     meeting.hasRecording?button('往後 2 秒',()=>{extra.tail+=EXTEND_MS;play(seq)}):null,
+    meeting.hasRecording?el('span',{className:'play-time',id:`playtime-${seq}`}):null,
     el('span',{className:'spacer'}),
     button('修改原文',()=>{editing=seq;render()}),
     segment.state==='unreviewed'?button('確認正確',()=>confirmSegment(seq)):null,
     button('歷程',()=>showHistory(seq)));
+  bar.querySelector('.play-button')?.setAttribute('data-play',seq);
+  queueMicrotask(syncPlayer);
   return [bar,status(segment),history(segment)];
 }
 // Shown on open rows, and on closed ones while something is happening to them ("一併重譯下一段").
@@ -104,7 +131,6 @@ function status(segment){
   const seq=segment.seq,note=notes.get(seq)||{};
   const button=(text,onclick,cls)=>el('button',{type:'button',className:cls,textContent:text,onclick:event=>{event.stopPropagation();onclick()}});
   return el('div',{className:'seg-note',ariaLive:'polite'},
-    note.playing?el('span',{className:'muted small',textContent:note.playing}):null,
     note.text?el('span',{className:note.text.includes('失敗')||note.text.includes('重複')?'warn':'ok',textContent:note.text}):null,
     note.retry?button('重試',note.retry,'secondary-button compact'):null,
     note.next?button('一併重譯下一段',()=>{notes.set(seq,{...note,next:null});retranslate(note.next,false)},'secondary-button compact'):null);

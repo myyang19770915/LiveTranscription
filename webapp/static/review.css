@@ -64,6 +64,9 @@ code { padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); fon
 .seg-panel { grid-column: 1 / -1; display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
 .seg-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .seg-actions .spacer { flex: 1; }
+.play-button { min-width: 84px; text-align: left; }
+.play-button.playing { color: var(--accent); background: var(--accent-soft); }
+.play-time { margin-left: 6px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .seg-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 14px; }
 .seg-note:empty { display: none; }
 .seg-note .ok { color: var(--accent); font-weight: 600; }
