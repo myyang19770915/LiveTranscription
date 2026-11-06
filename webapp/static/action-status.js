@@ -26,7 +26,9 @@
       list.replaceChildren(...(rows.length?rows.map(h=>el('li',{},
         el('span',{textContent:`${LABEL[h.from]} → ${LABEL[h.to]}`}),
         el('small',{className:'muted',textContent:` ${h.by} · ${when(h.at)}`}),
-        h.note?el('p',{className:'status-history-note',textContent:h.note}):null))
+        h.note?el('p',{className:'status-history-note',textContent:h.note}):null,
+        // Applied from an in-meeting progress suggestion: where it was said.
+        h.meetingId?el('a',{className:'status-history-meeting',href:`/meetings/${h.meetingId}${h.evidence?.length?`#seg-${h.evidence[0]}`:''}`,textContent:'於會議中提到'}):null))
         :[el('li',{className:'muted small',textContent:'還沒有狀態變更'})]));
     }).catch(()=>list.replaceChildren(el('li',{className:'muted small',textContent:'無法載入歷程'})));
     return list;
@@ -67,5 +69,5 @@
     };
     return wrap;
   }
-  root.ActionStatus={STATUS,LABEL,overdue,control};
+  root.ActionStatus={STATUS,LABEL,overdue,control,send};
 })(window);

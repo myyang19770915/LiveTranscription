@@ -1,72 +1,204 @@
-// Action board: confirmed action items of the user's teams in status columns; filters live in the address.
+// Action board in the spirit of a Jira board (jira-style-board): compact cards, drag between columns to change
+// the status, a detail panel to edit, quick filters, avatar filter and swimlanes. Everything filterable lives in
+// the address; the open card too (?item=).
 const $=id=>document.getElementById(id);
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
-const FILTERS=['q','team','owner','due'];
 const COLUMNS=['todo','doing','done','cancelled'];
-let latest=0,peopleLoaded=false;
+const AVATAR_MAX=12;
+const CALENDAR='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>';
+let params=new URLSearchParams(location.search);
+let data=null,latest=0,teamsLoaded=false,allDone=false,dragging=null,shownVersion=null;
 
-function notice(message){$('notice').textContent=message;$('notice').hidden=!message}
-function dueLabel(item){
-  if(!item.dueDate)return item.dueText?`到期：${item.dueText}`:'沒有到期日';
-  const [y,m,d]=item.dueDate.split('-').map(Number);
-  return `到期 ${y!==new Date().getFullYear()?`${y}/`:''}${m}/${d}${item.dueText?`（${item.dueText}）`:''}`;
+function notice(message){$('notice').textContent=message||'';$('notice').hidden=!message}
+const store={get(k){try{return localStorage.getItem(k)}catch{return null}},set(k,v){try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch{}}};
+function setParam(key,value){if(value)params.set(key,value);else params.delete(key);history.replaceState(null,'',params.toString()?`/actions?${params}`:'/actions')}
+
+// --- Pieces ---
+function avatarFor(username,name,size=''){
+  if(!username)return el('span',{className:`avatar-mini empty ${size}`,title:'未指派',ariaLabel:'未指派'});
+  const {initial,color}=ActionBoard.avatar(username,name);
+  return el('span',{className:`avatar-mini c${color} ${size}`,title:name||username,textContent:initial});
 }
+function dueChip(item){
+  const tone=ActionBoard.dueTone(item,today());
+  if(tone==='overdue')return el('span',{className:'due-chip overdue',textContent:`逾期 ${item.overdueDays} 天`});
+  if(!item.dueDate)return null;
+  const [,m,d]=item.dueDate.split('-').map(Number);
+  return el('span',{className:`due-chip ${tone}`,title:item.dueText?`原話：${item.dueText}`:''},el('span',{className:'due-icon',innerHTML:CALENDAR}),`${m}/${d}`);
+}
+const meetingName=item=>`${item.team} · ${MeetingCatalog.displayTitle({title:item.meetingTitle,startedAt:item.startedAt})}`;
+function laneName(item){
+  const d=new Date(item.startedAt);
+  return `${meetingName(item)}${item.meetingTitle?`（${d.getMonth()+1}/${d.getDate()}）`:''}${item.series?` · ${item.series}`:''}`;
+}
+// The server's today (MEETING_TIMEZONE), at noon so a local-time conversion cannot move it to another day.
+const today=()=>{const [y,m,d]=(data?.today||'').split('-').map(Number);return y?new Date(y,m-1,d,12):new Date()};
 function card(item){
-  const meeting={title:item.meetingTitle,startedAt:item.startedAt};
-  return el('article',{className:`card action-card status-${item.status}${item.overdueDays>0?' is-overdue':''}`,id:`action-${item.id}`},
-    el('p',{className:'action-content',textContent:item.content}),
-    el('div',{className:'action-meta'},
-      el('span',{className:item.owner?'action-owner':'action-owner muted',textContent:item.owner?item.ownerName:'未指派'}),
-      el('span',{className:'muted',textContent:dueLabel(item)})),
-    ActionStatus.control(item,{meetingId:item.meetingId,onChange:(next,message)=>{notice(message);reload()},onError:notice}),
-    el('a',{className:'action-source',href:`/meetings/${item.meetingId}/minutes#item-${item.id}`},
-      el('span',{className:'count',textContent:item.team}),` ${MeetingCatalog.displayTitle(meeting)}`));
+  const node=el('article',{className:`issue status-${item.status}${item.overdueDays>0?' is-overdue':''}`,id:`action-${item.id}`,tabIndex:0,draggable:true,
+      ariaLabel:`#${item.id} ${item.content}`},
+    el('p',{className:'issue-source',textContent:meetingName(item)}),
+    el('p',{className:'issue-summary',textContent:item.content}),
+    el('div',{className:'issue-foot'},
+      el('span',{className:'issue-key',textContent:`#${item.id}`}),dueChip(item),el('span',{className:'issue-gap'}),
+      avatarFor(item.owner,item.ownerName)));
+  node.onclick=()=>openDetail(item.id);
+  node.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openDetail(item.id)}};
+  node.ondragstart=event=>{dragging=item;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',String(item.id));node.classList.add('dragging')};
+  node.ondragend=()=>{dragging=null;node.classList.remove('dragging');document.querySelectorAll('.drop-target').forEach(c=>c.classList.remove('drop-target'))};
+  return node;
 }
-function currentFilters(){
-  // Until the first answer fills the team and owner menus, their values come from the address.
-  const value=k=>!peopleLoaded&&(k==='team'||k==='owner')?params.get(k)||'':$(k).value;
-  const filters=Object.fromEntries(FILTERS.map(k=>[k,value(k)]).filter(([,v])=>v));
-  if($('cancelled').checked)filters.cancelled='1';
-  return filters;
+function column(status,items){
+  let shown=items,earlier=[];
+  if(status==='done'&&!allDone)({shown,earlier}=ActionBoard.recentDone(items,today()));
+  const body=el('div',{className:'column-body'},...shown.map(card),
+    earlier.length?el('button',{type:'button',className:'more-done',textContent:`另有 ${earlier.length} 件較早完成`,onclick:()=>{allDone=true;render()}}):null,
+    !items.length?el('p',{className:'column-empty',textContent:'沒有待辦'}):null);
+  const col=el('section',{className:`board-column column-${status}`,ariaLabel:ActionStatus.LABEL[status]},
+    el('h2',{className:'column-title'},el('span',{textContent:ActionStatus.LABEL[status]}),el('span',{className:'column-count',textContent:String(items.length)})),body);
+  col.ondragover=event=>{if(!dragging)return;event.preventDefault();col.classList.add('drop-target')};
+  col.ondragleave=event=>{if(!col.contains(event.relatedTarget))col.classList.remove('drop-target')};
+  col.ondrop=event=>{event.preventDefault();col.classList.remove('drop-target');const item=dragging;dragging=null;if(item)moveTo(item,status)};
+  return col;
+}
+async function moveTo(item,status){
+  if(item.status===status)return;
+  if(status==='cancelled'){openDetail(item.id,{cancel:true});return}     // a reason is required first
+  try{const {message}=await ActionStatus.send(item.meetingId,item,status,'');notice(message)}
+  catch(error){notice(error.message)}
+  await reload();
+}
+
+// --- Board ---
+function render(){
+  const columns=COLUMNS.filter(s=>s!=='cancelled'||params.get('cancelled'));
+  const group=params.get('group')||'';
+  const lanes=ActionBoard.swimlanes(data.items,group,laneName);
+  $('board').style.setProperty('--columns',columns.length);
+  $('board').classList.toggle('grouped',!!group);
+  $('board').replaceChildren(...lanes.map(lane=>{
+    const grid=el('div',{className:'lane-columns'},...columns.map(s=>column(s,lane.items.filter(i=>i.status===s))));
+    if(!group)return grid;
+    const key=`lane:${group}:${lane.key}`,collapsed=store.get(key)==='1';
+    const toggle=el('button',{type:'button',className:'lane-toggle',ariaExpanded:String(!collapsed)},
+      el('span',{className:'lane-caret',textContent:'▾'}),
+      group==='owner'?avatarFor(lane.key,lane.label):null,
+      el('b',{textContent:lane.label}),el('span',{className:'column-count',textContent:`${lane.items.length} 件`}));
+    toggle.onclick=()=>{store.set(key,collapsed?null:'1');render()};
+    return el('section',{className:`lane${collapsed?' collapsed':''}`},toggle,collapsed?null:grid);
+  }));
+  if(!$('detail').hidden)$(`action-${params.get('item')}`)?.classList.add('selected');
+  renderFilters();
+}
+function pressQuick(){for(const button of document.querySelectorAll('.quick'))button.setAttribute('aria-pressed',String(params.get(button.dataset.key)===button.dataset.value))}
+function moreAvatars(owner){
+  const rest=data.people.slice(AVATAR_MAX);
+  const menu=el('select',{className:'avatar-more',ariaLabel:'其他成員'},el('option',{value:'',textContent:`+${rest.length}`}),
+    ...rest.map(p=>el('option',{value:p.username,textContent:p.displayName})));
+  menu.value=rest.some(p=>p.username===owner)?owner:'';
+  menu.onchange=()=>{setParam('owner',menu.value);reload()};
+  return menu;
+}
+function renderFilters(){
+  pressQuick();
+  const owner=params.get('owner');
+  $('avatars').replaceChildren(...data.people.slice(0,AVATAR_MAX).map(p=>{
+    const button=el('button',{type:'button',className:'avatar-button',title:p.displayName},avatarFor(p.username,p.displayName,'large'));
+    button.setAttribute('aria-pressed',String(owner===p.username));button.setAttribute('aria-label',`只看 ${p.displayName}`);
+    button.onclick=()=>{setParam('owner',owner===p.username?'':p.username);reload()};
+    return button;
+  }),...(data.people.length>AVATAR_MAX?[moreAvatars(owner)]:[]));
+  $('clear').hidden=!['q','team','owner','due','cancelled'].some(k=>params.get(k));
+  const open=data.items.filter(i=>i.status==='todo'||i.status==='doing'),overdue=open.filter(i=>i.overdueDays>0).length;
+  $('summary').textContent=`${open.length} 件未完成${overdue?`，${overdue} 件逾期`:''}`;
 }
 async function load(){
-  const ticket=++latest,filters=currentFilters(),query=new URLSearchParams(filters).toString();
-  history.replaceState(null,'',query?`/actions?${query}`:'/actions');
-  $('clear').hidden=!query;
-  const api=new URLSearchParams({...filters,status:filters.cancelled?COLUMNS.join(','):COLUMNS.slice(0,3).join(',')});
-  api.delete('cancelled');
-  const response=await fetch(`/api/actions?${api}`);
-  const data=await response.json().catch(()=>null);
+  const ticket=++latest;
+  const query=new URLSearchParams();
+  for(const k of ['q','team','owner','due'])if(params.get(k))query.set(k,params.get(k));
+  query.set('status',(params.get('cancelled')?COLUMNS:COLUMNS.slice(0,3)).join(','));
+  const response=await fetch(`/api/actions?${query}`);
+  const result=await response.json().catch(()=>null);
   if(ticket!==latest)return;
   // A bookmarked team the user has left: show all their teams instead of staying on the error.
-  if(response.status===404&&filters.team){params.delete('team');$('team').value='';await load();notice('找不到這個團隊，已改為顯示全部團隊');return}
-  if(!response.ok||!data?.items)throw new Error(data?.detail||'無法載入待辦');
-  if(!peopleLoaded){
-    peopleLoaded=true;
+  if(response.status===404&&params.get('team')){setParam('team','');$('team').value='';await load();notice('找不到這個團隊，已改為顯示全部團隊');return}
+  if(!response.ok||!result?.items)throw new Error(result?.detail||'無法載入待辦');
+  data=result;
+  if(!teamsLoaded){
+    teamsLoaded=true;
     $('team').append(...data.teams.map(t=>el('option',{value:t.id,textContent:t.name})));
-    $('owner').append(...data.people.map(p=>el('option',{value:p.username,textContent:p.displayName===p.username?p.username:`${p.displayName}（${p.username}）`})));
-    $('team').value=params.get('team')||'';$('owner').value=params.get('owner')||'';
+    $('team').value=params.get('team')||'';
   }
-  const overdue=data.items.filter(i=>i.overdueDays>0).length;
-  $('summary').textContent=`${data.items.filter(i=>i.status==='todo'||i.status==='doing').length} 件未完成${overdue?`，${overdue} 件逾期`:''}`;
-  const columns=COLUMNS.filter(s=>s!=='cancelled'||filters.cancelled);
-  $('board').style.setProperty('--columns',columns.length);
-  $('board').replaceChildren(...columns.map(status=>{
-    const items=data.items.filter(i=>i.status===status);
-    return el('section',{className:`board-column column-${status}`,ariaLabel:ActionStatus.LABEL[status]},
-      el('h2',{className:'column-title'},ActionStatus.LABEL[status],el('span',{className:'count',textContent:String(items.length)})),
-      ...(items.length?items.map(card):[el('p',{className:'muted small empty-column',textContent:query?'沒有符合條件的待辦':'沒有待辦'})]));
-  }));
+  render();
+  // The open card (?item=) follows the latest data; it closes when the filters no longer include it.
+  const open=Number(params.get('item')),current=data.items.find(i=>i.id===open);
+  if(open&&current&&!$('detail').hidden&&current.version===shownVersion)$(`action-${open}`)?.classList.add('selected');
+  else if(open)openDetail(open,{keep:true});
 }
-function reload(){load().catch(error=>notice(error.message))}
+function reload(){return load().catch(error=>notice(error.message))}
 
-let params=new URLSearchParams(location.search);
-for(const k of FILTERS)$(k).value=params.get(k)||'';
-$('cancelled').checked=params.get('cancelled')==='1';
+// --- Detail panel ---
+async function patchItem(item,body){
+  const response=await fetch(`/api/meetings/${item.meetingId}/minutes/items/${item.id}`,{method:'PATCH',headers:{'content-type':'application/json'},
+    body:JSON.stringify({version:item.version,...body})});
+  const result=await response.json().catch(()=>({}));
+  panelError(response.ok?'':typeof result.detail==='string'?result.detail:'儲存失敗');
+  if(response.ok)fresh(item,result);
+  await reload();
+}
+// The server's answer carries the new version: take it at once, so a second edit before the board reloads is not stale.
+function fresh(item,next){
+  const {version,status,statusNote,owner,ownerName,dueDate,dueText,overdueDays}=next;
+  Object.assign(item,{version,status,statusNote,owner,ownerName,dueDate,dueText,overdueDays});
+}
+function panelError(message){const box=$('detailError');if(box){box.textContent=message||'';box.hidden=!message}}
+function openDetail(id,{cancel=false,keep=false}={}){
+  const item=data.items.find(i=>i.id===id);
+  if(!item){closeDetail();return}
+  if(!keep)setParam('item',String(id));
+  document.querySelectorAll('.issue.selected').forEach(n=>n.classList.remove('selected'));
+  $(`action-${id}`)?.classList.add('selected');
+  document.documentElement.style.setProperty('--detail-top',`${document.querySelector('.topbar').offsetHeight}px`);
+  document.body.classList.add('detail-open');$('detail').hidden=false;
+  $('detailKey').textContent=`#${item.id}`;
+  shownVersion=item.version;
+  const status=ActionStatus.control(item,{meetingId:item.meetingId,onChange:(next,message)=>{fresh(item,next);panelError(message);reload()},onError:panelError});
+  const members=data.people.filter(p=>p.teams.includes(item.teamId));
+  const owner=el('select',{className:'input compact',ariaLabel:'負責人'},el('option',{value:'',textContent:'未指派'}),
+    ...members.map(p=>el('option',{value:p.username,textContent:p.displayName===p.username?p.username:`${p.displayName}（${p.username}）`})));
+  if(item.owner&&!members.some(p=>p.username===item.owner))owner.append(el('option',{value:item.owner,disabled:true,textContent:`${item.ownerName||item.owner}（已不在團隊）`}));
+  owner.value=item.owner||'';owner.onchange=()=>patchItem(item,{owner:owner.value||null});
+  const due=el('input',{className:'input compact',type:'date',value:item.dueDate||'',ariaLabel:'到期日'});
+  due.onchange=()=>patchItem(item,{dueDate:due.value||null});
+  const field=(label,...content)=>el('div',{className:'detail-field'},el('span',{className:'detail-label',textContent:label}),el('div',{className:'detail-value'},...content));
+  $('detailBody').replaceChildren(
+    el('h2',{id:'detailTitle',className:'detail-title',textContent:item.content}),
+    el('p',{id:'detailError',className:'alert',role:'alert',hidden:true}),
+    field('狀態',status),
+    field('負責人',avatarFor(item.owner,item.ownerName),owner),
+    field('到期日',due,dueChip(item),item.dueText?el('span',{className:'muted small',textContent:`原話：「${item.dueText}」`}):null),
+    field('團隊',el('span',{textContent:item.team})),
+    field('來源',el('a',{href:`/meetings/${item.meetingId}/minutes#item-${item.id}`,textContent:meetingName(item)})),
+    el('p',{className:'detail-hint muted small',textContent:'按「歷程」看每次狀態變更；會議中套用的進度提示會附上那場會議的連結。'}));
+  // Opened by dropping on 已取消: ask for the reason right away.
+  if(cancel){const select=status.querySelector('select');select.value='cancelled';select.dispatchEvent(new Event('change'))}
+}
+function closeDetail(){
+  $('detail').hidden=true;document.body.classList.remove('detail-open');setParam('item','');
+  document.querySelectorAll('.issue.selected').forEach(n=>n.classList.remove('selected'));
+}
+
+// --- Filters ---
+for(const k of ['q','team','group'])$(k).value=params.get(k)||'';
 let typing;
-$('q').oninput=()=>{clearTimeout(typing);typing=setTimeout(reload,300)};
-for(const k of ['team','owner','due','cancelled'])$(k).onchange=()=>{notice('');reload()};
-$('filters').onsubmit=event=>{event.preventDefault();reload()};
-$('clear').onclick=()=>{params=new URLSearchParams();for(const k of FILTERS)$(k).value='';$('cancelled').checked=false;notice('');reload()};
+$('q').oninput=()=>{clearTimeout(typing);typing=setTimeout(()=>{setParam('q',$('q').value.trim());reload()},300)};
+$('team').onchange=()=>{notice('');setParam('team',$('team').value);reload()};
+$('group').onchange=()=>{setParam('group',$('group').value);render()};
+for(const button of document.querySelectorAll('.quick'))button.onclick=()=>{
+  const {key,value}=button.dataset;setParam(key,params.get(key)===value?'':value);pressQuick();notice('');reload();
+};
+$('filters').onsubmit=event=>{event.preventDefault();setParam('q',$('q').value.trim());reload()};
+$('clear').onclick=()=>{for(const k of ['q','team','owner','due','cancelled'])params.delete(k);$('q').value='';$('team').value='';setParam('q','');notice('');reload()};
+$('detailClose').onclick=closeDetail;
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('detail').hidden)closeDetail()});
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
 window.accountReady.then(reload);

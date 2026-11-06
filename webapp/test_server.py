@@ -1309,6 +1309,20 @@ class ActionTrackingTests(ReviewTestCase):
         self.assertEqual(self.alice.get("/api/actions?status=open").status_code, 422)
         self.assertEqual(self.alice.get("/api/actions?due=later").status_code, 422)
 
+    def test_board_status_time_series_and_people_teams(self):
+        changed, untouched = self.item("改過狀態"), self.item("沒改過")
+        self.assertEqual(self.change(changed, "doing").status_code, 200)
+        weekly = self.alice.post(f"/api/teams/{self.team_id}/series", json={"name": "研發週會"}).json()["id"]
+        self.alice.patch(f"/api/meetings/{self.meeting}", json={"series_id": weekly})
+        items = {i["content"]: i for i in self.alice.get("/api/actions").json()["items"]}
+        self.assertIsNotNone(items["改過狀態"]["statusAt"])
+        self.assertIsNone(items["沒改過"]["statusAt"])
+        self.assertEqual({i["series"] for i in items.values()}, {"研發週會"})
+        sales = self.team("業務部", "alice", "bob")
+        self.team("財務部", "bob", "carol")
+        people = {p["username"]: p["teams"] for p in self.alice.get("/api/actions").json()["people"]}
+        self.assertEqual(people, {"alice": sorted([self.team_id, sales]), "bob": sorted([self.team_id, sales])})
+
     def test_board_order_and_keyword(self):
         self.item("晚一點", due=date(2026, 11, 20))
         self.item("沒有日期")

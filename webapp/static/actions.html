@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>待辦看板 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261106c"><link rel="stylesheet" href="/assets/review.css?v=20261107a"><link rel="stylesheet" href="/assets/actions.css?v=20261106b"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>待辦看板 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261106c"><link rel="stylesheet" href="/assets/review.css?v=20261107a"><link rel="stylesheet" href="/assets/actions.css?v=20261107b"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>待辦看板</small></span></a>
@@ -11,30 +11,50 @@
 </header>
 
 <main class="page board-page">
-  <div class="page-head">
+  <div class="board-head">
     <div>
       <p class="eyebrow">ACTIONS</p>
       <h1>待辦看板</h1>
-      <p class="lead">你所屬團隊在會議紀要中已確認的待辦。改狀態會留下歷程；到期日已過、還沒完成的待辦以紅字標示逾期天數。</p>
     </div>
     <p id="summary" class="summary" aria-live="polite"></p>
   </div>
 
-  <form id="filters" class="card filters" role="search">
-    <label class="filter-search">搜尋內容<input id="q" class="input compact" type="search" maxlength="100" placeholder="例如 合約" autocomplete="off"></label>
-    <label>團隊<select id="team" class="input compact"><option value="">全部團隊</option></select></label>
-    <label>負責人<select id="owner" class="input compact"><option value="">所有人</option><option value="me">我的</option><option value="none">未指派</option></select></label>
-    <label>到期<select id="due" class="input compact"><option value="">全部</option><option value="overdue">逾期</option><option value="week">7 天內到期</option><option value="none">沒有到期日</option></select></label>
-    <label class="toggle filter-toggle"><input id="cancelled" type="checkbox"> 顯示已取消</label>
-    <button id="clear" class="text-button" type="button" hidden>清除篩選</button>
+  <form id="filters" class="board-toolbar" role="search">
+    <div class="toolbar-row">
+      <label class="board-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><input id="q" type="search" maxlength="100" placeholder="搜尋待辦" aria-label="搜尋待辦內容" autocomplete="off"></label>
+      <div id="avatars" class="avatar-filter" role="group" aria-label="依負責人篩選"></div>
+      <span class="toolbar-gap"></span>
+      <label class="toolbar-select">團隊<select id="team"><option value="">全部</option></select></label>
+      <label class="toolbar-select">分組<select id="group"><option value="">不分組</option><option value="owner">依負責人</option><option value="meeting">依來源會議</option></select></label>
+    </div>
+    <div class="toolbar-row quick-filters" role="group" aria-label="快速篩選">
+      <button type="button" class="quick" data-key="owner" data-value="me">只看我的</button>
+      <button type="button" class="quick" data-key="owner" data-value="none">未指派</button>
+      <span class="quick-divider" aria-hidden="true"></span>
+      <button type="button" class="quick" data-key="due" data-value="overdue">逾期</button>
+      <button type="button" class="quick" data-key="due" data-value="week">7 天內到期</button>
+      <button type="button" class="quick" data-key="due" data-value="none">沒有到期日</button>
+      <span class="quick-divider" aria-hidden="true"></span>
+      <button type="button" class="quick" data-key="cancelled" data-value="1">顯示已取消</button>
+      <button id="clear" class="text-button" type="button" hidden>清除篩選</button>
+    </div>
   </form>
 
   <p id="notice" class="alert" role="alert" hidden></p>
   <section id="board" class="board" aria-label="待辦" aria-live="polite"></section>
 </main>
 
+<aside id="detail" class="detail" aria-labelledby="detailTitle" hidden>
+  <div class="detail-head">
+    <span id="detailKey" class="issue-key"></span>
+    <button id="detailClose" class="icon-button" type="button" aria-label="關閉（Esc）" title="關閉（Esc）"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div id="detailBody" class="detail-body"></div>
+</aside>
+
 <script src="/assets/account.js?v=20261106b"></script>
 <script src="/assets/meeting-catalog.js?v=20261105a"></script>
-<script src="/assets/action-status.js?v=20261106a"></script>
-<script src="/assets/actions.js?v=20261106b"></script>
+<script src="/assets/board.js?v=20261107a"></script>
+<script src="/assets/action-status.js?v=20261107b"></script>
+<script src="/assets/actions.js?v=20261107d"></script>
 </body></html>

@@ -110,12 +110,14 @@ async def board(user: auth.CurrentUser, team: int | None = None, owner: str = Qu
         teams = await (await conn.execute(
             "SELECT t.id, t.name FROM teams t JOIN team_members tm ON tm.team_id = t.id AND tm.username = %s ORDER BY t.name",
             (user.username,))).fetchall()
+        # Each person with the teams they share with the user: the detail panel offers only the item's team's members.
         people = await (await conn.execute(
-            "SELECT DISTINCT tm.username, coalesce(nullif(u.display_name, ''), tm.username) AS display_name FROM team_members tm "
-            "JOIN team_members mine ON mine.team_id = tm.team_id AND mine.username = %s LEFT JOIN users u ON u.username = tm.username "
-            "ORDER BY tm.username", (user.username,))).fetchall()
-    return {"items": items, "teams": [{"id": t["id"], "name": t["name"]} for t in teams],
-            "people": [{"username": p["username"], "displayName": p["display_name"]} for p in people]}
+            "SELECT tm.username, coalesce(nullif(u.display_name, ''), tm.username) AS display_name, array_agg(tm.team_id ORDER BY tm.team_id) AS teams "
+            "FROM team_members tm JOIN team_members mine ON mine.team_id = tm.team_id AND mine.username = %s "
+            "LEFT JOIN users u ON u.username = tm.username GROUP BY tm.username, u.display_name ORDER BY tm.username", (user.username,))).fetchall()
+    # today: the server's calendar (MEETING_TIMEZONE), so "due soon" and "recently done" agree with overdue days.
+    return {"items": items, "today": minutes.local_today().isoformat(), "teams": [{"id": t["id"], "name": t["name"]} for t in teams],
+            "people": [{"username": p["username"], "displayName": p["display_name"], "teams": p["teams"]} for p in people]}
 
 
 async def action_rows(conn, user: auth.User, where: list[str], params: dict) -> list[dict]:
@@ -123,17 +125,18 @@ async def action_rows(conn, user: auth.User, where: list[str], params: dict) -> 
     shows them, most overdue first, then by due date (none last). params needs no today/open/user."""
     params = {**params, "user": user.username, "today": minutes.local_today(), "open": list(minutes.OPEN_STATUSES)}
     rows = await (await conn.execute(
-        "SELECT i.*, m.title AS meeting_title, m.started_at, m.team_id, t.name AS team_name, "
+        "SELECT i.*, m.title AS meeting_title, m.started_at, m.team_id, t.name AS team_name, ms.name AS series_name, "
         "coalesce(nullif(o.display_name, ''), i.owner) AS owner_name, "
         "CASE WHEN i.status = ANY(%(open)s) AND i.due_date < %(today)s THEN %(today)s - i.due_date ELSE 0 END AS overdue "
         "FROM minute_items i JOIN meetings m ON m.id = i.meeting_id JOIN teams t ON t.id = m.team_id "
         "JOIN team_members tm ON tm.team_id = m.team_id AND tm.username = %(user)s "
-        "LEFT JOIN users o ON o.username = i.owner "
+        "LEFT JOIN users o ON o.username = i.owner LEFT JOIN meeting_series ms ON ms.id = m.series_id "
         "WHERE " + " AND ".join(where) + " ORDER BY overdue DESC, i.due_date ASC NULLS LAST, i.id LIMIT " + str(BOARD_LIMIT),
         params)).fetchall()
     return [{"id": r["id"], "meetingId": str(r["meeting_id"]), "meetingTitle": r["meeting_title"],
              "startedAt": r["started_at"].isoformat(), "teamId": r["team_id"], "team": r["team_name"],
              "content": r["content"], "owner": r["owner"], "ownerName": r["owner_name"], "ownerHint": r["owner_hint"],
              "dueDate": r["due_date"].isoformat() if r["due_date"] else None, "dueText": r["due_text"],
-             "status": r["status"], "statusNote": r["status_note"], "overdueDays": r["overdue"], "version": r["version"]}
+             "status": r["status"], "statusNote": r["status_note"], "overdueDays": r["overdue"], "version": r["version"],
+             "statusAt": r["status_at"].isoformat() if r["status_at"] else None, "series": r["series_name"]}
             for r in rows]

@@ -37,7 +37,8 @@ try {
   await page.waitForFunction(name => document.querySelector('#series').selectedOptions[0]?.textContent === name, seriesName);
   const seriesId = Number(await page.inputValue('#series'));
   check('series created in place and selected', seriesId > 0, seriesId);
-  check('new series has no unfinished items', (await page.textContent('#seriesItems')).includes('這個系列沒有未完成的待辦'));
+  const empty = await page.waitForFunction(() => document.querySelector('#seriesItems').textContent.includes('這個系列沒有未完成的待辦'), null, {timeout: 10000}).then(() => true, () => false);
+  check('new series has no unfinished items', empty, await page.textContent('#seriesItems'));
 
   // Move the meeting with actions into the series: its unfinished items appear before the next meeting.
   const moved = await api.patch(`${app}/api/meetings/${source}`, {data: {series_id: seriesId}});
