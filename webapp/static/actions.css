@@ -20,10 +20,14 @@
 .quick-divider { width: 1px; height: 20px; background: var(--border); }
 
 /* Avatars: a person's initial on a stable colour; 未指派 is a dashed circle. */
-.avatar-filter { display: flex; align-items: center; padding-left: 6px; }
-.avatar-button { margin-left: -6px; padding: 0; border: 2px solid var(--page, var(--panel)); border-radius: 50%; background: transparent; cursor: pointer; transition: transform .12s ease; }
+.avatar-filter { display: flex; align-items: center; padding: 4px 4px 4px 10px; }
+/* A fixed round box (no line box around the photo), separated from its neighbour by a ring in the page colour;
+   pressed adds an accent ring outside it (avatar-self-service). */
+.avatar-button { position: relative; display: inline-grid; place-items: center; margin-left: -6px; padding: 0; border: 0; border-radius: 50%; line-height: 0;
+  background: transparent; box-shadow: 0 0 0 2px var(--page, var(--panel)); cursor: pointer; transition: transform .12s ease; }
 .avatar-button:hover { transform: translateY(-2px); z-index: 1; }
-.avatar-button[aria-pressed="true"] { border-color: var(--accent); z-index: 2; }
+.avatar-button[aria-pressed="true"] { z-index: 2; box-shadow: 0 0 0 2px var(--page, var(--panel)), 0 0 0 4px var(--accent); }
+.avatar-button + .avatar-button { margin-left: -4px; }
 .avatar-more { margin-left: 4px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .avatar-mini { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; line-height: 1; }
 .avatar-mini.large { width: 32px; height: 32px; font-size: 14px; }

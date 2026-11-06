@@ -1869,6 +1869,24 @@ class AvatarTests(AccountTestCase):
         people = {p["username"]: p["avatarUrl"] for p in self.signed_in("alice").get("/api/actions").json()["people"]}
         self.assertIsNone(people["bob"])
 
+    def test_everyone_changes_their_own_photo(self):
+        alice = self.signed_in("alice")
+        self.assertIsNone(alice.get("/api/me").json()["avatarUrl"])
+        response = alice.put("/api/me/avatar", content=self.PNG, headers={"content-type": "image/png"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["username"], "alice")
+        self.assertEqual(alice.get("/api/me").json()["avatarUrl"], response.json()["avatarUrl"])
+        self.assertEqual(self.signed_in("bob").get("/api/users/alice/avatar").content, self.PNG)
+        self.assertEqual(self.query("SELECT updated_by FROM user_avatars"), [("alice",)])
+        for body, content_type, status in [(b"<svg/>", "image/svg+xml", 415), (self.JPEG, "image/png", 415),
+                                           (b"\xff\xd8\xff" + b"\0" * (300 * 1024), "image/jpeg", 413)]:
+            self.assertEqual(alice.put("/api/me/avatar", content=body, headers={"content-type": content_type}).status_code, status, content_type)
+        self.assertEqual(self.put(alice, "bob", self.PNG, "image/png").status_code, 403)
+        self.assertEqual(alice.delete("/api/me/avatar").status_code, 204)
+        self.assertIsNone(alice.get("/api/me").json()["avatarUrl"])
+        self.assertEqual(alice.delete("/api/me/avatar").status_code, 404)
+        self.assertEqual(TestClient(app).put("/api/me/avatar", content=self.PNG, headers={"content-type": "image/png"}).status_code, 401)
+
     def test_signed_out_cannot_read_photos(self):
         self.put(self.signed_in("admin"), "bob", self.PNG, "image/png")
         self.assertEqual(TestClient(app).get("/api/users/bob/avatar").status_code, 401)

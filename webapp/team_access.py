@@ -10,7 +10,6 @@ import uuid
 from datetime import date
 from pathlib import Path
 from typing import Annotated, Literal
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
@@ -355,15 +354,11 @@ AVATAR_SIGNATURES = {"image/png": lambda b: b.startswith(b"\x89PNG\r\n\x1a\n"),
                      "image/webp": lambda b: b[:4] == b"RIFF" and b[8:12] == b"WEBP"}
 
 
-def avatar_url(username: str, updated_at) -> str | None:
-    """The photo's address, versioned by its update time so a new photo gets a new (long-cached) address."""
-    if updated_at is None:
-        return None
-    return f"/api/users/{quote(username, safe='')}/avatar?v={int(updated_at.timestamp() * 1000)}"
+avatar_url = auth.avatar_url
 
 
-@router.put("/api/admin/users/{username}/avatar")
-async def set_avatar(username: str, request: Request, admin: Admin):
+async def store_avatar(username: str, request: Request, by: str) -> dict:
+    """Check and store the uploaded photo for username (administrator API and /api/me/avatar alike)."""
     username = username.strip().lower()
     media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     body = bytearray()
@@ -380,17 +375,37 @@ async def set_avatar(username: str, request: Request, admin: Admin):
             "INSERT INTO user_avatars (username, image, content_type, updated_by) VALUES (%s, %s, %s, %s) "
             "ON CONFLICT (username) DO UPDATE SET image = excluded.image, content_type = excluded.content_type, "
             "updated_at = now(), updated_by = excluded.updated_by RETURNING updated_at",
-            (username, bytes(body), media_type, admin.username))).fetchone()
+            (username, bytes(body), media_type, by))).fetchone()
     return {"username": username, "avatarUrl": avatar_url(username, row["updated_at"])}
 
 
-@router.delete("/api/admin/users/{username}/avatar", status_code=204)
-async def remove_avatar(username: str, _admin: Admin):
+async def delete_avatar(username: str) -> Response:
     async with db.connect() as conn:
         result = await conn.execute("DELETE FROM user_avatars WHERE username = %s", (username.strip().lower(),))
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="這位成員沒有照片")
     return Response(status_code=204)
+
+
+@router.put("/api/admin/users/{username}/avatar")
+async def set_avatar(username: str, request: Request, admin: Admin):
+    return await store_avatar(username, request, admin.username)
+
+
+@router.delete("/api/admin/users/{username}/avatar", status_code=204)
+async def remove_avatar(username: str, _admin: Admin):
+    return await delete_avatar(username)
+
+
+# Everyone changes their own photo (avatar-self-service); the account is always the signed-in one.
+@router.put("/api/me/avatar")
+async def set_my_avatar(request: Request, user: auth.CurrentUser):
+    return await store_avatar(user.username, request, user.username)
+
+
+@router.delete("/api/me/avatar", status_code=204)
+async def remove_my_avatar(user: auth.CurrentUser):
+    return await delete_avatar(user.username)
 
 
 @router.get("/api/users/{username}/avatar")

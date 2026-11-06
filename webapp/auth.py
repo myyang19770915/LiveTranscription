@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, WebSocketException
 from fastapi.responses import FileResponse
@@ -284,9 +284,19 @@ async def require_signed_in(connection: HTTPConnection) -> None:
     raise HTTPException(status_code=303, headers={"Location": "/login"})
 
 
+def avatar_url(username: str, updated_at) -> str | None:
+    """A profile photo's address (member-avatars), versioned by its update time so a new photo gets a new
+    (long-cached) address."""
+    if updated_at is None:
+        return None
+    return f"/api/users/{quote(username, safe='')}/avatar?v={int(updated_at.timestamp() * 1000)}"
+
+
 @router.get("/api/me")
 async def me(user: CurrentUser):
-    return user_payload(user)
+    async with db.connect() as conn:
+        row = await (await conn.execute("SELECT updated_at FROM user_avatars WHERE username = %s", (user.username,))).fetchone()
+    return {**user_payload(user), "avatarUrl": avatar_url(user.username, row and row["updated_at"])}
 
 
 async def issue_session(username: str, hours: float) -> str:

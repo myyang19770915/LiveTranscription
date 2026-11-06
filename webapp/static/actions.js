@@ -141,6 +141,8 @@ async function load(){
   else if(open)openDetail(open,{keep:true});
 }
 function reload(){return load().catch(error=>notice(error.message))}
+// The header menu changed the user's own photo (avatar-self-service): show it on the board.
+window.addEventListener('yq:avatar',()=>reload());
 
 // --- Detail panel ---
 async function patchItem(item,body){
