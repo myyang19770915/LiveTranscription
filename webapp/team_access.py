@@ -149,10 +149,26 @@ class NewMeeting(BaseModel):
     language: str = Field(min_length=1, max_length=16)
     engine: str = Field(default="local", pattern="^(local|hybrid|mai)$")
     title: Title = ""
+    series_id: int | None = None
 
 
-class MeetingTitle(BaseModel):
-    title: Title
+class MeetingChange(BaseModel):
+    """Either or both; series_id null takes the meeting out of its series."""
+    title: Title | None = None
+    series_id: int | None = None
+
+
+SERIES_OF_OTHER_TEAM = "系列不屬於這個團隊"
+
+
+async def series_name(conn, series_id: int | None, team_id: int) -> str | None:
+    """The series' name when it belongs to the team; 422 for a series of another team (or none at all)."""
+    if series_id is None:
+        return None
+    row = await (await conn.execute("SELECT name FROM meeting_series WHERE id = %s AND team_id = %s", (series_id, team_id))).fetchone()
+    if row is None:
+        raise HTTPException(status_code=422, detail=SERIES_OF_OTHER_TEAM)
+    return row["name"]
 
 
 @router.post("/api/meetings", status_code=201)
@@ -160,9 +176,10 @@ async def create_meeting(body: NewMeeting, user: auth.CurrentUser):
     async with db.connect() as conn:
         if not await is_member(conn, user.username, body.team_id):
             raise HTTPException(status_code=404, detail=TEAM_NOT_FOUND)
+        await series_name(conn, body.series_id, body.team_id)
         row = await (await conn.execute(
-            "INSERT INTO meetings (team_id, created_by, language, engine, title) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-            (body.team_id, user.username, body.language, body.engine, body.title.strip()))).fetchone()
+            "INSERT INTO meetings (team_id, created_by, language, engine, title, series_id) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+            (body.team_id, user.username, body.language, body.engine, body.title.strip(), body.series_id))).fetchone()
     return {"id": str(row["id"])}
 
 
@@ -197,14 +214,16 @@ async def list_meetings(user: auth.CurrentUser, team: int | None = None, start: 
             raise HTTPException(status_code=404, detail=TEAM_NOT_FOUND)
         rows = await (await conn.execute(
             "SELECT m.id, m.team_id, t.name AS team_name, m.started_at, m.created_by, m.language, m.engine, m.audio_bytes, m.title, "
+            "m.series_id, ms.name AS series_name, "
             "count(s.seq) AS segments, count(s.seq) FILTER (WHERE s.state <> 'unreviewed') AS reviewed "
             "FROM meetings m JOIN teams t ON t.id = m.team_id "
             "JOIN team_members tm ON tm.team_id = m.team_id AND tm.username = %(user)s "
-            "LEFT JOIN segments s ON s.meeting_id = m.id "
+            "LEFT JOIN segments s ON s.meeting_id = m.id LEFT JOIN meeting_series ms ON ms.id = m.series_id "
             + "".join(f"{'WHERE' if i == 0 else 'AND'} {condition} " for i, condition in enumerate(where))
-            + "GROUP BY m.id, t.name ORDER BY m.started_at DESC LIMIT 500", params)).fetchall()
+            + "GROUP BY m.id, t.name, ms.name ORDER BY m.started_at DESC LIMIT 500", params)).fetchall()
     return [{"id": str(row["id"]), "teamId": row["team_id"], "team": row["team_name"], "startedAt": row["started_at"].isoformat(),
-             "title": row["title"], "createdBy": row["created_by"], "language": row["language"], "engine": row["engine"],
+             "title": row["title"], "seriesId": row["series_id"], "series": row["series_name"],
+             "createdBy": row["created_by"], "language": row["language"], "engine": row["engine"],
              "durationMs": duration, "segments": row["segments"], "reviewed": row["reviewed"]}
             for row, duration in zip(rows, await asyncio.to_thread(lambda: [recorded_ms(row, repair=False) for row in rows]))]
 
@@ -221,12 +240,16 @@ async def meeting_creators(user: auth.CurrentUser):
 
 
 @router.patch("/api/meetings/{meeting_id}")
-async def rename_meeting(meeting_id: str, body: MeetingTitle, user: auth.CurrentUser):
-    """Any member of the meeting's team may change or clear its topic."""
+async def change_meeting(meeting_id: str, body: MeetingChange, user: auth.CurrentUser):
+    """Any member of the meeting's team may change or clear its topic and its series."""
     async with db.connect() as conn:
         meeting = await require_member(conn, user, meeting_id)
-        await conn.execute("UPDATE meetings SET title = %s WHERE id = %s", (body.title.strip(), meeting["id"]))
-    return {"id": str(meeting["id"]), "title": body.title.strip()}
+        given = body.model_fields_set
+        title = (body.title or "").strip() if "title" in given else meeting["title"]
+        series_id = body.series_id if "series_id" in given else meeting["series_id"]
+        name = await series_name(conn, series_id, meeting["team_id"])
+        await conn.execute("UPDATE meetings SET title = %s, series_id = %s WHERE id = %s", (title, series_id, meeting["id"]))
+    return {"id": str(meeting["id"]), "title": title, "seriesId": series_id, "series": name}
 
 
 @router.get("/api/meetings/{meeting_id}")
@@ -236,12 +259,13 @@ async def get_meeting(meeting_id: str, user: auth.CurrentUser):
         files = await (await conn.execute("SELECT kind, path, bytes FROM meeting_files WHERE meeting_id = %s ORDER BY kind",
                                           (meeting["id"],))).fetchall()
         team = await (await conn.execute("SELECT name FROM teams WHERE id = %s", (meeting["team_id"],))).fetchone()
+        series = await series_name(conn, meeting["series_id"], meeting["team_id"])
         segments = await (await conn.execute(
             "SELECT seq, start_ms, end_ms, asr_text, source, live_target, target, detected, state, version "
             "FROM segments WHERE meeting_id = %s ORDER BY seq", (meeting["id"],))).fetchall()
     duration = await asyncio.to_thread(recorded_ms, meeting)
     return {"id": str(meeting["id"]), "teamId": meeting["team_id"], "team": team["name"], "startedAt": meeting["started_at"].isoformat(),
-            "title": meeting["title"],
+            "title": meeting["title"], "seriesId": meeting["series_id"], "series": series,
             "createdBy": meeting["created_by"], "language": meeting["language"], "engine": meeting["engine"],
             "sourceLanguage": meeting["source_language"], "targetLanguage": meeting["target_language"],
             "glossary": meeting["glossary"], "learned": meeting["learned_terms"],

@@ -23,6 +23,7 @@ import meeting_audio
 import actions
 import minutes
 import review
+import series
 import team_access
 from translation_quality import (TERMS_SCHEMA, apply_aliases, asr_context, consolidate_terms, glossary_entries, learned_replacements,
                                  parse_discovered_terms, policy, repair_asr, strip_context_echo, term_discovery_messages, violations)
@@ -107,6 +108,7 @@ app.include_router(review.router)
 # Before minutes: its /items/{id}/{action} would otherwise take /items/{id}/status.
 app.include_router(actions.router)
 app.include_router(minutes.router)
+app.include_router(series.router)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 
@@ -200,7 +202,7 @@ async def health():
 
 @app.get("/api/config")
 async def config():
-    return {"cloudRefine": bool(REFINE_URL and REFINE_MODEL), "mai": mai_asr.configured()}
+    return {"cloudRefine": bool(REFINE_URL and REFINE_MODEL), "mai": mai_asr.configured(), "minutes": minutes.configured()}
 
 
 def asr_engine(choice: str, language: str) -> str:

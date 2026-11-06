@@ -882,7 +882,8 @@ class MeetingCatalogTests(AccountTestCase):
     def test_member_renames_and_clears_the_topic(self):
         meeting = self.create("alice", self.rd, "週會").json()["id"]
         bob = self.signed_in("bob")
-        self.assertEqual(bob.patch(f"/api/meetings/{meeting}", json={"title": " Q4 規劃 "}).json(), {"id": meeting, "title": "Q4 規劃"})
+        self.assertEqual(bob.patch(f"/api/meetings/{meeting}", json={"title": " Q4 規劃 "}).json(),
+                         {"id": meeting, "title": "Q4 規劃", "seriesId": None, "series": None})
         self.assertEqual(self.titles(bob), ["Q4 規劃"])
         bob.patch(f"/api/meetings/{meeting}", json={"title": ""})
         self.assertEqual(self.titles(bob), [""])
@@ -1323,6 +1324,240 @@ class ActionTrackingTests(ReviewTestCase):
         self.assertNotEqual(TestClient(app).get("/actions", follow_redirects=False).status_code, 200)
 
 
+class SeriesTests(ReviewTestCase):
+    """meeting-series: alice and bob in 研發部, carol in 業務部; today is 2026-11-13 (Asia/Taipei)."""
+    TODAY = date(2026, 11, 13)
+
+    def setUp(self):
+        super().setUp()
+        self.ldap.add("carol", "pw-carol")
+        self.rd, self.sales = self.team("研發部", "alice", "bob"), self.team("業務部", "carol")
+        self.alice = self.signed_in("alice")
+        for name, value in (("minutes.MINUTES_URL", "http://model"), ("minutes.MINUTES_MODEL", "m"),
+                            ("minutes.local_today", lambda: self.TODAY)):
+            p = patch(name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def series(self, name, team=None, client=None):
+        return (client or self.alice).post(f"/api/teams/{team or self.rd}/series", json={"name": name})
+
+    def meeting(self, series_id=None, team=None, client=None):
+        body = {"team_id": team or self.rd, "language": "zh", **({"series_id": series_id} if series_id else {})}
+        response = (client or self.alice).post("/api/meetings", json=body)
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()["id"]
+
+    def item(self, meeting, content, kind="action", state="confirmed", status="todo", due=None):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            return conn.execute(
+                "INSERT INTO minute_items (meeting_id, kind, content, origin, state, status, due_date, evidence) "
+                "VALUES (%s, %s, %s, 'ai', %s, %s, %s, '{1}') RETURNING id", (meeting, kind, content, state, status, due)).fetchone()[0]
+
+    # --- Team series ---
+    def test_creating_series(self):
+        # spec example "series names in team 研發部"
+        first = self.series("研發週會")
+        self.assertEqual((first.status_code, first.json()["name"]), (201, "研發週會"))
+        again = self.series(" 研發週會 ")
+        self.assertEqual((again.status_code, again.json()["id"]), (200, first.json()["id"]))
+        sprint = self.series("Sprint Review")
+        same = self.series("sprint review")
+        self.assertEqual((same.status_code, same.json()), (200, {"id": sprint.json()["id"], "name": "Sprint Review"}))
+        self.assertEqual(self.series("長" * 61).status_code, 422)
+        self.assertEqual(self.series("   ").status_code, 422)
+        self.assertEqual([s["name"] for s in self.alice.get(f"/api/teams/{self.rd}/series").json()], ["Sprint Review", "研發週會"])
+
+    def test_another_teams_series(self):
+        carol = self.signed_in("carol")
+        self.assertEqual(carol.get(f"/api/teams/{self.rd}/series").status_code, 404)
+        self.assertEqual(self.series("偷建", client=carol).status_code, 404)
+        self.assertEqual(self.query("SELECT count(*) FROM meeting_series"), [(0,)])
+
+    # --- Choosing a series ---
+    def test_starting_a_meeting_in_a_series(self):
+        weekly = self.series("研發週會").json()["id"]
+        meeting = self.meeting(weekly)
+        listed = self.alice.get("/api/meetings").json()[0]
+        self.assertEqual((listed["seriesId"], listed["series"], listed["team"]), (weekly, "研發週會", "研發部"))
+        detail = self.alice.get(f"/api/meetings/{meeting}").json()
+        self.assertEqual((detail["seriesId"], detail["series"]), (weekly, "研發週會"))
+
+    def test_series_of_another_team(self):
+        theirs = self.series("業務週會", team=self.sales, client=self.signed_in("carol")).json()["id"]
+        response = self.alice.post("/api/meetings", json={"team_id": self.rd, "language": "zh", "series_id": theirs})
+        self.assertEqual((response.status_code, response.json()["detail"]), (422, "系列不屬於這個團隊"))
+        self.assertEqual(self.query("SELECT count(*) FROM meetings"), [(0,)])
+        meeting = self.meeting()
+        response = self.alice.patch(f"/api/meetings/{meeting}", json={"series_id": theirs})
+        self.assertEqual((response.status_code, response.json()["detail"]), (422, "系列不屬於這個團隊"))
+        self.assertEqual(self.query("SELECT series_id FROM meetings"), [(None,)])
+
+    def test_clearing_and_changing_the_series(self):
+        weekly = self.series("研發週會").json()["id"]
+        meeting = self.meeting(weekly)
+        self.alice.patch(f"/api/meetings/{meeting}", json={"title": "Q4 規劃"})
+        self.assertEqual(self.query("SELECT title, series_id FROM meetings"), [("Q4 規劃", weekly)])
+        response = self.signed_in("bob").patch(f"/api/meetings/{meeting}", json={"series_id": None})
+        self.assertEqual(response.json(), {"id": meeting, "title": "Q4 規劃", "seriesId": None, "series": None})
+        self.assertEqual(self.query("SELECT title, series_id FROM meetings"), [("Q4 規劃", None)])
+
+    # --- Unfinished actions ---
+    def test_unfinished_actions_before_the_meeting(self):
+        # spec example "series 研發週會 before the 11/13 meeting"
+        weekly, sales_weekly = self.series("研發週會").json()["id"], self.series("業務週會").json()["id"]
+        m1030, m1106, today = self.meeting(weekly), self.meeting(weekly), self.meeting(weekly)
+        other = self.meeting(sales_weekly)
+        self.item(m1106, "部署腳本", status="doing", due=date(2026, 11, 30))
+        self.item(m1106, "寄合約", due=date(2026, 11, 10))
+        self.item(m1030, "報價單", status="done", due=date(2026, 11, 1))
+        self.item(m1106, "晶片延遲", kind="risk")
+        self.item(m1106, "確認預算", state="proposed")
+        self.item(other, "客戶拜訪")
+        self.item(today, "本場的待辦")
+        listed = self.alice.get(f"/api/series/{weekly}/actions?exclude={today}").json()
+        self.assertEqual([(i["content"], i["overdueDays"]) for i in listed], [("寄合約", 3), ("部署腳本", 0)])
+        self.assertEqual(listed[0]["meetingId"], m1106)
+        self.assertEqual(self.signed_in("carol").get(f"/api/series/{weekly}/actions").status_code, 404)
+
+    # --- Progress detection ---
+    def detection(self, statuses=("todo", "doing")):
+        """Series meeting 11/06 with items #a (todo) and #b (doing); today's meeting has segments 1..35."""
+        weekly = self.series("研發週會").json()["id"]
+        earlier, self.today = self.meeting(weekly), self.meeting(weekly)
+        ids = [self.item(earlier, content, status=status) for content, status in zip(("寄合約", "部署腳本"), statuses)]
+        self.save(self.alice, self.today, [(f"第{i}句", f"S{i}") for i in range(1, 36)])
+        return ids
+
+    def check(self, answer, after=30, client=None):
+        calls = []
+
+        async def model(messages, timeout=None):
+            calls.append(messages)
+            if isinstance(answer, Exception):
+                raise answer
+            return json.dumps(answer, ensure_ascii=False)
+        with patch("minutes.call_model", model):
+            response = (client or self.alice).post(f"/api/meetings/{self.today}/progress/check", json={"after": after})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json(), calls
+
+    def test_validating_the_model_answer(self):
+        # spec example "unfinished items #11 (todo) and #12 (doing); this check sent segments 31–35"
+        a, b = self.detection()
+        result, calls = self.check({"updates": [
+            {"item": a, "status": "done", "note": "合約已寄出", "evidence": [33]},
+            {"item": b, "status": "doing", "evidence": [34]},
+            {"item": 99999, "status": "done", "evidence": [33]},
+            {"item": a, "status": "doing", "evidence": [12]},
+            {"item": b, "status": "cancelled", "note": "", "evidence": [35]}]})
+        self.assertEqual([(s["itemId"], s["toStatus"], s["note"], [e["seq"] for e in s["evidence"]]) for s in result["suggestions"]],
+                         [(a, "done", "合約已寄出", [33])])
+        self.assertEqual(result["suggestions"][0]["evidence"][0]["source"], "第33句")
+        self.assertEqual(result["checkedThrough"], 35)
+        prompt = calls[0][1]["content"]
+        self.assertIn(f"[#{a}] 寄合約", prompt)
+        self.assertIn("[29] 第29句", prompt)          # context
+        self.assertIn("[35] 第35句", prompt)
+        self.assertNotIn("[28] 第28句", prompt)
+        later, _ = self.check({"updates": [{"item": a, "status": "done", "note": "又說一次", "evidence": [34]}]})
+        self.assertEqual(len(later["suggestions"]), 1)
+        self.assertEqual(self.query("SELECT count(*) FROM progress_suggestions"), [(1,)])
+
+    def test_nothing_to_check(self):
+        self.today = self.meeting()                       # no series
+        self.save(self.alice, self.today, [("第1句", "S1")])
+        result, calls = self.check({"updates": []}, after=0)
+        self.assertEqual((calls, result["suggestions"]), ([], []))
+        self.detection(statuses=("done", "cancelled"))   # a series without unfinished items
+        _, calls = self.check({"updates": []})
+        self.assertEqual(calls, [])
+        self.detection()                                 # unfinished items, but no segment after 35
+        _, calls = self.check({"updates": []}, after=35)
+        self.assertEqual(calls, [])
+
+    def test_model_failure_keeps_the_segments(self):
+        self.detection()
+        result, _ = self.check(TimeoutError("slow"))
+        self.assertEqual((result["checkedThrough"], result["suggestions"], result["error"]), (30, [], "進度偵測暫時失敗，稍後重試"))
+        _, calls = self.check({"updates": []}, after=result["checkedThrough"])
+        self.assertIn("[31] 第31句", calls[0][1]["content"])
+
+    def test_model_not_configured(self):
+        self.detection()
+        with patch("minutes.MINUTES_URL", ""):
+            response = self.alice.post(f"/api/meetings/{self.today}/progress/check", json={"after": 0})
+        self.assertEqual((response.status_code, response.json()["detail"]), (400, "紀要模型未設定"))
+
+    def suggest(self, item, status="done", note="合約已寄出", evidence=(33,)):
+        result, _ = self.check({"updates": [{"item": item, "status": status, "note": note, "evidence": list(evidence)}]})
+        return next(s["id"] for s in result["suggestions"] if s["itemId"] == item and s["toStatus"] == status)
+
+    def test_applying_during_the_meeting(self):
+        a, _ = self.detection()
+        sid = self.suggest(a)
+        response = self.alice.post(f"/api/meetings/{self.today}/progress/{sid}/accept")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((response.json()["suggestion"]["state"], response.json()["item"]["status"]), ("accepted", "done"))
+        self.assertEqual(self.query("SELECT status, status_note FROM minute_items WHERE id = %s", (a,)), [("done", "合約已寄出")])
+        earlier = self.query("SELECT meeting_id FROM minute_items WHERE id = %s", (a,))[0][0]
+        history = self.alice.get(f"/api/meetings/{earlier}/minutes/items/{a}/updates").json()
+        self.assertEqual([(h["from"], h["to"], h["note"], h["by"], h["meetingId"], h["evidence"]) for h in history],
+                         [("todo", "done", "合約已寄出", "王愛麗", self.today, [33])])
+
+    def test_applying_when_the_item_already_has_that_status(self):
+        a, _ = self.detection()
+        sid = self.suggest(a)
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE minute_items SET status = 'done' WHERE id = %s", (a,))
+        response = self.alice.post(f"/api/meetings/{self.today}/progress/{sid}/accept")
+        self.assertEqual((response.status_code, response.json()["suggestion"]["state"]), (200, "accepted"))
+        self.assertEqual(self.query("SELECT count(*) FROM item_updates"), [(0,)])
+
+    def test_applying_dismisses_out_of_date_suggestions(self):
+        a, _ = self.detection()
+        doing = self.suggest(a, status="doing", note="開始寄了", evidence=(32,))
+        done = self.suggest(a, status="done", note="合約已寄出", evidence=(34,))
+        pending = {s["id"]: s["fromStatus"] for s in self.alice.get(f"/api/meetings/{self.today}/progress").json()}
+        self.assertEqual(pending, {doing: "todo", done: "todo"})
+        self.assertEqual(self.alice.post(f"/api/meetings/{self.today}/progress/{done}/accept").status_code, 200)
+        states = {s["id"]: s["state"] for s in self.alice.get(f"/api/meetings/{self.today}/progress").json()}
+        self.assertEqual(states, {doing: "dismissed", done: "accepted"})
+        response = self.alice.post(f"/api/meetings/{self.today}/progress/{doing}/accept")
+        self.assertEqual((response.status_code, response.json()["detail"]), (409, "這則提示已處理"))
+        self.assertEqual(self.query("SELECT status FROM minute_items WHERE id = %s", (a,)), [("done",)])
+
+    def test_handled_twice_and_dismissed_not_suggested_again(self):
+        a, _ = self.detection()
+        sid = self.suggest(a)
+        self.assertEqual(self.alice.post(f"/api/meetings/{self.today}/progress/{sid}/dismiss").json()["suggestion"]["state"], "dismissed")
+        response = self.signed_in("bob").post(f"/api/meetings/{self.today}/progress/{sid}/accept")
+        self.assertEqual((response.status_code, response.json()["detail"]), (409, "這則提示已處理"))
+        self.assertEqual(self.query("SELECT status FROM minute_items WHERE id = %s", (a,)), [("todo",)])
+        again, _ = self.check({"updates": [{"item": a, "status": "done", "note": "再說一次", "evidence": [34]}]})
+        self.assertEqual(again["suggestions"], [])
+        listed = self.alice.get(f"/api/meetings/{self.today}/progress").json()
+        self.assertEqual([(s["id"], s["state"]) for s in listed], [(sid, "dismissed")])
+
+    def test_item_no_longer_confirmed(self):
+        a, _ = self.detection()
+        sid = self.suggest(a)
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE minute_items SET state = 'rejected' WHERE id = %s", (a,))
+        response = self.alice.post(f"/api/meetings/{self.today}/progress/{sid}/accept")
+        self.assertEqual((response.status_code, response.json()["detail"]), (409, "只有已確認的待辦可以更新狀態"))
+        self.assertEqual(self.query("SELECT state FROM progress_suggestions"), [("pending",)])
+
+    def test_another_team_cannot_check_or_decide(self):
+        a, _ = self.detection()
+        sid = self.suggest(a)
+        carol = self.signed_in("carol")
+        self.assertEqual(carol.post(f"/api/meetings/{self.today}/progress/check", json={"after": 0}).status_code, 404)
+        self.assertEqual(carol.get(f"/api/meetings/{self.today}/progress").status_code, 404)
+        self.assertEqual(carol.post(f"/api/meetings/{self.today}/progress/{sid}/accept").status_code, 404)
+        self.assertEqual(self.query("SELECT state FROM progress_suggestions"), [("pending",)])
+
+
 class DatabaseTests(DatabaseTestCase):
     def test_migrations_apply_once(self):
         with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
@@ -1337,9 +1572,15 @@ class DatabaseTests(DatabaseTestCase):
         self.assertEqual(versions, [version for version, _ in db.migration_files()])
         tables = {row[0] for row in self.query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")}
         self.assertLessEqual({"users", "teams", "team_members", "sessions", "login_failures", "meetings", "meeting_files",
-                              "segments", "segment_history", "minutes", "minute_items", "item_updates"}, tables)
+                              "segments", "segment_history", "minutes", "minute_items", "item_updates", "meeting_series",
+                              "progress_suggestions"}, tables)
+        with self.assertRaises(psycopg.errors.UniqueViolation), psycopg.connect(TEST_DATABASE_URL) as conn:
+            team = conn.execute("INSERT INTO teams (name, name_key) VALUES ('研發部', '研發部') RETURNING id").fetchone()[0]
+            for name in ("Sprint Review", "sprint review"):
+                conn.execute("INSERT INTO meeting_series (team_id, name, name_key, created_by) VALUES (%s, %s, %s, 'alice')",
+                             (team, name, name.casefold()))
         columns = {row[0] for row in self.query("SELECT column_name FROM information_schema.columns WHERE table_name = 'meetings'")}
-        self.assertLessEqual({"source_language", "target_language", "glossary", "learned_terms", "audio_bytes", "ended_at", "title"}, columns)
+        self.assertLessEqual({"source_language", "target_language", "glossary", "learned_terms", "audio_bytes", "ended_at", "title", "series_id"}, columns)
 
 
 class ActionMigrationTests(DatabaseTestCase):
@@ -1359,7 +1600,7 @@ class ActionMigrationTests(DatabaseTestCase):
                                    (team,)).fetchone()[0]
             conn.execute("INSERT INTO minute_items (meeting_id, kind, content, origin, state) VALUES (%s, 'action', '寄合約', 'ai', 'confirmed')",
                          (meeting,))
-        self.assertEqual(asyncio.run(migrate(db.migration_files())), [5])
+        self.assertEqual(asyncio.run(migrate(db.migration_files()))[0], 5)
         self.assertEqual(self.query("SELECT status, status_note FROM minute_items"), [("todo", "")])
         with self.assertRaises(psycopg.errors.CheckViolation):
             self.query("UPDATE minute_items SET status = 'open'")

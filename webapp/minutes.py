@@ -90,12 +90,12 @@ def build_messages(meeting: dict, segments: list[dict], members: list[dict]) -> 
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
 
 
-async def call_model(messages: list[dict]) -> str:
+async def call_model(messages: list[dict], timeout: float = MODEL_TIMEOUT) -> str:
     """One chat completion from the minutes model; tests replace this."""
     payload = {"model": MINUTES_MODEL, "messages": messages, "temperature": 0, "max_tokens": MAX_TOKENS,
                "response_format": {"type": "json_object"}}
     headers = {"Authorization": f"Bearer {MINUTES_KEY}"} if MINUTES_KEY else {}
-    async with httpx.AsyncClient(timeout=MODEL_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(f"{MINUTES_URL}/chat/completions", json=payload, headers=headers)
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"] or ""

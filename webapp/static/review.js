@@ -177,12 +177,28 @@ async function load(){
   if(segments.some(s=>s.seq===linked)){selected=linked;render();$(`seg-${linked}`).scrollIntoView({block:'center'})}
 }
 // 主題: any team member can change or clear it; a cleared topic shows the start time again.
-function renaming(on){$('titleRow').hidden=on;$('renameForm').hidden=!on;if(on){$('titleInput').value=meeting.title||'';$('titleInput').focus()}}
+// 主題 and 系列 change together; the series menu lists the meeting's team's series.
+async function renaming(on){
+  $('titleRow').hidden=on;$('renameForm').hidden=!on;if(!on)return;
+  $('titleInput').value=meeting.title||'';$('titleInput').focus();
+  // Start from the meeting's own series: saving before the list arrives (or when it fails) keeps it as it is.
+  const current=meeting.seriesId?[{id:meeting.seriesId,name:meeting.series}]:[];
+  const options=(list,chosen)=>{
+    $('seriesInput').replaceChildren(el('option',{value:'',textContent:'不屬於系列'}),...list.map(s=>el('option',{value:s.id,textContent:s.name})));
+    $('seriesInput').value=chosen};
+  options(current,meeting.seriesId?String(meeting.seriesId):'');
+  const list=await fetch(`/api/teams/${meeting.teamId}/series`).then(r=>r.ok?r.json():null).catch(()=>null);
+  // Keep whatever is chosen by now (the user may already have picked 不屬於系列).
+  if(list&&!$('renameForm').hidden)options(list.some(s=>s.id===meeting.seriesId)?list:[...current,...list],$('seriesInput').value);
+}
 $('renameButton').onclick=()=>renaming(true);
 $('renameCancel').onclick=()=>renaming(false);
 $('renameForm').onsubmit=async event=>{
   event.preventDefault();const button=event.submitter;button.disabled=true;
-  try{meeting.title=(await call('PATCH',`/api/meetings/${meetingId}`,{title:$('titleInput').value})).title;MeetingNav.show(meeting);renaming(false)}
+  try{
+    const changed=await call('PATCH',`/api/meetings/${meetingId}`,{title:$('titleInput').value,series_id:$('seriesInput').value?Number($('seriesInput').value):null});
+    Object.assign(meeting,{title:changed.title,seriesId:changed.seriesId,series:changed.series});MeetingNav.show(meeting);renaming(false)
+  }
   catch(error){notice(error.message)}finally{button.disabled=false}
 };
 fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine})=>{$('refineRow').hidden=!cloudRefine}).catch(()=>{});

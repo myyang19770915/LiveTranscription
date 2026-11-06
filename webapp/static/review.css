@@ -37,6 +37,7 @@ code { padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); fon
 .title-row h1 { overflow-wrap: anywhere; }
 .rename-title { margin: 10px 0 2px; }
 .rename-title .input { flex: 1 1 320px; font-size: 20px; font-weight: 600; }
+.rename-title .series-input { flex: 0 1 200px; font-size: 15px; font-weight: 400; appearance: auto; }
 .back-link { display: inline-flex; align-items: center; gap: 4px; margin: -12px 0 18px -6px; padding: 6px 10px 6px 4px; border-radius: 999px; color: var(--muted); font-size: 14px; font-weight: 600; text-decoration: none; }
 .back-link:hover { color: var(--text); background: var(--accent-soft); }
 .back-link svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

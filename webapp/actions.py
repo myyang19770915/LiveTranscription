@@ -42,10 +42,17 @@ async def change_status(meeting_id: str, item_id: int, body: StatusIn, user: aut
             raise HTTPException(status_code=422, detail=UNCHANGED)
         if body.status == "cancelled" and not body.note:
             raise HTTPException(status_code=422, detail=REASON_REQUIRED)
-        await conn.execute("INSERT INTO item_updates (item_id, from_status, to_status, note, changed_by) VALUES (%s, %s, %s, %s, %s)",
-                           (item_id, row["status"], body.status, body.note, user.username))
-        return await minutes.updated(conn, meeting, item_id, "status = %s, status_note = %s, status_by = %s, status_at = now()",
-                                     (body.status, body.note, user.username), user)
+        return await apply_status(conn, meeting, row, body.status, body.note, user)
+
+
+async def apply_status(conn, meeting: dict, row: dict, status: str, note: str, user: auth.User,
+                       heard_in=None, evidence: list[int] = ()) -> dict:
+    """Record the change in the history and update the locked item; heard_in/evidence: the meeting and
+    segments where the progress was said (meeting-series). Returns the item as the minutes page shows it."""
+    await conn.execute("INSERT INTO item_updates (item_id, from_status, to_status, note, meeting_id, evidence, changed_by) "
+                       "VALUES (%s, %s, %s, %s, %s, %s, %s)", (row["id"], row["status"], status, note, heard_in, list(evidence), user.username))
+    return await minutes.updated(conn, meeting, row["id"], "status = %s, status_note = %s, status_by = %s, status_at = now()",
+                                 (status, note, user.username), user)
 
 
 @router.get("/api/meetings/{meeting_id}/minutes/items/{item_id}/updates")
@@ -76,7 +83,7 @@ async def board(user: auth.CurrentUser, team: int | None = None, owner: str = Qu
         raise HTTPException(status_code=422, detail="不支援的狀態")
     today = minutes.local_today()
     where = ["i.kind = 'action'", "i.state = 'confirmed'", "i.status = ANY(%(statuses)s)"]
-    params = {"user": user.username, "statuses": wanted, "today": today, "open": list(minutes.OPEN_STATUSES)}
+    params = {"statuses": wanted, "today": today, "open": list(minutes.OPEN_STATUSES)}
     if team is not None:
         where.append("m.team_id = %(team)s")
         params["team"] = team
@@ -99,15 +106,7 @@ async def board(user: auth.CurrentUser, team: int | None = None, owner: str = Qu
     async with db.connect() as conn:
         if team is not None and not await team_access.is_member(conn, user.username, team):
             raise HTTPException(status_code=404, detail=team_access.TEAM_NOT_FOUND)
-        rows = await (await conn.execute(
-            "SELECT i.*, m.title AS meeting_title, m.started_at, m.team_id, t.name AS team_name, "
-            "coalesce(nullif(o.display_name, ''), i.owner) AS owner_name, "
-            "CASE WHEN i.status = ANY(%(open)s) AND i.due_date < %(today)s THEN %(today)s - i.due_date ELSE 0 END AS overdue "
-            "FROM minute_items i JOIN meetings m ON m.id = i.meeting_id JOIN teams t ON t.id = m.team_id "
-            "JOIN team_members tm ON tm.team_id = m.team_id AND tm.username = %(user)s "
-            "LEFT JOIN users o ON o.username = i.owner "
-            "WHERE " + " AND ".join(where) + " ORDER BY overdue DESC, i.due_date ASC NULLS LAST, i.id LIMIT " + str(BOARD_LIMIT),
-            params)).fetchall()
+        items = await action_rows(conn, user, where, params)
         teams = await (await conn.execute(
             "SELECT t.id, t.name FROM teams t JOIN team_members tm ON tm.team_id = t.id AND tm.username = %s ORDER BY t.name",
             (user.username,))).fetchall()
@@ -115,11 +114,26 @@ async def board(user: auth.CurrentUser, team: int | None = None, owner: str = Qu
             "SELECT DISTINCT tm.username, coalesce(nullif(u.display_name, ''), tm.username) AS display_name FROM team_members tm "
             "JOIN team_members mine ON mine.team_id = tm.team_id AND mine.username = %s LEFT JOIN users u ON u.username = tm.username "
             "ORDER BY tm.username", (user.username,))).fetchall()
-    return {"items": [{"id": r["id"], "meetingId": str(r["meeting_id"]), "meetingTitle": r["meeting_title"],
-                       "startedAt": r["started_at"].isoformat(), "teamId": r["team_id"], "team": r["team_name"],
-                       "content": r["content"], "owner": r["owner"], "ownerName": r["owner_name"], "ownerHint": r["owner_hint"],
-                       "dueDate": r["due_date"].isoformat() if r["due_date"] else None, "dueText": r["due_text"],
-                       "status": r["status"], "statusNote": r["status_note"], "overdueDays": r["overdue"], "version": r["version"]}
-                      for r in rows],
-            "teams": [{"id": t["id"], "name": t["name"]} for t in teams],
+    return {"items": items, "teams": [{"id": t["id"], "name": t["name"]} for t in teams],
             "people": [{"username": p["username"], "displayName": p["display_name"]} for p in people]}
+
+
+async def action_rows(conn, user: auth.User, where: list[str], params: dict) -> list[dict]:
+    """Action items of the user's teams matching where (SQL on i = minute_items, m = meetings), as the board
+    shows them, most overdue first, then by due date (none last). params needs no today/open/user."""
+    params = {**params, "user": user.username, "today": minutes.local_today(), "open": list(minutes.OPEN_STATUSES)}
+    rows = await (await conn.execute(
+        "SELECT i.*, m.title AS meeting_title, m.started_at, m.team_id, t.name AS team_name, "
+        "coalesce(nullif(o.display_name, ''), i.owner) AS owner_name, "
+        "CASE WHEN i.status = ANY(%(open)s) AND i.due_date < %(today)s THEN %(today)s - i.due_date ELSE 0 END AS overdue "
+        "FROM minute_items i JOIN meetings m ON m.id = i.meeting_id JOIN teams t ON t.id = m.team_id "
+        "JOIN team_members tm ON tm.team_id = m.team_id AND tm.username = %(user)s "
+        "LEFT JOIN users o ON o.username = i.owner "
+        "WHERE " + " AND ".join(where) + " ORDER BY overdue DESC, i.due_date ASC NULLS LAST, i.id LIMIT " + str(BOARD_LIMIT),
+        params)).fetchall()
+    return [{"id": r["id"], "meetingId": str(r["meeting_id"]), "meetingTitle": r["meeting_title"],
+             "startedAt": r["started_at"].isoformat(), "teamId": r["team_id"], "team": r["team_name"],
+             "content": r["content"], "owner": r["owner"], "ownerName": r["owner_name"], "ownerHint": r["owner_hint"],
+             "dueDate": r["due_date"].isoformat() if r["due_date"] else None, "dueText": r["due_text"],
+             "status": r["status"], "statusNote": r["status_note"], "overdueDays": r["overdue"], "version": r["version"]}
+            for r in rows]

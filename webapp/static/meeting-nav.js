@@ -41,7 +41,7 @@
   function show(meeting){
     const title=window.MeetingCatalog.displayTitle(meeting);
     const source=meeting.sourceLanguage||meeting.language,target=meeting.targetLanguage;
-    const meta=[meeting.team,new Date(meeting.startedAt).toLocaleString('zh-TW',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}),
+    const meta=[meeting.series?`${meeting.team} · ${meeting.series}`:meeting.team,new Date(meeting.startedAt).toLocaleString('zh-TW',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}),
       meeting.hasRecording?`錄音 ${clock(meeting.durationMs)}`:'沒有錄音',
       source==='zh_ja'?'中日雙向':`${LANG[source]||source||''} → ${LANG[target]||target||''}`,`建立者 ${meeting.createdBy}`];
     draw(title,meta);

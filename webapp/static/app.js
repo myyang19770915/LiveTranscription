@@ -60,7 +60,7 @@ function renderTranslation(){
 }
 function updateCounts(){ $('transcriptCount').textContent=`${transcript.length.toLocaleString()} 字`; $('translationCount').textContent=`${visibleTranslation().length.toLocaleString()} 字`; }
 function toast(message,duration=2200){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),duration)}
-function setControls(active){const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('asrEngine').disabled=active;$('team').disabled=active;$('topic').disabled=active;$('cloudRefine').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
+function setControls(active){const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('asrEngine').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
 function updateTranslationDirection(){
   const pair=$('language').value==='zh_ja';
   if(pair){if($('targetLanguage').value!=='zh_ja')fixedTarget=$('targetLanguage').value;$('targetLanguage').value='zh_ja'}
@@ -150,7 +150,7 @@ async function startMeeting() {
     if(selectedSource()==='microphone')await refreshMicrophones(stream.getAudioTracks()[0].getSettings().deviceId);
     captureStreams.forEach(media=>media.getTracks().forEach(track=>track.onended=()=>{if(stream && !stopping){stopMeeting(false).then(()=>{setStatus('分享或麥克風已停止','error');setMicStatus('音源已中斷','error')})}}));
     setStatus('正在連線…');
-    meetingId=await createMeeting(teamId);topicUsed=true;
+    meetingId=await createMeeting(teamId);topicUsed=true;window.MeetingSeries?.started(meetingId);
     resetMeetingState();
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket = new WebSocket(`${protocol}//${location.host}/ws/transcribe`);
@@ -186,7 +186,7 @@ async function stopMeeting(sendEos=true) {
   finalizeRemaining=true;
   try{socket?.close();}catch{} captureStreams.forEach(media=>media.getTracks().forEach(track=>{track.onended=null;track.stop()}));
   try{sourceNodes.forEach(node=>node.disconnect());workletNode?.disconnect();await audioContext?.close();}catch{}
-  socket=stream=audioContext=null;captureStreams=[];sourceNodes=[];workletNode=null;clearInterval(timerHandle);$('start').innerHTML=startButtonContent;$('start').classList.remove('stop');setControls(false);if(topicUsed){$('topic').value='';topicUsed=false}setMicStatus(`已確認：${$('activeMic').textContent}`,'ok');setStatus(transcript?'會議已結束':'系統待機');scheduleTranslation(true);storeTranscript();stopping=false;
+  socket=stream=audioContext=null;captureStreams=[];sourceNodes=[];workletNode=null;clearInterval(timerHandle);$('start').innerHTML=startButtonContent;$('start').classList.remove('stop');setControls(false);if(topicUsed){$('topic').value='';topicUsed=false}setMicStatus(`已確認：${$('activeMic').textContent}`,'ok');setStatus(transcript?'會議已結束':'系統待機');scheduleTranslation(true);storeTranscript();if(meetingId)window.MeetingSeries?.ended(meetingId);stopping=false;
 }
 // The meeting audio is kept only in this browser and saved next to the exported transcript.
 function startRecording(gains){
@@ -252,7 +252,7 @@ function sendSegments(id){
   if(!segments.length)return;
   fetch(`/api/meetings/${id}/segments`,{method:'PUT',headers:{'content-type':'application/json'},
     body:JSON.stringify({glossary:$('context').value.trim(),learned:learnedTerms,sourceLanguage:direction.source,targetLanguage:direction.target,segments})})
-    .then(response=>{if(!response.ok)console.warn('Segment save failed',response.status)}).catch(error=>console.warn('Segment save failed',error.message));
+    .then(response=>{if(!response.ok)console.warn('Segment save failed',response.status);else window.MeetingSeries?.saved(id,segments.length)}).catch(error=>console.warn('Segment save failed',error.message));
 }
 function updateTimer(){const sec=Math.floor((Date.now()-startedAt)/1000);$('timer').textContent=`${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;}
 function onMessage(event){
@@ -317,7 +317,7 @@ window.accountReady.then(({teams})=>{
 });
 $('team').onchange=()=>{try{localStorage.setItem('team',$('team').value)}catch{}};
 async function createMeeting(teamId){
-  const response=await fetch('/api/meetings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({team_id:teamId,language:$('language').value,engine:asrEngine(),title:$('topic').value.trim()})});
+  const response=await fetch('/api/meetings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({team_id:teamId,language:$('language').value,engine:asrEngine(),title:$('topic').value.trim(),series_id:window.MeetingSeries?.seriesId()??null})});
   if(response.status===401){location.replace('/login');throw new Error('請先登入')}
   if(!response.ok)throw new Error((await response.json().catch(()=>({}))).detail||'無法建立會議');
   return (await response.json()).id;
@@ -459,7 +459,7 @@ const mobileQuery=matchMedia('(max-width: 760px), (max-width: 1000px) and (max-h
 const mobilePanels={transcript:$('transcript').closest('article'),translation:$('translation').closest('article')};
 const mobileFollow={transcript:true,translation:true};
 let mobileView='translation';
-const mobileSettingsNodes=[$('teamRow'),$('topicRow'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('asrEngineRow'),$('cloudRefineRow')];
+const mobileSettingsNodes=[$('teamRow'),$('topicRow'),$('seriesRow'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('asrEngineRow'),$('cloudRefineRow')];
 const movableControls=[...mobileSettingsNodes,$('start')].map(node=>{
   const anchor=document.createComment('responsive-control');node.before(anchor);return{node,anchor};
 });

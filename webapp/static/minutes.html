@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>會議紀要 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261106c"><link rel="stylesheet" href="/assets/review.css?v=20261106c"><link rel="stylesheet" href="/assets/minutes.css?v=20261106b"><link rel="stylesheet" href="/assets/actions.css?v=20261106b"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>會議紀要 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261106c"><link rel="stylesheet" href="/assets/review.css?v=20261107a"><link rel="stylesheet" href="/assets/minutes.css?v=20261107a"><link rel="stylesheet" href="/assets/actions.css?v=20261106b"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>會議紀錄</small></span></a>
@@ -38,6 +38,12 @@
       <div class="edit-buttons"><button class="primary-button compact" type="submit">儲存</button><button id="cancelSummary" class="text-button" type="button">取消</button></div></form>
   </section>
 
+  <section id="progress" class="card progress-card" aria-labelledby="progressHeading" hidden>
+    <div class="section-head"><h2 id="progressHeading">會中進度提示 <span id="progressCount" class="count">0</span></h2></div>
+    <p class="hint">會議中偵測到這個系列之前的待辦有進度，還沒處理。套用後會更新那個待辦的狀態並記入歷程。</p>
+    <div id="progressList" class="progress-list"></div>
+  </section>
+
   <div id="sections"></div>
 </main>
 
@@ -54,7 +60,7 @@
 <script src="/assets/account.js?v=20261106b"></script>
 <script src="/assets/meeting-catalog.js?v=20261105a"></script>
 <script src="/assets/timeline.js?v=20261106a"></script>
-<script src="/assets/meeting-nav.js?v=20261106a"></script>
+<script src="/assets/meeting-nav.js?v=20261107a"></script>
 <script src="/assets/action-status.js?v=20261106a"></script>
-<script src="/assets/minutes.js?v=20261106f"></script>
+<script src="/assets/minutes.js?v=20261107b"></script>
 </body></html>

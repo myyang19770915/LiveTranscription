@@ -7,6 +7,13 @@
 .status-line.running { color: var(--accent); }
 .status-line.failed { color: var(--danger); }
 .summary-card { padding: 18px 20px; margin-bottom: 20px; }
+.progress-card { padding: 18px 20px; margin-bottom: 20px; border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.progress-card[hidden] { display: none; }
+.progress-card .hint { margin: 0 0 10px; }
+.progress-list { display: grid; gap: 10px; }
+.progress-item { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; }
+.progress-item p { margin: 0; }
+.progress-label { color: var(--accent); }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .section-head h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 18px; }
 .summary-text { margin: 0; font-size: 16px; line-height: 1.8; white-space: pre-wrap; }

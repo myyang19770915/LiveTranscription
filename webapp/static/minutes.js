@@ -45,15 +45,16 @@ function evidence(item){
 }
 
 // --- Evidence side panel: the cited segments with one segment of context each side, playable in place ---
-function openPeek(itemId,focusSeq){peeking={itemId,focusSeq};renderPeek();render()}
+// subject: an item of these minutes, or {label, content, evidence} for a progress suggestion.
+function openPeek(itemId,focusSeq,subject=null){peeking={itemId,focusSeq,subject};renderPeek();render()}
 function closePeek(){peeking=null;$('player').pause();renderPeek();render()}
 function renderPeek(){
-  const item=peeking&&data.items.find(i=>i.id===peeking.itemId);
+  const item=peeking&&(peeking.subject||data.items.find(i=>i.id===peeking.itemId));
   // Below the sticky top bar, so the account and theme buttons stay reachable.
   document.documentElement.style.setProperty('--peek-top',`${document.querySelector('.topbar').offsetHeight}px`);
   document.body.classList.toggle('peeking',!!item);$('peek').hidden=!item;
   if(!item){peeking=null;return}
-  $('peekKind').textContent=`${Object.fromEntries(KINDS)[item.kind]}的證據`;
+  $('peekKind').textContent=item.label||`${Object.fromEntries(KINDS)[item.kind]}的證據`;
   $('peekTitle').textContent=item.content;
   if(!meeting){$('peekList').replaceChildren(el('p',{className:'muted small',textContent:'載入逐字稿中…'}));return}
   const rows=MeetingTimeline.evidenceContext(meeting.segments,item.evidence.map(e=>e.seq)).flatMap(({segment,cited,gapBefore})=>
@@ -175,7 +176,8 @@ function render(){
   const fields=draftFields();
   if(fields.length===drafts.length)fields.forEach((field,i)=>{field.value=drafts[i]});
   // The panel follows its item: closed when a regeneration replaced it, retitled after an edit.
-  if(peeking){const item=data.items.find(i=>i.id===peeking.itemId);if(item)$('peekTitle').textContent=item.content;else closePeek()}
+  if(peeking&&!peeking.subject){const item=data.items.find(i=>i.id===peeking.itemId);if(item)$('peekTitle').textContent=item.content;else closePeek()}
+  renderProgress();
 }
 async function load(){
   const polling=data?.status==='running';
@@ -205,4 +207,32 @@ $('summaryForm').onsubmit=event=>{event.preventDefault();act(async()=>{
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
 load().catch(error=>notice(error.message));
 // The header and the evidence panel come from the meeting itself (same as the review page).
+// --- Progress suggestions left from the meeting (meeting-series) ---
+const PROGRESS={doing:'可能已開始',done:'可能已完成',cancelled:'可能取消'};
+let progress=[];
+function renderProgress(){
+  const pending=progress.filter(s=>s.state==='pending');
+  $('progress').hidden=!pending.length;
+  $('progressCount').textContent=String(pending.length);
+  $('progressList').replaceChildren(...pending.map(s=>{
+    const decide=action=>act(async()=>{
+      const {suggestion}=await call('POST',`/api/meetings/${meetingId}/progress/${s.id}/${action}`);
+      progress=progress.map(x=>x.id===suggestion.id?suggestion:action==='accept'&&x.itemId===s.itemId&&x.state==='pending'?{...x,state:'dismissed'}:x);
+      renderProgress();
+    }).catch(()=>{});
+    const subject={label:`進度提示：${PROGRESS[s.toStatus]}`,content:s.content,evidence:s.evidence};
+    return el('article',{className:'progress-item',id:`progress-${s.id}`},
+      el('p',{className:'item-content'},s.content),
+      el('p',{className:'muted small'},el('b',{className:'progress-label',textContent:PROGRESS[s.toStatus]}),s.note?`：${s.note}`:null,
+        ` （目前${ActionStatus.LABEL[s.fromStatus]} → ${ActionStatus.LABEL[s.toStatus]}）`),
+      el('div',{className:'evidence'},el('span',{className:'muted small',textContent:'證據'}),
+        ...s.evidence.map(e=>el('a',{className:'chip',href:`/meetings/${meetingId}#seg-${e.seq}`,textContent:`▸ ${clock(e.startMs)}`,title:e.source,
+          onclick:event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();openPeek(null,e.seq,subject)}}))),
+      el('div',{className:'item-actions'},
+        el('button',{type:'button',className:'secondary-button compact',textContent:'套用',onclick:()=>decide('accept')}),
+        el('button',{type:'button',className:'text-button',textContent:'略過',onclick:()=>decide('dismiss')}),
+        el('a',{className:'text-button',href:`/meetings/${s.itemMeetingId}/minutes#item-${s.itemId}`,textContent:'原會議的待辦'})));
+  }));
+}
+call('GET',`/api/meetings/${meetingId}/progress`).then(list=>{progress=list;renderProgress()}).catch(()=>{});
 call('GET',`/api/meetings/${meetingId}`).then(result=>{meeting=result;MeetingNav.show(meeting);if(data)render();if(peeking)renderPeek()}).catch(error=>notice(error.message));
