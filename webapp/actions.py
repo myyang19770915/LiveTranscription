@@ -230,11 +230,12 @@ async def change_action(item_id: int, body: ActionChange, user: auth.CurrentUser
             return await stale_action(conn, user, row)
         given = body.model_fields_set
         members, _ = await minutes.item_context(conn, home)
-        owner = minutes.require_owner(body.owner, members) if "owner" in given else row["owner"]
-        await minutes.updated(conn, home, item_id, "content = %s, owner = %s, due_date = %s, owner_hint = %s",
-                              (body.content if "content" in given and body.content else row["content"], owner,
-                               body.dueDate if "dueDate" in given else row["due_date"],
-                               "" if "owner" in given else row["owner_hint"]), user)
+        values = {"content": body.content if "content" in given and body.content else row["content"],
+                  "owner": minutes.require_owner(body.owner, members) if "owner" in given else row["owner"],
+                  "due_date": body.dueDate if "dueDate" in given else row["due_date"]}
+        await minutes.updated(conn, home, item_id, "content = %s, owner = %s, due_date = %s, owner_hint = %s, edited = edited OR %s",
+                              (values["content"], values["owner"], values["due_date"], "" if "owner" in given else row["owner_hint"],
+                               minutes.changed_by_hand(row, values)), user)
         return await item_row(conn, user, item_id)
 
 

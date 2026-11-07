@@ -1,0 +1,70 @@
+/* Outcome metrics page (outcome-metrics). Builds on tokens.css and admin.css. Chart colours are categorical slots 1–3,
+   checked with the dataviz validate_palette script against the panel colour of each theme (#fffefb light, #121715
+   dark); slot 3 is below 3:1 on light, so the split bar prints a part's share where it fits and always has a table. */
+.metrics-page { width: min(1180px, 100%); }
+:root[data-theme="light"] .metrics-page { --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-rest: #c9c4b8; --grid: #ece7dc; }
+.metrics-page, :root[data-theme="dark"] .metrics-page { --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-rest: #3a443f; --grid: #222b27; }
+
+.metrics-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.metrics-head h1 { margin: 0 0 6px; }
+.metrics-filters { display: flex; flex-wrap: wrap; gap: 10px 14px; }
+.toolbar-select { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.toolbar-select select { height: 34px; padding: 0 8px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--field); color: var(--text); font-size: 13px; }
+
+/* Stat tiles: label, value, what it was computed from. */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
+.tile { display: grid; align-content: start; gap: 6px; padding: 16px 18px; }
+.tile-label { margin: 0; color: var(--muted); font-size: 13px; font-weight: 700; }
+.tile-value { margin: 0; color: var(--text); font-size: 30px; font-weight: 650; line-height: 1.15; }
+.tile-value small { margin-left: 4px; color: var(--muted); font-size: 15px; font-weight: 600; }
+.tile-note { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+
+.metrics-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; margin-bottom: 16px; }
+.viz-card { padding: 18px 20px; min-width: 0; }
+.viz-card h2 { margin: 0; font-size: 16px; }
+.viz-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.viz-sub { margin: 4px 0 14px; color: var(--muted); font-size: 12.5px; }
+.viz-empty { margin: 8px 0; color: var(--muted); font-size: 14px; }
+.viz-foot { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+
+/* Legend: a swatch beside text in text colours. */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 12.5px; }
+.legend li { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+
+/* AI split: one whole in parts, 28px, 4px corners, 2px surface gaps, share printed inside when it fits. */
+.split { display: flex; gap: 2px; height: 28px; }
+.split-part { display: flex; align-items: center; min-width: 0; padding: 0 8px; border-radius: 4px; background: var(--c); overflow: hidden;
+  color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; outline-offset: 2px; }
+.split-part.rest { color: var(--text); }
+
+/* Tables (table views and the transcript table). */
+.data-table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 13px; }
+.data-table th, .data-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+.data-table th:first-child, .data-table td:first-child { text-align: left; }
+.data-table th { color: var(--muted); font-weight: 700; font-size: 12px; }
+.data-table td { font-variant-numeric: tabular-nums; }
+.table-wrap { overflow-x: auto; }
+
+/* Weekly grouped bars. */
+.weekly { position: relative; }
+.weekly svg { display: block; width: 100%; height: auto; overflow: visible; }
+.weekly .grid-line { stroke: var(--grid); stroke-width: 1; }
+.weekly .axis-label { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.weekly .bar-1 { fill: var(--series-1); }
+.weekly .bar-2 { fill: var(--series-2); }
+.weekly .hit { fill: transparent; cursor: default; }
+.weekly .hit:hover, .weekly .hit:focus { fill: color-mix(in srgb, var(--text) 6%, transparent); outline: none; }
+.viz-tip { position: absolute; z-index: 5; pointer-events: none; min-width: 120px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--panel); box-shadow: 0 8px 24px rgb(0 0 0 / .18); color: var(--text); font-size: 12.5px; line-height: 1.6; }
+.viz-tip b { display: block; margin-bottom: 2px; }
+.viz-tip span { display: flex; align-items: center; gap: 6px; }
+
+@media (max-width: 900px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metrics-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .metrics-head { flex-direction: column; align-items: flex-start; }
+  .tile-value { font-size: 26px; }
+}

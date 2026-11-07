@@ -170,6 +170,7 @@ window.accountReady=fetch('/api/me').then(response=>{
     const out=make('button',{type:'button',textContent:'登出',onclick:async()=>{await fetch('/api/logout',{method:'POST'});location.replace('/login')}});
     const link=(href,text)=>make('a',{href,textContent:text});
     const links=[location.pathname==='/'?link('/meetings','會議紀錄'):null,location.pathname!=='/actions'?link('/actions','待辦看板'):null,
+      location.pathname!=='/metrics'?link('/metrics','成效指標'):null,
       me.admin&&location.pathname!=='/admin'?link('/admin','團隊管理'):null].filter(Boolean);
     slot.replaceChildren(...links,ownAvatar(me,make),name,out);
   }

@@ -1669,6 +1669,113 @@ class BoardItemTests(ReviewTestCase):
                 conn.execute("INSERT INTO minute_items (team_id, kind, content, origin) VALUES (%s, 'decision', 'x', 'ai')", (self.rd,))
 
 
+class MetricsTests(ReviewTestCase):
+    """outcome-metrics: alice and bob in 研發部, carol in 業務部; today is 2026-11-13 (Asia/Taipei)."""
+    TODAY = date(2026, 11, 13)
+
+    def setUp(self):
+        ReviewTestCase.setUp(self)
+        self.ldap.add("carol", "pw-carol")
+        self.rd, self.sales = self.team("研發部", "alice", "bob"), self.team("業務部", "carol")
+        self.alice = self.signed_in("alice")
+        today = patch("minutes.local_today", lambda: self.TODAY)
+        today.start()
+        self.addCleanup(today.stop)
+        self.meeting = self.alice.post("/api/meetings", json={"team_id": self.rd, "language": "zh"}).json()["id"]
+        # Inside the fixed period whatever the real date is.
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE meetings SET started_at = '2026-11-10 10:00+08' WHERE id = %s", (self.meeting,))
+
+    def action(self, status="todo", created="2026-11-10", status_on=None, due=None, team=None, origin="manual", state="confirmed"):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            return conn.execute(
+                "INSERT INTO minute_items (meeting_id, team_id, kind, content, origin, state, status, due_date, confirmed_at, status_at) "
+                "VALUES (%s, %s, 'action', 'x', %s, %s, %s, %s, %s::date + time '12:00' AT TIME ZONE 'Asia/Taipei', "
+                "%s::date + time '12:00' AT TIME ZONE 'Asia/Taipei') RETURNING id",
+                (self.meeting, team or self.rd, origin, state, status, due, created, status_on)).fetchone()[0]
+
+    def metrics(self, query=""):
+        response = self.alice.get(f"/api/metrics{query}")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_action_metrics(self):
+        # spec example "Action metrics (today 2026-11-13, days 30)"
+        self.assertIsNone(self.metrics()["actions"]["completionRate"])
+        for _ in range(4):
+            self.action("done", status_on="2026-11-11")
+        self.action("doing", due="2026-11-12")
+        self.action("cancelled")
+        self.action("todo", created="2026-09-01", due="2026-11-20")
+        self.action("todo", created="2026-09-01", due="2026-11-13")
+        self.action("done", created="2026-09-01", status_on="2026-11-10", due="2026-11-10")
+        self.action("done", created="2026-09-01", status_on="2026-11-12", due="2026-11-11")
+        self.action("todo", team=self.sales)
+        a = self.metrics()["actions"]
+        self.assertEqual((a["created"], a["done"], a["completionRate"]), (5, 4, 0.8))
+        self.assertEqual((a["openWithDue"], a["overdue"], a["overdueRate"]), (3, 1, 0.3333))
+        self.assertEqual((a["finishedWithDue"], a["onTime"], a["onTimeRate"]), (2, 1, 0.5))
+        self.assertEqual(self.metrics("?days=365")["actions"]["created"], 9)
+
+    def test_weekly_trend(self):
+        self.action("done", created="2026-11-09", status_on="2026-11-13")
+        self.action("todo", created="2026-11-08")
+        self.action("todo", created="2026-08-01")
+        weekly = self.metrics()["weekly"]
+        self.assertEqual(len(weekly), 12)
+        self.assertEqual(weekly[-1], {"week": "2026-11-09", "created": 1, "done": 1})
+        self.assertEqual(weekly[-2], {"week": "2026-11-02", "created": 1, "done": 0})
+        self.assertEqual(weekly[0]["week"], "2026-08-24")
+        self.assertEqual(sum(w["created"] for w in weekly), 2)
+
+    def test_ai_extraction_and_edited_marking(self):
+        adopted, edited, rejected = (self.action(origin="ai", state="proposed") for _ in range(3))
+        self.action(origin="ai", state="proposed")
+        url = f"/api/meetings/{self.meeting}/minutes/items"
+        version = lambda i: self.query("SELECT version FROM minute_items WHERE id = %s", (i,))[0][0]  # noqa: E731
+        self.alice.patch(f"{url}/{edited}", json={"version": version(edited), "owner": "bob"})
+        self.alice.patch(f"{url}/{adopted}", json={"version": version(adopted), "owner": None})   # no real change
+        for item in (adopted, edited):
+            self.assertEqual(self.alice.post(f"{url}/{item}/confirm", json={"version": version(item)}).status_code, 200)
+        self.alice.post(f"{url}/{rejected}/reject", json={"version": version(rejected)})
+        self.alice.post(f"/api/actions/{adopted}/status", json={"version": version(adopted), "status": "doing", "note": ""})
+        self.assertEqual(self.query("SELECT id, edited FROM minute_items WHERE id IN (%s, %s) ORDER BY id", (adopted, edited)),
+                         [(adopted, False), (edited, True)])
+        self.assertEqual(self.metrics()["ai"], {"adopted": 1, "edited": 1, "rejected": 1, "pending": 1})
+        # On the board: an unchanged content does not mark it; a new due date does.
+        content = self.query("SELECT content FROM minute_items WHERE id = %s", (adopted,))[0][0]
+        self.alice.patch(f"/api/actions/{adopted}", json={"version": version(adopted), "content": content})
+        self.assertEqual(self.query("SELECT edited FROM minute_items WHERE id = %s", (adopted,)), [(False,)])
+        self.alice.patch(f"/api/actions/{adopted}", json={"version": version(adopted), "dueDate": "2026-11-30"})
+        self.assertEqual(self.query("SELECT edited FROM minute_items WHERE id = %s", (adopted,)), [(True,)])
+
+    def test_transcript_correction(self):
+        # spec example "Transcript correction"
+        self.save(self.alice, self.meeting, [("今天開會", "S1"), ("迷你max很好", "S2")])
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE segments SET source = 'MiniMax很好' WHERE meeting_id = %s AND seq = 2", (self.meeting,))
+        engine = self.query("SELECT engine FROM meetings WHERE id = %s", (self.meeting,))[0][0]
+        self.assertEqual(self.metrics()["transcript"], [{"engine": engine, "language": "zh", "meetings": 1, "segments": 2, "editedSegments": 1,
+                                                         "chars": 11, "editedChars": 5, "per100": 45.5}])
+
+    def test_minutes_lag(self):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE meetings SET ended_at = '2026-11-10 10:00+08' WHERE id = %s", (self.meeting,))
+            conn.execute("INSERT INTO minute_items (meeting_id, kind, content, origin, state, confirmed_at) VALUES "
+                         "(%s, 'decision', 'a', 'ai', 'confirmed', '2026-11-10 13:00+08'), (%s, 'decision', 'b', 'ai', 'confirmed', '2026-11-11 10:00+08')",
+                         (self.meeting, self.meeting))
+        self.assertEqual(self.metrics()["minutesLag"], {"meetings": 1, "medianHours": 3.0})
+
+    def test_scope_and_validation(self):
+        self.assertEqual(self.alice.get(f"/api/metrics?team={self.sales}").status_code, 404)
+        self.assertEqual(self.alice.get("/api/metrics?days=7").status_code, 422)
+        result = self.metrics(f"?team={self.rd}&days=90")
+        self.assertEqual((result["days"], result["from"], result["to"]), (90, "2026-08-16", "2026-11-13"))
+        self.assertEqual([t["name"] for t in result["teams"]], ["研發部"])
+        self.assertIsNotNone(result["editedSince"])
+        self.assertEqual(TestClient(app).get("/api/metrics").status_code, 401)
+
+
 class DatabaseTests(DatabaseTestCase):
     def test_migrations_apply_once(self):
         with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:

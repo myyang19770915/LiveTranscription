@@ -330,6 +330,11 @@ def require_owner(owner: str | None, members: dict) -> str | None:
     return owner
 
 
+def changed_by_hand(row: dict, values: dict) -> bool:
+    """Whether the edit really changes one of the item's fields (outcome-metrics counts such items as edited)."""
+    return any(values[key] != row[key] for key in values)
+
+
 async def locked_item(conn, user: auth.User, meeting_id: str, item_id: int) -> tuple[dict, dict]:
     meeting = await team_access.require_member(conn, user, meeting_id)
     row = await (await conn.execute("SELECT * FROM minute_items WHERE id = %s AND meeting_id = %s FOR UPDATE",
@@ -382,8 +387,10 @@ async def change_item(meeting_id: str, item_id: int, body: ItemChange, user: aut
                   "due_text": (body.dueText or "").strip() if "dueText" in given else row["due_text"]}
         # A person chose the owner: the model's unmatched name no longer applies.
         hint = "" if "owner" in given else row["owner_hint"]
-        return await updated(conn, meeting, item_id, "kind = %s, content = %s, owner = %s, due_date = %s, due_text = %s, owner_hint = %s",
-                             (values["kind"], values["content"], values["owner"], values["due_date"], values["due_text"], hint), user)
+        return await updated(conn, meeting, item_id,
+                             "kind = %s, content = %s, owner = %s, due_date = %s, due_text = %s, owner_hint = %s, edited = edited OR %s",
+                             (values["kind"], values["content"], values["owner"], values["due_date"], values["due_text"], hint,
+                              changed_by_hand(row, values)), user)
 
 
 @router.post("/api/meetings/{meeting_id}/minutes/items/{item_id}/{action}")
