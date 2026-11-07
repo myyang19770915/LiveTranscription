@@ -1,28 +1,140 @@
 // Signed-in user in the nav (#account), shared by every page. Exposes window.accountReady (the /api/me payload)
-// and window.AvatarPhoto (member-avatars, avatar-self-service): the browser crops the chosen image to its centre
-// square and scales it to 160x160 before uploading. The header avatar opens a menu to change one's own photo; a
-// change is announced with a `yq:avatar` event so pages showing avatars can reload them.
+// and window.AvatarPhoto (member-avatars, avatar-self-service, avatar-crop): after an image is chosen, a crop dialog
+// shows it with a square frame the user moves and resizes; only on 確定 is the framed area scaled to 160x160 and
+// uploaded. The header avatar opens a menu to change one's own photo; a change is announced with a `yq:avatar` event
+// so pages showing avatars can reload them. The dialog's styles are injected here once, because the live meeting
+// page (themes.css) and the other pages (tokens.css) have different stylesheets; colours fall back between the two.
 window.AvatarPhoto=(()=>{
-  const SIZE=160;
-  async function square(file){
-    if(!file.type.startsWith('image/')||file.type==='image/svg+xml')throw new Error('請選 PNG、JPEG 或 WebP 圖片');
-    let bitmap;
-    try{bitmap=await createImageBitmap(file)}catch{throw new Error('讀不到這張圖片，請換一張')}
-    const side=Math.min(bitmap.width,bitmap.height);
-    const canvas=Object.assign(document.createElement('canvas'),{width:SIZE,height:SIZE});
-    canvas.getContext('2d').drawImage(bitmap,(bitmap.width-side)/2,(bitmap.height-side)/2,side,side,0,0,SIZE,SIZE);
-    bitmap.close();
-    const encode=type=>new Promise(resolve=>canvas.toBlob(resolve,type,.85));
-    const webp=await encode('image/webp');
-    return webp?.type==='image/webp'?webp:encode('image/jpeg');
+  const SIZE=160,PREVIEW=64;
+  const make=(tag,props={},...children)=>{const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(Boolean));return node};
+  const clamp=(value,low,high)=>Math.min(Math.max(value,low),high);
+  const CSS=`
+.crop-dialog{width:max-content;max-width:calc(100vw - 32px);padding:20px;border:1px solid var(--border,var(--line));border-radius:16px;
+  background:var(--panel,var(--surface));color:var(--text);box-shadow:0 24px 64px rgb(0 0 0/.35)}
+.crop-dialog::backdrop{background:rgb(0 0 0/.55)}
+.crop-dialog h2{margin:0;font-size:18px}
+.crop-hint{margin:4px 0 14px;color:var(--muted);font-size:13px}
+.crop-body{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:center}
+.crop-stage{position:relative;overflow:hidden;touch-action:none;user-select:none;border-radius:8px;background:#000}
+.crop-stage canvas{display:block}
+.crop-frame{position:absolute;box-sizing:border-box;border:2px solid #fff;box-shadow:0 0 0 9999px rgb(0 0 0/.55);cursor:move}
+.crop-frame::after{content:"";position:absolute;inset:0;border:1px dashed rgb(255 255 255/.75);border-radius:50%;pointer-events:none}
+.crop-frame:focus-visible{outline:3px solid var(--accent,var(--mint));outline-offset:2px}
+.crop-handle{position:absolute;right:-2px;bottom:-2px;width:18px;height:18px;border-radius:4px 0 4px 0;background:#fff;cursor:nwse-resize}
+.crop-side{display:grid;justify-items:center;gap:8px;color:var(--muted);font-size:12px}
+.crop-preview{width:${PREVIEW}px;height:${PREVIEW}px;border-radius:50%;background:var(--field,var(--soft))}
+.crop-size{width:100%;accent-color:var(--accent,var(--mint))}
+.crop-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.crop-actions button{height:38px;padding:0 18px;border:1px solid var(--border,var(--line));border-radius:999px;background:transparent;
+  color:var(--text);font:inherit;font-weight:600;cursor:pointer}
+.crop-actions .crop-ok{border-color:transparent;background:var(--accent,var(--mint));color:var(--accent-ink,#06110d)}`;
+  function bitmapOf(file){
+    if(!file.type.startsWith('image/')||file.type==='image/svg+xml')return Promise.reject(new Error('請選 PNG、JPEG 或 WebP 圖片'));
+    return createImageBitmap(file).catch(()=>{throw new Error('讀不到這張圖片，請換一張')});
+  }
+  // The crop dialog: resolves to the source rectangle {x, y, size} in image pixels, or null when cancelled.
+  function frameOn(bitmap){
+    if(!document.getElementById('crop-style'))document.head.append(make('style',{id:'crop-style',textContent:CSS}));
+    const {width,height}=bitmap;
+    const longest=Math.max(120,Math.min(360,innerWidth-80));
+    const scale=Math.min(longest/width,longest/height);
+    const w=Math.round(width*scale),h=Math.round(height*scale);
+    const full=Math.min(w,h),least=Math.max(24,Math.round(full*.2));
+    const frame={size:full,x:(w-full)/2,y:(h-full)/2};
+    const ratio=1/scale;
+    const source=()=>({x:frame.x*ratio,y:frame.y*ratio,size:frame.size*ratio});
+
+    const dpr=devicePixelRatio||1;
+    const picture=make('canvas',{width:Math.round(w*dpr),height:Math.round(h*dpr)});
+    Object.assign(picture.style,{width:`${w}px`,height:`${h}px`});
+    picture.getContext('2d').drawImage(bitmap,0,0,picture.width,picture.height);
+    const handle=make('span',{className:'crop-handle',title:'拖曳調整大小'});
+    const box=make('div',{className:'crop-frame',tabIndex:0,ariaLabel:'裁切範圍，方向鍵移動'},handle);
+    const stage=make('div',{className:'crop-stage'},picture,box);
+    Object.assign(stage.style,{width:`${w}px`,height:`${h}px`});
+    const preview=make('canvas',{className:'crop-preview',width:PREVIEW*dpr,height:PREVIEW*dpr,ariaLabel:'預覽'});
+    const slider=make('input',{type:'range',className:'crop-size',min:least,max:full,step:1,value:full,ariaLabel:'框選大小'});
+    const cancel=make('button',{type:'button',textContent:'取消'});
+    const ok=make('button',{type:'button',className:'crop-ok',textContent:'確定'});
+    const dialog=make('dialog',{className:'crop-dialog',ariaLabel:'裁切照片'},
+      make('h2',{textContent:'裁切照片'}),
+      make('p',{className:'crop-hint',textContent:'拖曳方框選擇範圍，拉右下角或用滑桿調整大小；也可用方向鍵移動、＋／－ 縮放。'}),
+      make('div',{className:'crop-body'},stage,make('div',{className:'crop-side'},preview,make('span',{textContent:'預覽'}),slider)),
+      make('div',{className:'crop-actions'},cancel,ok));
+
+    function draw(){
+      frame.size=clamp(frame.size,least,full);
+      frame.x=clamp(frame.x,0,w-frame.size);frame.y=clamp(frame.y,0,h-frame.size);
+      Object.assign(box.style,{left:`${frame.x}px`,top:`${frame.y}px`,width:`${frame.size}px`,height:`${frame.size}px`});
+      slider.value=Math.round(frame.size);
+      const r=source();
+      const g=preview.getContext('2d');
+      g.clearRect(0,0,preview.width,preview.height);   // transparent images must not keep earlier positions
+      g.drawImage(bitmap,r.x,r.y,r.size,r.size,0,0,preview.width,preview.height);
+    }
+    // Drag the frame to move it, its handle to resize it (top-left corner fixed).
+    box.onpointerdown=event=>{
+      event.preventDefault();box.focus();
+      const resizing=event.target===handle,start={px:event.clientX,py:event.clientY,...frame};
+      box.setPointerCapture(event.pointerId);
+      box.onpointermove=move=>{
+        const dx=move.clientX-start.px,dy=move.clientY-start.py;
+        if(resizing)frame.size=clamp(start.size+Math.max(dx,dy),least,Math.min(w-start.x,h-start.y));
+        else{frame.x=start.x+dx;frame.y=start.y+dy}
+        draw();
+      };
+      box.onpointerup=box.onpointercancel=()=>{box.onpointermove=null};
+    };
+    // Resize about the frame's centre; the size is clamped first so a frame at its limit does not drift.
+    const resize=size=>{
+      const next=clamp(size,least,full),cx=frame.x+frame.size/2,cy=frame.y+frame.size/2;
+      Object.assign(frame,{size:next,x:cx-next/2,y:cy-next/2});draw();
+    };
+    // Arrow keys move (Shift: further); + and - resize.
+    box.onkeydown=event=>{
+      const step=event.shiftKey?20:4;
+      const moves={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]};
+      if(moves[event.key]){frame.x+=moves[event.key][0];frame.y+=moves[event.key][1];draw()}
+      else if(event.key==='+'||event.key==='=')resize(frame.size+step);
+      else if(event.key==='-')resize(frame.size-step);
+      else return;
+      event.preventDefault();
+    };
+    slider.oninput=()=>resize(Number(slider.value));
+    return new Promise(resolve=>{
+      let result=null;
+      ok.onclick=()=>{result=source();dialog.close()};
+      cancel.onclick=()=>dialog.close();
+      dialog.onclose=()=>{dialog.remove();resolve(result)};
+      // Keys belong to the dialog: the page's own shortcuts (Space plays audio, Esc closes a side panel) must not
+      // react behind it. Esc still cancels, the browser closes a modal dialog by itself.
+      dialog.addEventListener('keydown',event=>event.stopPropagation());
+      document.body.append(dialog);
+      draw();dialog.showModal();box.focus();
+    });
+  }
+  // Ask the user for the area to keep; resolves to a 160x160 WebP (JPEG where WebP cannot be encoded), or null.
+  async function crop(file){
+    const bitmap=await bitmapOf(file);
+    try{
+      const area=await frameOn(bitmap);
+      if(!area)return null;
+      const canvas=make('canvas',{width:SIZE,height:SIZE});
+      canvas.getContext('2d').drawImage(bitmap,area.x,area.y,area.size,area.size,0,0,SIZE,SIZE);
+      const encode=type=>new Promise(resolve=>canvas.toBlob(resolve,type,.85));
+      const webp=await encode('image/webp');
+      return webp?.type==='image/webp'?webp:encode('image/jpeg');
+    }finally{bitmap.close()}
   }
   async function failed(response,fallback){
     const detail=(await response.json().catch(()=>({}))).detail;
     return new Error(typeof detail==='string'?detail:fallback);
   }
-  // PUT the cropped photo to url (the administrator API or /api/me/avatar); resolves to {username, avatarUrl}.
+  // Crop, then PUT the photo to url (the administrator API or /api/me/avatar); resolves to {username, avatarUrl},
+  // or null when the user cancelled the crop (nothing is sent).
   async function upload(url,file){
-    const photo=await square(file);
+    const photo=await crop(file);
+    if(!photo)return null;
     const response=await fetch(url,{method:'PUT',headers:{'content-type':photo.type},body:photo});
     if(!response.ok)throw await failed(response,'照片上傳失敗，請再試一次');
     return response.json();
@@ -43,7 +155,7 @@ window.AvatarPhoto=(()=>{
     });
   }
   const initial=(name,username)=>[...(name||username||'?')][0].toUpperCase();
-  return {square,upload,remove,pick,initial};
+  return {crop,upload,remove,pick,initial};
 })();
 
 window.accountReady=fetch('/api/me').then(response=>{
@@ -103,8 +215,10 @@ function ownAvatar(me,make){
       item('更換照片',()=>run(async()=>{
         const file=await AvatarPhoto.pick();
         if(!file)return;
+        close();   // the crop dialog takes over; an error reopens the menu with its message
         const result=await AvatarPhoto.upload('/api/me/avatar',file);
-        changed(result.avatarUrl);close();
+        if(result)changed(result.avatarUrl);   // null: the crop was cancelled, nothing changed
+        close();
       })),
       me.avatarUrl?item('移除照片',()=>run(async()=>{await AvatarPhoto.remove('/api/me/avatar');changed(null);close()})):null,
       message].filter(Boolean));

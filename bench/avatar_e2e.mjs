@@ -53,7 +53,35 @@ try {
 
   // Set the photo.
   const image = {name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64')};
-  const choose = async (click) => { const [chooser] = await Promise.all([page.waitForEvent('filechooser'), click()]); await chooser.setFiles(image); };
+  let puts = 0;
+  page.on('request', r => { if (r.method() === 'PUT' && r.url().includes('/avatar')) puts++; });
+  // Choosing a file opens the crop dialog (avatar-crop); choose() confirms the initial frame.
+  const openCrop = async (click) => {
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), click()]);
+    await chooser.setFiles(image); await page.waitForSelector('dialog.crop-dialog[open]');
+  };
+  const choose = async (click) => { await openCrop(click); await page.click('.crop-ok'); };
+  const rectOf = sel => page.locator(sel).boundingBox();
+  // The photo's pixel colour at (x, y) of its 160x160.
+  const pixel = (img, x, y) => img.evaluate((node, [px, py]) => {
+    const c = Object.assign(document.createElement('canvas'), {width: 160, height: 160}); const g = c.getContext('2d'); g.drawImage(node, 0, 0);
+    return Array.from(g.getImageData(px, py, 1, 1).data.slice(0, 3));
+  }, [x, y]);
+
+  // Cancel and Esc upload nothing.
+  await openCrop(() => row().locator('button.avatar-edit').click());
+  const [stage, frame] = [await rectOf('.crop-stage'), await rectOf('.crop-frame')];
+  check('crop dialog shows the image with the largest centred square frame',
+    Math.abs(frame.height - stage.height) < 1 && Math.abs((frame.x + frame.width / 2) - (stage.x + stage.width / 2)) < 1, [stage.width, stage.height, frame.width]);
+  await page.screenshot({path: join(out, 'crop-dialog.png')});
+  await page.click('.crop-dialog >> text=取消');
+  await openCrop(() => row().locator('button.avatar-edit').click());
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog.crop-dialog', {state: 'detached'});
+  await page.waitForTimeout(300);
+  check('取消 and Esc close the dialog and upload nothing', puts === 0 && await row().locator('span.avatar-face').count() === 1, puts);
+
+  // Confirm the initial frame.
   const upload = page.waitForResponse(r => r.url().includes('/avatar') && r.request().method() === 'PUT');
   await choose(() => row().locator('button.avatar-edit').click());
   const response = await upload;
@@ -70,6 +98,40 @@ try {
   check('the centre square is kept', centre[2] > 150 && centre[0] < 120, centre);
   check('row offers 移除照片 and the avatar says 更換照片', await row().getByRole('button', {name: '移除照片'}).count() === 1
     && await row().locator('button.avatar-edit').getAttribute('title') === '更換照片');
+
+  // Drag the frame far past the left edge: it stops at the edge, and the photo is the left part (red at its left).
+  await openCrop(() => row().locator('button.avatar-edit').click());
+  const startFrame = await rectOf('.crop-frame');
+  await page.locator('.crop-frame').focus(); await page.keyboard.press('Shift+ArrowLeft');
+  check('Shift+← moves the frame 20 px', Math.abs((await rectOf('.crop-frame')).x - (startFrame.x - 20)) < 1);
+  const before = await rectOf('.crop-frame');
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2); await page.mouse.down();
+  await page.mouse.move(before.x - 600, before.y + before.height / 2, {steps: 8}); await page.mouse.up();
+  const [stage2, moved] = [await rectOf('.crop-stage'), await rectOf('.crop-frame')];
+  check('dragging the frame stops at the image edge', Math.abs(moved.x - stage2.x) < 1, [moved.x, stage2.x]);
+  const previewEdge = await page.locator('canvas.crop-preview').evaluate(c => Array.from(c.getContext('2d').getImageData(2, c.height / 2, 1, 1).data.slice(0, 3)));
+  check('the preview shows the framed area (red at its left)', previewEdge[0] > 150 && previewEdge[2] < 120, previewEdge);
+  // Shrink with the corner handle, then with the slider; the frame stays square and inside.
+  const handle = await rectOf('.crop-handle');
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2); await page.mouse.down();
+  await page.mouse.move(handle.x - 60, handle.y - 60, {steps: 6}); await page.mouse.up();
+  const shrunk = await rectOf('.crop-frame');
+  check('the corner handle resizes the frame, keeping it square', shrunk.width < moved.width - 30 && Math.abs(shrunk.width - shrunk.height) < 1, [moved.width, shrunk.width]);
+  await page.locator('.crop-size').fill(String(Math.round(stage2.height)));
+  const grown = await rectOf('.crop-frame');
+  check('the slider resizes the frame within the image', Math.abs(grown.height - stage2.height) < 1 && grown.x >= stage2.x - 0.5, [grown.width, stage2.height]);
+  await page.keyboard.press('Tab'); await page.locator('.crop-frame').focus();
+  for (let i = 0; i < 5; i++) await page.keyboard.press('Shift+ArrowLeft');
+  const oldSrc = await row().locator('img.avatar-face').getAttribute('src');
+  const left = page.waitForResponse(r => r.url().includes('/avatar') && r.request().method() === 'PUT');
+  await page.click('.crop-ok'); await left;
+  // Wait for the list to show the new photo (a new versioned address), fully loaded.
+  await page.waitForFunction(([who, src]) => {
+    const img = [...document.querySelectorAll('img.avatar-face')].find(i => i.src.includes(`/api/users/${who}/avatar`));
+    return img && !img.src.endsWith(src) && img.complete && img.naturalWidth > 0;
+  }, [member, oldSrc]);
+  const edge = await pixel(row().locator('img.avatar-face'), 4, 80);
+  check('the uploaded photo is the framed area (red at its left edge)', edge[0] > 150 && edge[2] < 120, edge);
   await page.screenshot({path: join(out, 'admin-photo.png')});
 
   // Board.
@@ -109,6 +171,13 @@ try {
   await openAdmin();
   check('no horizontal scroll on team administration at 400 px', !(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)));
   await page.screenshot({path: join(out, 'admin-400.png'), fullPage: true});
+  const putsBefore = puts;
+  await openCrop(() => row().locator('button.avatar-edit').click());
+  const dialog400 = await rectOf('dialog.crop-dialog');
+  check('crop dialog fits a 400 px screen', dialog400.x >= 0 && dialog400.x + dialog400.width <= 400, [dialog400.x, dialog400.width]);
+  await page.screenshot({path: join(out, 'crop-400.png')});
+  await page.click('.crop-dialog >> text=取消');
+  check('cancelling at 400 px uploads nothing', puts === putsBefore);
   await page.setViewportSize({width: 1280, height: 900});
 
   // Remove.
@@ -132,6 +201,13 @@ try {
   await page.keyboard.press('Escape');
   check('Esc still closes the menu after an error', await page.isHidden('.account-menu'));
   await page.unroute('**/api/me/avatar');
+  const putsHeader = puts;
+  await page.click('.account-avatar');
+  await openCrop(() => page.click('.account-menu >> text=更換照片'));
+  await page.click('.crop-dialog >> text=取消');
+  await page.waitForSelector('dialog.crop-dialog', {state: 'detached'});
+  check('cancelling the crop from the header changes nothing', puts === putsHeader
+    && await page.locator('.account-avatar .account-initial').count() === 1 && await page.isHidden('.account-menu-error'));
   await page.click('.account-avatar');
   check('header menu offers 更換照片 only without a photo', (await page.locator('.account-menu [role=menuitem]').allTextContents()).join() === '更換照片');
   const mine = page.waitForResponse(r => r.url().endsWith('/api/me/avatar') && r.request().method() === 'PUT');

@@ -32,7 +32,7 @@
   <section id="teams" class="team-grid" aria-label="團隊列表"></section>
 </main>
 
-<script src="/assets/account.js?v=20261107b"></script>
+<script src="/assets/account.js?v=20261107e"></script>
 <script>
 const $=id=>document.getElementById(id);
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
@@ -73,7 +73,10 @@ function avatar(member,name){
   const picker=el('input',{type:'file',accept:'image/png,image/jpeg,image/webp',hidden:true});
   const button=el('button',{type:'button',className:`avatar avatar-edit${member.avatarUrl?' photo':''}`,title:member.avatarUrl?'更換照片':'設定照片',
     ariaLabel:`${member.avatarUrl?'更換':'設定'}${name}的照片`,onclick:()=>picker.click()},face(),el('span',{className:'avatar-camera',innerHTML:CAMERA}));
-  picker.onchange=()=>{const file=picker.files[0];picker.value='';if(file)act(async()=>ownChanged(member,(await AvatarPhoto.upload(`/api/admin/users/${encodeURIComponent(member.username)}/avatar`,file)).avatarUrl),button)};
+  picker.onchange=()=>{const file=picker.files[0];picker.value='';if(file)act(async()=>{
+    const result=await AvatarPhoto.upload(`/api/admin/users/${encodeURIComponent(member.username)}/avatar`,file);
+    if(result)ownChanged(member,result.avatarUrl);   // null: the crop was cancelled, nothing changed
+  },button)};
   return [button,picker];
 }
 
