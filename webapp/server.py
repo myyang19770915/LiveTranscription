@@ -25,6 +25,7 @@ import minutes
 import review
 import series
 import metrics
+import search
 import team_access
 from translation_quality import (TERMS_SCHEMA, apply_aliases, asr_context, consolidate_terms, glossary_entries, learned_replacements,
                                  parse_discovered_terms, policy, repair_asr, strip_context_echo, term_discovery_messages, violations)
@@ -111,6 +112,7 @@ app.include_router(actions.router)
 app.include_router(minutes.router)
 app.include_router(series.router)
 app.include_router(metrics.router)
+app.include_router(search.router)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 

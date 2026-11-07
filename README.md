@@ -330,6 +330,15 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
   - **修改內容**：詳細面板標題旁按「編輯」（Enter 儲存、Esc 取消）。
   - **刪除**：只有看板新增的待辦可以刪（按兩次確認，連同歷程一起刪除）；會議產生的待辦請改成「已取消」並填原因。
 
+## 搜尋
+
+頁首的放大鏡（`/search`，任何頁面按 `/` 也能開啟）一次搜尋所屬團隊的逐字稿原文與譯文、紀要條目（含看板新增的待辦，不含已駁回的）與會議主題。
+
+- 子字串比對，大小寫不分，中日英文都可以；多個詞用空白分開時，必須同時出現在同一段文字裡（最多 5 個詞）。
+- 篩選：類型（全部、逐字稿、紀要、會議主題）、團隊、系列、日期範圍。搜尋字與篩選都寫在網址，可以直接分享。
+- 結果依會議分組，新的在前，符合的字會標示出來：逐字稿結果附時間點，點了直接開到校對頁那一段（可播放）；紀要結果開到紀要頁那一條；看板新增的待辦開到看板。超過 300 筆只列前 300 筆，並提示縮小範圍。
+- 使用 Postgres 的 `pg_trgm` 索引（migration 010）。
+
 ## 成效指標
 
 頁首「成效指標」（`/metrics`，手機寬度不顯示連結）依團隊與期間（近 30 天、90 天、一年）即時計算 roadmap 的效益指標，每個數字都附計算依據的件數；分母為 0 時顯示「—」與「資料不足」。
@@ -413,6 +422,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `GET /api/meetings/{id}/minutes.md` | 下載 Markdown 會議紀錄（只含已確認條目） |
 | `GET /actions` | 待辦看板 |
 | `POST /api/actions`、`PATCH`／`DELETE /api/actions/{id}`、`POST /api/actions/{id}/status`、`GET /api/actions/{id}/updates` | 看板新增待辦、修改內容／負責人／到期日、刪除（限看板新增的）、改狀態、歷程；權限依待辦的團隊 |
+| `GET /api/search?q=&team=&series=&from=&to=&kind=` | 全文搜尋（`kind`：`all`、`segments`、`items`、`meetings`），依會議分組，最多 300 筆 |
 | `GET /api/metrics?team=&days=` | 成效指標（`days`：30、90、365；`team` 省略為所屬全部團隊） |
 | `GET /api/actions?team=&owner=&status=&due=&q=` | 所屬團隊已確認的待辦（`owner`：帳號、`me`、`none`；`status`：逗號分隔的 `todo,doing,done,cancelled`，預設前三種；`due`：`overdue`、`week`、`none`），附團隊與成員清單 |
 | `POST /api/meetings/{id}/minutes/items/{itemId}/status`、`GET …/updates` | 改待辦狀態（帶 `version`；取消需 `note`）、讀狀態歷程 |

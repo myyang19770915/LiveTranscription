@@ -172,7 +172,10 @@ window.accountReady=fetch('/api/me').then(response=>{
     const links=[location.pathname==='/'?link('/meetings','會議紀錄'):null,location.pathname!=='/actions'?link('/actions','待辦看板'):null,
       location.pathname!=='/metrics'?link('/metrics','成效指標'):null,
       me.admin&&location.pathname!=='/admin'?link('/admin','團隊管理'):null].filter(Boolean);
-    slot.replaceChildren(...links,ownAvatar(me,make),name,out);
+    // Search (meeting-search): an icon, shown on phones too; / opens it from any page.
+    const search=location.pathname==='/search'?null:Object.assign(make('a',{href:'/search',className:'account-search',title:'搜尋（/）',ariaLabel:'搜尋'}),
+      {innerHTML:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>'});
+    slot.replaceChildren(...[search,...links,ownAvatar(me,make),name,out].filter(Boolean));
   }
   return me;
 });
@@ -234,3 +237,12 @@ function ownAvatar(me,make){
   wrap.append(button,menu);
   return wrap;
 }
+
+// "/" opens search from any page (meeting-search), unless typing or a dialog is open; on the search page it focuses the box.
+document.addEventListener('keydown',event=>{
+  if(event.key!=='/'||event.ctrlKey||event.metaKey||event.altKey||event.defaultPrevented)return;
+  if(event.target.closest?.('input, textarea, select, [contenteditable="true"]')||document.querySelector('dialog[open]'))return;
+  event.preventDefault();
+  const box=location.pathname==='/search'&&document.getElementById('q');
+  if(box){box.focus();box.select()}else location.href='/search';
+});

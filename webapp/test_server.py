@@ -1776,6 +1776,113 @@ class MetricsTests(ReviewTestCase):
         self.assertEqual(TestClient(app).get("/api/metrics").status_code, 401)
 
 
+class SearchTests(ReviewTestCase):
+    """meeting-search: alice and bob in 研發部, carol in 業務部."""
+
+    def setUp(self):
+        ReviewTestCase.setUp(self)
+        self.ldap.add("carol", "pw-carol")
+        self.rd, self.sales = self.team("研發部", "alice", "bob"), self.team("業務部", "carol")
+        self.alice, self.carol = self.signed_in("alice"), self.signed_in("carol")
+        self.weekly = self.alice.post(f"/api/teams/{self.rd}/series", json={"name": "研發週會"}).json()["id"]
+
+    def meeting(self, title="", day="2026-11-05", team=None, client=None, series=None):
+        body = {"team_id": team or self.rd, "language": "zh", **({"series_id": series} if series else {})}
+        meeting = (client or self.alice).post("/api/meetings", json=body).json()["id"]
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE meetings SET title = %s, started_at = %s::date + time '10:00' AT TIME ZONE 'Asia/Taipei' WHERE id = %s",
+                         (title, day, meeting))
+        return meeting
+
+    def segments(self, meeting, *pairs):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            for n, (source, target) in enumerate(pairs, 1):
+                conn.execute("INSERT INTO segments (meeting_id, seq, start_ms, end_ms, asr_text, source, live_target, target) "
+                             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (meeting, n, n * 1000, n * 1000 + 900, source, source, target, target))
+
+    def item(self, meeting, content, state="confirmed", kind="action"):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            return conn.execute("INSERT INTO minute_items (meeting_id, kind, content, origin, state) VALUES (%s, %s, %s, 'ai', %s) RETURNING id",
+                                (meeting, kind, content, state)).fetchone()[0]
+
+    def search(self, query, client=None, status=200):
+        response = (client or self.alice).get(f"/api/search?{query}")
+        self.assertEqual(response.status_code, status, response.text)
+        return response.json()
+
+    def hits(self, result):
+        return [(g["meetingId"], h["type"], h.get("seq") or h.get("id")) for g in result["groups"] for h in g["hits"]]
+
+    def test_matching(self):
+        # spec example "Matching"
+        m = self.meeting("報價單討論")
+        self.segments(m, ("合約下週五前寄給客戶", "send the contract by next Friday"), ("合約已寄出", "sent to the client"),
+                      ("我們用迷你max", "MiniMax launch"))
+        discount, plain = self.item(m, "折扣 100%"), self.item(m, "數量 1000")
+        self.item(m, "報價單", state="rejected")
+        self.assertEqual(self.hits(self.search("q=合約 客戶")), [(m, "segment", 1)])
+        self.assertEqual(self.hits(self.search("q=合約 client")), [])
+        self.assertEqual(self.hits(self.search("q=minimax")), [(m, "segment", 3)])
+        self.assertEqual(self.hits(self.search("q=100%25")), [(m, "item", discount)])
+        self.assertNotIn(plain, [h[2] for h in self.hits(self.search("q=100%25"))])
+        self.assertEqual(self.hits(self.search("q=報價單")), [(m, "title", None)])
+        self.assertEqual(self.search("q=%20%20", status=422)["detail"], "請輸入要搜尋的字")
+        self.search("q=" + "字" * 100 + "%20")                              # 100 after trimming
+        self.assertEqual(self.search("q=" + "字" * 101, status=422)["detail"], "搜尋字最多 100 個字")
+        self.search("q=x&kind=people", status=422)
+
+    def test_grouping_newest_first_and_board_items(self):
+        old, new = self.meeting("週會", "2026-11-01"), self.meeting("週會", "2026-11-06")
+        self.segments(old, ("交貨時間確認", "delivery"))
+        self.segments(new, ("交貨改成分批", "split delivery"), ("交貨日期", "date"))
+        decided = self.item(new, "交貨方式改為分批", kind="decision")
+        board = self.alice.post("/api/actions", json={"teamId": self.rd, "content": "確認交貨倉庫"}).json()["id"]
+        result = self.search("q=交貨")
+        self.assertEqual([g["meetingId"] for g in result["groups"]][:2], [None, new])   # the board item was created today
+        self.assertEqual(self.hits(result)[1:], [(new, "segment", 1), (new, "segment", 2), (new, "item", decided), (old, "segment", 1)])
+        self.assertEqual(result["groups"][0]["hits"], [{"type": "item", "id": board, "kind": "action", "content": "確認交貨倉庫",
+                                                         "state": "confirmed", "status": "todo"}])
+        self.assertEqual((result["groups"][1]["title"], result["groups"][1]["team"]), ("週會", "研發部"))
+
+    def test_other_teams_stay_invisible(self):
+        theirs = self.meeting("業務會議", team=self.sales, client=self.carol)
+        self.segments(theirs, ("機密報價", "secret quote"))
+        self.assertEqual(self.search("q=機密")["groups"], [])
+        self.search(f"q=機密&team={self.sales}", status=404)
+        their_series = self.carol.post(f"/api/teams/{self.sales}/series", json={"name": "業務週會"}).json()["id"]
+        self.search(f"q=機密&series={their_series}", status=404)
+        self.assertEqual(len(self.search("q=機密", client=self.carol)["groups"]), 1)
+
+    def test_filters(self):
+        inside = self.meeting("A", "2026-11-03", series=self.weekly)
+        other_series = self.meeting("B", "2026-11-03")
+        too_early = self.meeting("C", "2026-10-20", series=self.weekly)
+        for m in (inside, other_series, too_early):
+            self.segments(m, ("預算簽核", "budget"))
+            self.item(m, "預算簽核流程")
+        board = self.alice.post("/api/actions", json={"teamId": self.rd, "content": "預算表", "seriesId": self.weekly}).json()["id"]
+        result = self.search(f"q=預算&team={self.rd}&series={self.weekly}&from=2026-11-01&to=2026-11-05&kind=items")
+        self.assertEqual({(g["meetingId"], h["type"]) for g in result["groups"] for h in g["hits"]}, {(inside, "item")})
+        # A board item is dated by its creation: inside the range it is listed.
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE minute_items SET confirmed_at = '2026-11-03 09:00+08' WHERE id = %s", (board,))
+        result = self.search(f"q=預算&team={self.rd}&series={self.weekly}&from=2026-11-01&to=2026-11-05&kind=items")
+        self.assertEqual({(g["meetingId"], h.get("id")) for g in result["groups"] for h in g["hits"] if g["meetingId"] is None}, {(None, board)})
+        result = self.search(f"q=預算&series={self.weekly}&kind=items")
+        self.assertIn(board, [h[2] for h in self.hits(result)])
+        self.assertEqual({h[1] for h in self.hits(self.search(f"q=預算&series={self.weekly}&kind=segments"))}, {"segment"})
+
+    def test_truncated(self):
+        m = self.meeting("長會議")
+        self.segments(m, *[(f"重複的詞 {n}", "repeat") for n in range(305)])
+        result = self.search("q=重複")
+        self.assertEqual((result["total"], result["truncated"]), (300, True))
+
+    def test_trigram_indexes_exist(self):
+        names = {r[0] for r in self.query("SELECT indexname FROM pg_indexes WHERE indexname LIKE '%%_trgm'")}
+        self.assertEqual(names, {"segments_source_trgm", "segments_target_trgm", "minute_items_content_trgm", "meetings_title_trgm"})
+
+
 class DatabaseTests(DatabaseTestCase):
     def test_migrations_apply_once(self):
         with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
