@@ -77,6 +77,8 @@
 
 ## 後續事項
 
+- **會中進度提示實測（2026-11-07）**：以實際紀要模型（`deepseek-v4-flash`）跑 `bench/progress_model_eval.py` 的 10 種情境（明確完成、開始、取消、只是討論或計畫、問句與否定、日文、辨識錯字、句子被切開、長段落中的一句、閒聊），共 56 次呼叫（前 8 題各 2 輪、加入後 2 題後全部 3 輪、再全部 1 輪，另有「取消」題單獨重跑 6 次觀察）：該提的 60 項中提出 58 項（漏掉的 2 項來自同一次呼叫，重跑 6 次都正確），誤報 0，延遲中位數約 2 秒。提示詞與門檻維持不變；換模型或改提示詞時重跑這支工具。
+
 - **外部同步**：`minute_items.external_ref`（議題追蹤平台的編號）仍保留未用，P5 串接時使用；待辦狀態已由 `action-tracking` 啟用。
 
 - **公司 LDAP 切換驗證**（原 team-accounts 任務 5.3）：把公司 LDAP 參數填入 `.env`（`LDAP_URL`、`LDAP_BASE_DN`、`LDAP_BIND_DN`／`LDAP_BIND_PASSWORD` 或 `LDAP_USER_DN_TEMPLATE`、`LDAP_USER_FILTER`、需要時 `LDAP_CA_FILE`），`docker compose up -d app`，執行 `docker exec -it asr_confucius4-r2t2-app-1 python -m auth check-ldap <帳號>`，再以瀏覽器實際登入一次；完成後移除 `dev-ldap` 測試目錄。
