@@ -1572,6 +1572,103 @@ class SeriesTests(ReviewTestCase):
         self.assertEqual(self.query("SELECT state FROM progress_suggestions"), [("pending",)])
 
 
+class BoardItemTests(ReviewTestCase):
+    """board-created-actions: alice and bob in 研發部, carol in 業務部; today is 2026-11-13 (Asia/Taipei)."""
+    TODAY = SeriesTests.TODAY
+
+    def setUp(self):
+        ReviewTestCase.setUp(self)
+        self.ldap.add("carol", "pw-carol")
+        self.rd, self.sales = self.team("研發部", "alice", "bob"), self.team("業務部", "carol")
+        self.alice = self.signed_in("alice")
+        for name, value in (("minutes.MINUTES_URL", "http://model"), ("minutes.MINUTES_MODEL", "m"),
+                            ("minutes.local_today", lambda: self.TODAY)):
+            p = patch(name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    series, meeting, item = SeriesTests.series, SeriesTests.meeting, SeriesTests.item
+    detection, check, suggest = SeriesTests.detection, SeriesTests.check, SeriesTests.suggest
+
+    def create(self, client=None, **body):
+        return (client or self.alice).post("/api/actions", json={"teamId": self.rd, "content": "寄報價單給客戶", **body})
+
+    def test_creating_on_the_board(self):
+        # spec example "Validation"
+        response = self.create(owner="bob", dueDate="2026-11-20")
+        self.assertEqual(response.status_code, 201, response.text)
+        item = response.json()
+        self.assertEqual((item["content"], item["status"], item["owner"], item["dueDate"], item["meetingId"], item["origin"], item["team"]),
+                         ("寄報價單給客戶", "todo", "bob", "2026-11-20", None, "manual", "研發部"))
+        self.assertEqual(self.query("SELECT state, meeting_id, confirmed_by FROM minute_items WHERE id = %s", (item["id"],)),
+                         [("confirmed", None, "alice")])
+        board = self.signed_in("bob").get("/api/actions").json()["items"]
+        self.assertEqual([i["id"] for i in board], [item["id"]])
+        self.assertEqual(self.create(teamId=self.sales).status_code, 404)
+        self.assertEqual(self.create(owner="carol").status_code, 422)
+        other = self.series("業務週會", team=self.sales, client=self.signed_in("carol")).json()["id"]
+        self.assertEqual(self.create(seriesId=other).status_code, 422)
+        self.assertEqual(self.create(content="   ").status_code, 422)
+        self.assertEqual(self.query("SELECT count(*) FROM minute_items"), [(1,)])
+        self.assertEqual(self.signed_in("carol").get("/api/actions").json()["items"], [])
+
+    def test_changing_any_action_by_id(self):
+        board = self.create().json()
+        meeting = self.meeting()
+        from_meeting = self.item(meeting, "寄合約")
+        for item_id in (board["id"], from_meeting):
+            version = self.query("SELECT version FROM minute_items WHERE id = %s", (item_id,))[0][0]
+            changed = self.alice.patch(f"/api/actions/{item_id}", json={"version": version, "content": "改過的內容", "owner": "bob"})
+            self.assertEqual((changed.status_code, changed.json()["content"], changed.json()["owner"]), (200, "改過的內容", "bob"), changed.text)
+            self.assertEqual(changed.json()["version"], version + 1)
+            stale = self.alice.patch(f"/api/actions/{item_id}", json={"version": version, "content": "舊版本"})
+            self.assertEqual((stale.status_code, stale.json()["item"]["content"]), (409, "改過的內容"))
+            status = self.alice.post(f"/api/actions/{item_id}/status", json={"version": changed.json()["version"], "status": "cancelled", "note": ""})
+            self.assertEqual(status.status_code, 422)
+            status = self.alice.post(f"/api/actions/{item_id}/status", json={"version": changed.json()["version"], "status": "doing", "note": ""})
+            self.assertEqual((status.status_code, status.json()["status"]), (200, "doing"))
+            history = self.alice.get(f"/api/actions/{item_id}/updates").json()
+            self.assertEqual([(h["from"], h["to"]) for h in history], [("todo", "doing")])
+            carol = self.signed_in("carol")
+            self.assertEqual(carol.get(f"/api/actions/{item_id}/updates").status_code, 404)
+            self.assertEqual(carol.post(f"/api/actions/{item_id}/status", json={"version": 1, "status": "done", "note": ""}).status_code, 404)
+
+    def test_deleting_only_board_items(self):
+        board = self.create().json()
+        self.alice.post(f"/api/actions/{board['id']}/status", json={"version": board["version"], "status": "doing", "note": ""})
+        from_meeting = self.item(self.meeting(), "寄合約")
+        self.assertEqual(self.signed_in("carol").delete(f"/api/actions/{board['id']}").status_code, 404)
+        refused = self.alice.delete(f"/api/actions/{from_meeting}")
+        self.assertEqual((refused.status_code, refused.json()["detail"]), (409, "會議產生的待辦請改用已取消"))
+        self.assertEqual(self.signed_in("bob").delete(f"/api/actions/{board['id']}").status_code, 204)
+        self.assertEqual(self.query("SELECT count(*) FROM minute_items"), [(1,)])
+        self.assertEqual(self.query("SELECT count(*) FROM item_updates"), [(0,)])
+
+    def test_board_item_of_a_series_is_carried_and_detected(self):
+        a, _ = self.detection()
+        weekly = self.query("SELECT series_id FROM meetings WHERE id = %s", (self.today,))[0][0]
+        board = self.create(seriesId=weekly, dueDate="2026-11-10").json()
+        self.assertEqual(board["series"], "研發週會")
+        listed = self.alice.get(f"/api/series/{weekly}/actions?exclude={self.today}").json()
+        self.assertIn(board["id"], [i["id"] for i in listed])
+        self.assertEqual(next(i for i in listed if i["id"] == board["id"])["overdueDays"], 3)
+        sid = self.suggest(board["id"], note="報價單已寄出")
+        pending = next(s for s in self.alice.get(f"/api/meetings/{self.today}/progress").json() if s["id"] == sid)
+        self.assertIsNone(pending["itemMeetingId"])
+        accepted = self.alice.post(f"/api/meetings/{self.today}/progress/{sid}/accept")
+        self.assertEqual((accepted.status_code, accepted.json()["item"]["status"]), (200, "done"), accepted.text)
+        history = self.alice.get(f"/api/actions/{board['id']}/updates").json()
+        self.assertEqual([(h["to"], h["meetingId"]) for h in history], [("done", self.today)])
+
+    def test_meeting_items_get_their_team(self):
+        meeting = self.meeting()
+        item = self.item(meeting, "寄合約")
+        self.assertEqual(self.query("SELECT team_id FROM minute_items WHERE id = %s", (item,)), [(self.rd,)])
+        with self.assertRaises(psycopg.errors.CheckViolation):
+            with psycopg.connect(TEST_DATABASE_URL) as conn:
+                conn.execute("INSERT INTO minute_items (team_id, kind, content, origin) VALUES (%s, 'decision', 'x', 'ai')", (self.rd,))
+
+
 class DatabaseTests(DatabaseTestCase):
     def test_migrations_apply_once(self):
         with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
@@ -1616,6 +1713,8 @@ class ActionMigrationTests(DatabaseTestCase):
                          (meeting,))
         self.assertEqual(asyncio.run(migrate(db.migration_files()))[0], 5)
         self.assertEqual(self.query("SELECT status, status_note FROM minute_items"), [("todo", "")])
+        # board-created-actions: existing items get their meeting's team.
+        self.assertEqual(self.query("SELECT team_id, series_id FROM minute_items"), [(team, None)])
         with self.assertRaises(psycopg.errors.CheckViolation):
             self.query("UPDATE minute_items SET status = 'open'")
         self.assertEqual(self.query("SELECT count(*) FROM item_updates"), [(0,)])

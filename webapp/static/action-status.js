@@ -1,18 +1,18 @@
 /* Status of a confirmed action item, shared by the board (/actions) and the minutes page: a status menu
-   (已取消 asks for the reason first), the overdue badge, the status note and the change history. */
+   (已取消 asks for the reason first), the overdue badge, the status note and the change history. url is the
+   item's address: /api/actions/{id} on the board, the meeting's minutes item on the minutes page. */
 (function(root){
   const STATUS=[['todo','未開始'],['doing','進行中'],['done','已完成'],['cancelled','已取消']];
   const LABEL=Object.fromEntries(STATUS);
   function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
   const pad=n=>String(n).padStart(2,'0');
   const when=iso=>{const d=new Date(iso);return `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`};
-  const itemUrl=(meetingId,item)=>`/api/meetings/${meetingId}/minutes/items/${item.id}`;
 
   function overdue(item){return item.overdueDays>0?el('span',{className:'overdue',textContent:`逾期 ${item.overdueDays} 天`}):null}
 
   // Resolves {item, message}: a 409 carries the item as someone else left it, shown with their message.
-  async function send(meetingId,item,status,note){
-    const response=await fetch(`${itemUrl(meetingId,item)}/status`,{method:'POST',headers:{'content-type':'application/json'},
+  async function send(url,item,status,note){
+    const response=await fetch(`${url}/status`,{method:'POST',headers:{'content-type':'application/json'},
       body:JSON.stringify({version:item.version,status,note})});
     const result=await response.json().catch(()=>({}));
     if(response.status===409&&result.item)return {item:result.item,message:result.detail};
@@ -20,9 +20,9 @@
     return {item:result,message:''};
   }
 
-  function history(meetingId,item){
+  function history(url){
     const list=el('ol',{className:'status-history'},el('li',{className:'muted small',textContent:'載入中…'}));
-    fetch(`${itemUrl(meetingId,item)}/updates`).then(r=>r.ok?r.json():Promise.reject()).then(rows=>{
+    fetch(`${url}/updates`).then(r=>r.ok?r.json():Promise.reject()).then(rows=>{
       list.replaceChildren(...(rows.length?rows.map(h=>el('li',{},
         el('span',{textContent:`${LABEL[h.from]} → ${LABEL[h.to]}`}),
         el('small',{className:'muted',textContent:` ${h.by} · ${when(h.at)}`}),
@@ -35,7 +35,7 @@
   }
 
   // onChange(item, message) after the server answered; onError(message) when it refused.
-  function control(item,{meetingId,onChange,onError}){
+  function control(item,{url,onChange,onError}){
     const select=el('select',{className:`input compact status-select status-${item.status}`,ariaLabel:'狀態'},
       ...STATUS.map(([value,label])=>el('option',{value,textContent:label})));
     select.value=item.status;
@@ -51,7 +51,7 @@
       reasonForm);
     async function change(status,note){
       select.disabled=true;
-      try{const {item:next,message}=await send(meetingId,item,status,note);onChange(next,message)}
+      try{const {item:next,message}=await send(url,item,status,note);onChange(next,message)}
       catch(error){select.value=item.status;onError(error.message)}
       finally{select.disabled=false}
     }
@@ -65,7 +65,7 @@
     };
     historyButton.onclick=()=>{
       const open=wrap.querySelector('.status-history');
-      if(open){open.remove();historyButton.textContent='歷程'}else{wrap.append(history(meetingId,item));historyButton.textContent='收起歷程'}
+      if(open){open.remove();historyButton.textContent='歷程'}else{wrap.append(history(url));historyButton.textContent='收起歷程'}
     };
     return wrap;
   }

@@ -2,6 +2,8 @@
    Builds on tokens.css, admin.css, review.css. */
 .board-page { width: min(1440px, 100%); }
 .board-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.board-head-actions { display: flex; align-items: center; gap: 14px; }
+.board-head-actions .summary { margin: 0; }
 
 /* Toolbar: search, avatar filter, team and grouping; quick filters below. */
 .board-toolbar { display: grid; gap: 10px; margin-bottom: 16px; }
@@ -87,6 +89,13 @@
 .detail-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .detail-body { flex: 1; overflow-y: auto; display: grid; align-content: start; gap: 16px; padding: 18px; }
 .detail-title { margin: 0; font-size: 19px; line-height: 1.5; overflow-wrap: anywhere; }
+/* Title with 編輯, the in-place editor, the new-item form and delete (board-created-actions). */
+.detail-title-row { display: flex; align-items: flex-start; gap: 8px; }
+.detail-title-row .detail-title { flex: 1; min-width: 0; }
+.detail-edit { width: 100%; min-height: 76px; resize: vertical; font: inherit; line-height: 1.5; }
+.detail-edit-form, .detail-create { display: grid; gap: 12px; }
+.detail-edit-actions { display: flex; align-items: center; gap: 8px; }
+.detail-danger { padding-top: 12px; border-top: 1px solid var(--border); }
 .detail-field { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; align-items: start; }
 .detail-label { padding-top: 9px; color: var(--muted); font-size: 13px; font-weight: 700; }
 .detail-value { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
@@ -113,6 +122,8 @@
 .status-history-note { margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 .status-history-meeting { margin-left: 6px; color: var(--accent); font-size: 12px; }
 
+@media (max-width: 640px) { .board-head { flex-wrap: wrap; align-items: flex-start; } .board-head-actions { width: 100%; justify-content: space-between; }
+  .board-head-actions .primary-button { width: auto; } .board-head-actions .summary { min-width: 0; } }
 @media (max-width: 900px) {
   .lane-columns { grid-template-columns: minmax(0, 1fr); }
   .toolbar-gap { display: none; }

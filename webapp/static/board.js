@@ -23,18 +23,20 @@
     let hash=0;for(const ch of username||'')hash=(hash*31+ch.codePointAt(0))>>>0;
     return {initial:[...(displayName||username||'?')][0].toUpperCase(),color:hash%COLORS};
   }
-  // [{key, label, items}] by owner or by source meeting; named lanes sorted, 未指派 / 沒有來源 last. group '' = one lane.
+  // [{key, label, items}] by owner or by source meeting; named lanes sorted, 未指派 / 看板新增 last. group '' = one lane.
+  // Items created on the board (board-created-actions) have no meeting: this is their source.
+  const BOARD_SOURCE='看板新增';
   function swimlanes(items,group,meetingLabel=i=>i.meetingTitle){
     if(group!=='owner'&&group!=='meeting')return [{key:'',label:'',items}];
     const lanes=new Map();
     for(const item of items){
-      const key=group==='owner'?item.owner||'':item.meetingId;
-      const label=group==='owner'?(item.owner?item.ownerName:'未指派'):meetingLabel(item);
-      if(!lanes.has(key))lanes.set(key,{key,label,items:[],last:group==='owner'&&!item.owner});
+      const key=group==='owner'?item.owner||'':item.meetingId||'';
+      const label=group==='owner'?(item.owner?item.ownerName:'未指派'):item.meetingId?meetingLabel(item):BOARD_SOURCE;
+      if(!lanes.has(key))lanes.set(key,{key,label,items:[],last:group==='owner'?!item.owner:!item.meetingId});
       lanes.get(key).items.push(item);
     }
     return [...lanes.values()].sort((a,b)=>a.last-b.last||a.label.localeCompare(b.label,'zh-Hant')).map(({key,label,items})=>({key,label,items}));
   }
-  root.ActionBoard={RECENT_DAYS,recentDone,dueTone,avatar,swimlanes};
+  root.ActionBoard={RECENT_DAYS,BOARD_SOURCE,recentDone,dueTone,avatar,swimlanes};
   if(typeof module!=='undefined')module.exports=root.ActionBoard;
 })(typeof globalThis!=='undefined'?globalThis:this);

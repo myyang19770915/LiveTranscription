@@ -131,7 +131,7 @@ function card(item){
     item.state!=='rejected'?el('button',{type:'button',className:'text-button danger',textContent:'駁回',onclick:()=>decide('reject')}):null,
     editing===item.id?null:el('button',{type:'button',className:'text-button',textContent:'修改',onclick:()=>{editing=item.id;render()}}));
   // A confirmed action is tracked (action-tracking): status, overdue days and history.
-  const tracking=item.kind==='action'&&item.state==='confirmed'?ActionStatus.control(item,{meetingId,onChange:(next,message)=>{replaceItem(next);notice(message)},onError:notice}):null;
+  const tracking=item.kind==='action'&&item.state==='confirmed'?ActionStatus.control(item,{url:itemUrl(item.id),onChange:(next,message)=>{replaceItem(next);notice(message)},onError:notice}):null;
   return el('article',{className:`card item ${item.state}${peeking?.itemId===item.id?' peeked':''}${item.id===linkedId?' linked':''}`,id:`item-${item.id}`},head,body,fields,tracking,evidence(item),actions);
 }
 function addForm(kind){
@@ -231,7 +231,9 @@ function renderProgress(){
       el('div',{className:'item-actions'},
         el('button',{type:'button',className:'secondary-button compact',textContent:'套用',onclick:()=>decide('accept')}),
         el('button',{type:'button',className:'text-button',textContent:'略過',onclick:()=>decide('dismiss')}),
-        el('a',{className:'text-button',href:`/meetings/${s.itemMeetingId}/minutes#item-${s.itemId}`,textContent:'原會議的待辦'})));
+        // A board item (board-created-actions) has no meeting: it opens on the board.
+        s.itemMeetingId?el('a',{className:'text-button',href:`/meetings/${s.itemMeetingId}/minutes#item-${s.itemId}`,textContent:'原會議的待辦'})
+          :el('a',{className:'text-button',href:`/actions?item=${s.itemId}`,textContent:'看板上的待辦'})));
   }));
 }
 call('GET',`/api/meetings/${meetingId}/progress`).then(list=>{progress=list;renderProgress()}).catch(()=>{});

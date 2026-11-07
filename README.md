@@ -313,7 +313,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 
 ## 待辦追蹤
 
-紀要中**已確認的待辦**會進入追蹤；每頁頂部都有「待辦看板」（`/actions`）。
+紀要中**已確認的待辦**會進入追蹤；會議以外交辦的事也可以直接在看板新增。每頁頂部都有「待辦看板」（`/actions`）。
 
 - **狀態**：未開始、進行中、已完成、已取消。同團隊的成員都可以在看板或紀要頁改狀態；改成「已取消」必須填原因。兩人同時更改時，後送出的人會看到最新狀態並重新操作。
 - **歷程**：每次改狀態都記下從什麼狀態到什麼狀態、備註、誰、何時；卡片上按「歷程」查看，新的在前。
@@ -326,6 +326,9 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
   - **分組**：依負責人或依來源會議分成泳道，可收合。
   - **已完成**欄預設只顯示最近 14 天完成的，欄底可展開較早完成的。
   - 所有篩選與分組都保留在網址中。
+  - **新增待辦**：按右上角「＋ 新增待辦」或鍵盤 `c`，填內容、團隊、負責人、到期日，可選系列；建立後是未開始，來源顯示「看板新增」。選了系列的話，下次這個系列開會時會列在會前未完成事項，也會納入會中進度提示。
+  - **修改內容**：詳細面板標題旁按「編輯」（Enter 儲存、Esc 取消）。
+  - **刪除**：只有看板新增的待辦可以刪（按兩次確認，連同歷程一起刪除）；會議產生的待辦請改成「已取消」並填原因。
 
 ## 系列會議與進度提示
 
@@ -397,6 +400,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `PATCH …/minutes/summary`、`POST …/minutes/items`、`PATCH …/minutes/items/{itemId}`、`POST …/items/{itemId}/confirm`、`…/reject` | 編輯摘要、新增、修改、確認、駁回條目（皆帶 `version`，過期回 409） |
 | `GET /api/meetings/{id}/minutes.md` | 下載 Markdown 會議紀錄（只含已確認條目） |
 | `GET /actions` | 待辦看板 |
+| `POST /api/actions`、`PATCH`／`DELETE /api/actions/{id}`、`POST /api/actions/{id}/status`、`GET /api/actions/{id}/updates` | 看板新增待辦、修改內容／負責人／到期日、刪除（限看板新增的）、改狀態、歷程；權限依待辦的團隊 |
 | `GET /api/actions?team=&owner=&status=&due=&q=` | 所屬團隊已確認的待辦（`owner`：帳號、`me`、`none`；`status`：逗號分隔的 `todo,doing,done,cancelled`，預設前三種；`due`：`overdue`、`week`、`none`），附團隊與成員清單 |
 | `POST /api/meetings/{id}/minutes/items/{itemId}/status`、`GET …/updates` | 改待辦狀態（帶 `version`；取消需 `note`）、讀狀態歷程 |
 | `GET`／`POST /api/teams/{team}/series` | 團隊的系列；新增（同名回既有，200） |

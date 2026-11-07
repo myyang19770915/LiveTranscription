@@ -22,3 +22,7 @@ const items=[{id:1,owner:'bob',ownerName:'bob',meetingId:'m1',meetingTitle:'週�
 t('lanes by owner',B.swimlanes(items,'owner').map(l=>[l.label,l.items.map(i=>i.id)]),[['alice',[3]],['bob',[1]],['未指派',[2]]]);
 t('lanes by meeting',B.swimlanes(items,'meeting').map(l=>[l.label,l.items.length]),[['專案會',1],['週會',2]]);
 t('no grouping is one lane',B.swimlanes(items,'').length,1);
+// board-created-actions: items with no meeting form the 看板新增 lane, after the meetings (even if it sorts first).
+const withBoard=[...items,{id:4,owner:'bob',ownerName:'bob',meetingId:null,meetingTitle:null}];
+t('board items lane last',B.swimlanes(withBoard,'meeting',i=>`A ${i.meetingTitle}`).map(l=>[l.label,l.items.map(i=>i.id)]),
+  [['A 專案會',[2]],['A 週會',[1,3]],['看板新增',[4]]]);

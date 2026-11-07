@@ -261,9 +261,10 @@ def item_payload(row: dict, members: dict, times: dict, today: date | None = Non
 
 
 async def item_context(conn, meeting: dict) -> tuple[dict, dict]:
+    """(members, segment times) for items of meeting; a board item passes {id: None, team_id} and has no segments."""
     members = {m["username"]: m["display_name"] for m in await team_members(conn, meeting["team_id"])}
     times = {r["seq"]: r["start_ms"] for r in await (await conn.execute(
-        "SELECT seq, start_ms FROM segments WHERE meeting_id = %s", (meeting["id"],))).fetchall()}
+        "SELECT seq, start_ms FROM segments WHERE meeting_id = %s", (meeting["id"],))).fetchall()} if meeting["id"] else {}
     return members, times
 
 

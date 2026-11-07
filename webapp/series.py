@@ -85,10 +85,10 @@ async def create_series(team_id: int, body: SeriesIn, user: auth.CurrentUser):
 
 async def unfinished(conn, user: auth.User, series_id: int, exclude=None) -> list[dict]:
     """Confirmed, unfinished action items from the series' meetings (other than exclude), as the board lists them."""
-    where = ["i.kind = 'action'", "i.state = 'confirmed'", "i.status = ANY(%(open)s)", "m.series_id = %(series)s"]
+    where = ["i.kind = 'action'", "i.state = 'confirmed'", "i.status = ANY(%(open)s)", "coalesce(m.series_id, i.series_id) = %(series)s"]
     params = {"series": series_id}
     if exclude is not None:
-        where.append("m.id <> %(exclude)s")
+        where.append("i.meeting_id IS DISTINCT FROM %(exclude)s")
         params["exclude"] = exclude
     return await actions.action_rows(conn, user, where, params)
 
@@ -153,7 +153,7 @@ async def suggestions(conn, meeting_id, pending_only: bool = True, only: int | N
     cited = sorted({n for r in rows for n in r["evidence"]})
     segments = {r["seq"]: r for r in await (await conn.execute(
         "SELECT seq, start_ms, source FROM segments WHERE meeting_id = %s AND seq = ANY(%s)", (meeting_id, cited))).fetchall()} if cited else {}
-    return [{"id": r["id"], "itemId": r["item_id"], "itemMeetingId": str(r["item_meeting"]), "content": r["content"],
+    return [{"id": r["id"], "itemId": r["item_id"], "itemMeetingId": str(r["item_meeting"]) if r["item_meeting"] else None, "content": r["content"],
              "fromStatus": r["item_status"], "toStatus": r["to_status"], "note": r["note"], "state": r["state"],
              "evidence": [{"seq": n, "startMs": segments[n]["start_ms"], "source": segments[n]["source"]} for n in r["evidence"] if n in segments]}
             for r in rows]
@@ -226,8 +226,8 @@ async def decide(meeting_id: str, suggestion_id: int, action: Literal["accept", 
         item = None
         if action == "accept":
             row = await (await conn.execute("SELECT * FROM minute_items WHERE id = %s FOR UPDATE", (suggestion["item_id"],))).fetchone()
-            home = await (await conn.execute("SELECT * FROM meetings WHERE id = %s", (row["meeting_id"],))).fetchone()
-            if row["kind"] != "action" or row["state"] != "confirmed" or home["team_id"] != meeting["team_id"]:
+            home = await actions.home_of(conn, row)
+            if row["kind"] != "action" or row["state"] != "confirmed" or row["team_id"] != meeting["team_id"]:
                 raise HTTPException(status_code=409, detail=actions.NOT_AN_ACTION)
             if row["status"] == suggestion["to_status"]:
                 members, times = await minutes.item_context(conn, home)

@@ -1,6 +1,7 @@
 // Action board in the spirit of a Jira board (jira-style-board): compact cards, drag between columns to change
 // the status, a detail panel to edit, quick filters, avatar filter and swimlanes. Everything filterable lives in
-// the address; the open card too (?item=).
+// the address; the open card too (?item=). ＋ 新增待辦 (or c) creates an item that belongs to no meeting
+// (board-created-actions); every item is changed through /api/actions/{id}.
 const $=id=>document.getElementById(id);
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
 const COLUMNS=['todo','doing','done','cancelled'];
@@ -32,7 +33,9 @@ function dueChip(item){
   const [,m,d]=item.dueDate.split('-').map(Number);
   return el('span',{className:`due-chip ${tone}`,title:item.dueText?`原話：${item.dueText}`:''},el('span',{className:'due-icon',innerHTML:CALENDAR}),`${m}/${d}`);
 }
-const meetingName=item=>`${item.team} · ${MeetingCatalog.displayTitle({title:item.meetingTitle,startedAt:item.startedAt})}`;
+const actionUrl=id=>`/api/actions/${id}`;
+const meetingName=item=>item.meetingId?`${item.team} · ${MeetingCatalog.displayTitle({title:item.meetingTitle,startedAt:item.startedAt})}`
+  :`${item.team} · ${ActionBoard.BOARD_SOURCE}${item.series?` · ${item.series}`:''}`;
 function laneName(item){
   const d=new Date(item.startedAt);
   return `${meetingName(item)}${item.meetingTitle?`（${d.getMonth()+1}/${d.getDate()}）`:''}${item.series?` · ${item.series}`:''}`;
@@ -69,7 +72,7 @@ function column(status,items){
 async function moveTo(item,status){
   if(item.status===status)return;
   if(status==='cancelled'){openDetail(item.id,{cancel:true});return}     // a reason is required first
-  try{const {message}=await ActionStatus.send(item.meetingId,item,status,'');notice(message)}
+  try{const {message}=await ActionStatus.send(actionUrl(item.id),item,status,'');notice(message)}
   catch(error){notice(error.message)}
   await reload();
 }
@@ -145,50 +148,146 @@ function reload(){return load().catch(error=>notice(error.message))}
 window.addEventListener('yq:avatar',()=>reload());
 
 // --- Detail panel ---
+// A refused edit keeps what was being typed: the panel is redrawn on reload, and reopens the editor with it.
+let unsaved=null;   // {id, content}
 async function patchItem(item,body){
-  const response=await fetch(`/api/meetings/${item.meetingId}/minutes/items/${item.id}`,{method:'PATCH',headers:{'content-type':'application/json'},
+  const response=await fetch(actionUrl(item.id),{method:'PATCH',headers:{'content-type':'application/json'},
     body:JSON.stringify({version:item.version,...body})});
   const result=await response.json().catch(()=>({}));
-  panelError(response.ok?'':typeof result.detail==='string'?result.detail:'儲存失敗');
+  const message=response.ok?'':typeof result.detail==='string'?result.detail:'儲存失敗';
   if(response.ok)fresh(item,result);
+  else if('content' in body)unsaved={id:item.id,content:body.content};
   await reload();
+  panelError(message);   // after the reload, which may have redrawn the panel
+  return response.ok;
 }
 // The server's answer carries the new version: take it at once, so a second edit before the board reloads is not stale.
 function fresh(item,next){
-  const {version,status,statusNote,owner,ownerName,dueDate,dueText,overdueDays}=next;
-  Object.assign(item,{version,status,statusNote,owner,ownerName,dueDate,dueText,overdueDays});
+  const {version,status,statusNote,owner,ownerName,dueDate,dueText,overdueDays,content}=next;
+  Object.assign(item,{version,status,statusNote,owner,ownerName,dueDate,dueText,overdueDays},content?{content}:{});
 }
 function panelError(message){const box=$('detailError');if(box){box.textContent=message||'';box.hidden=!message}}
+function showPanel(key){
+  document.documentElement.style.setProperty('--detail-top',`${document.querySelector('.topbar').offsetHeight}px`);
+  document.body.classList.add('detail-open');$('detail').hidden=false;
+  $('detailKey').textContent=key;
+}
+const field=(label,...content)=>el('div',{className:'detail-field'},el('span',{className:'detail-label',textContent:label}),el('div',{className:'detail-value'},...content));
+function ownerOptions(teamId,current){
+  const members=data.people.filter(p=>p.teams.includes(teamId));
+  return [el('option',{value:'',textContent:'未指派'}),
+    ...members.map(p=>el('option',{value:p.username,textContent:p.displayName===p.username?p.username:`${p.displayName}（${p.username}）`,selected:p.username===current}))];
+}
+// The title, and 編輯 to change it in place (Enter saves, Esc puts it back).
+function titleOf(item){
+  const title=el('h2',{id:'detailTitle',className:'detail-title',textContent:item.content});
+  const edit=el('button',{type:'button',className:'text-button',textContent:'編輯'});
+  const head=el('div',{className:'detail-title-row'},title,edit);
+  edit.onclick=()=>{
+    const draft=unsaved?.id===item.id?unsaved.content:item.content;unsaved=null;
+    const box=el('textarea',{className:'input detail-edit',value:draft,maxLength:500,rows:3,ariaLabel:'待辦內容'});
+    const save=el('button',{type:'submit',className:'primary-button compact',textContent:'儲存'});
+    const back=()=>form.replaceWith(head);
+    const form=el('form',{className:'detail-edit-form'},box,el('div',{className:'detail-edit-actions'},save,
+      el('button',{type:'button',className:'text-button',textContent:'取消',onclick:back})));
+    form.onsubmit=async event=>{event.preventDefault();
+      if(!box.value.trim()){box.focus();return}
+      save.disabled=true;
+      if(!await patchItem(item,{content:box.value}))save.disabled=false;
+    };
+    box.onkeydown=event=>{
+      if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();form.requestSubmit()}
+      if(event.key==='Escape'){event.stopPropagation();back()}
+    };
+    head.replaceWith(form);box.focus();box.select();
+  };
+  if(unsaved?.id===item.id)queueMicrotask(()=>edit.isConnected&&edit.click());
+  return head;
+}
+// Delete, for an item created on the board only: a second press confirms.
+function deleteButton(item){
+  const button=el('button',{type:'button',className:'text-button danger',textContent:'刪除待辦'});
+  button.onclick=async()=>{
+    if(!button.dataset.confirm){button.dataset.confirm='1';button.textContent='確定刪除？無法復原';
+      setTimeout(()=>{if(button.isConnected){delete button.dataset.confirm;button.textContent='刪除待辦'}},4000);return}
+    button.disabled=true;
+    const response=await fetch(actionUrl(item.id),{method:'DELETE'});
+    if(!response.ok){const result=await response.json().catch(()=>({}));panelError(typeof result.detail==='string'?result.detail:'刪除失敗');button.disabled=false;return}
+    closeDetail();notice(`已刪除 #${item.id}`);await reload();
+  };
+  return button;
+}
 function openDetail(id,{cancel=false,keep=false}={}){
   const item=data.items.find(i=>i.id===id);
   if(!item){closeDetail();return}
   if(!keep)setParam('item',String(id));
   document.querySelectorAll('.issue.selected').forEach(n=>n.classList.remove('selected'));
   $(`action-${id}`)?.classList.add('selected');
-  document.documentElement.style.setProperty('--detail-top',`${document.querySelector('.topbar').offsetHeight}px`);
-  document.body.classList.add('detail-open');$('detail').hidden=false;
-  $('detailKey').textContent=`#${item.id}`;
+  showPanel(`#${item.id}`);
   shownVersion=item.version;
-  const status=ActionStatus.control(item,{meetingId:item.meetingId,onChange:(next,message)=>{fresh(item,next);panelError(message);reload()},onError:panelError});
+  const status=ActionStatus.control(item,{url:actionUrl(item.id),onChange:(next,message)=>{fresh(item,next);panelError(message);reload()},onError:panelError});
   const members=data.people.filter(p=>p.teams.includes(item.teamId));
-  const owner=el('select',{className:'input compact',ariaLabel:'負責人'},el('option',{value:'',textContent:'未指派'}),
-    ...members.map(p=>el('option',{value:p.username,textContent:p.displayName===p.username?p.username:`${p.displayName}（${p.username}）`})));
+  const owner=el('select',{className:'input compact',ariaLabel:'負責人'},...ownerOptions(item.teamId));
   if(item.owner&&!members.some(p=>p.username===item.owner))owner.append(el('option',{value:item.owner,disabled:true,textContent:`${item.ownerName||item.owner}（已不在團隊）`}));
   owner.value=item.owner||'';owner.onchange=()=>patchItem(item,{owner:owner.value||null});
   const due=el('input',{className:'input compact',type:'date',value:item.dueDate||'',ariaLabel:'到期日'});
   due.onchange=()=>patchItem(item,{dueDate:due.value||null});
-  const field=(label,...content)=>el('div',{className:'detail-field'},el('span',{className:'detail-label',textContent:label}),el('div',{className:'detail-value'},...content));
   $('detailBody').replaceChildren(
-    el('h2',{id:'detailTitle',className:'detail-title',textContent:item.content}),
+    titleOf(item),
     el('p',{id:'detailError',className:'alert',role:'alert',hidden:true}),
     field('狀態',status),
     field('負責人',avatarFor(item.owner,item.ownerName),owner),
     field('到期日',due,dueChip(item),item.dueText?el('span',{className:'muted small',textContent:`原話：「${item.dueText}」`}):null),
     field('團隊',el('span',{textContent:item.team})),
-    field('來源',el('a',{href:`/meetings/${item.meetingId}/minutes#item-${item.id}`,textContent:meetingName(item)})),
-    el('p',{className:'detail-hint muted small',textContent:'按「歷程」看每次狀態變更；會議中套用的進度提示會附上那場會議的連結。'}));
+    field('來源',item.meetingId?el('a',{href:`/meetings/${item.meetingId}/minutes#item-${item.id}`,textContent:meetingName(item)})
+      :el('span',{textContent:`${ActionBoard.BOARD_SOURCE}${item.series?`，系列「${item.series}」的會議會帶出`:''}`})),
+    el('p',{className:'detail-hint muted small',textContent:'按「歷程」看每次狀態變更；會議中套用的進度提示會附上那場會議的連結。'}),
+    item.meetingId?null:el('div',{className:'detail-danger'},deleteButton(item)));
   // Opened by dropping on 已取消: ask for the reason right away.
   if(cancel){const select=status.querySelector('select');select.value='cancelled';select.dispatchEvent(new Event('change'))}
+}
+// --- New item (board-created-actions) ---
+async function openCreate(){
+  if(!data)return;
+  setParam('item','');
+  document.querySelectorAll('.issue.selected').forEach(n=>n.classList.remove('selected'));
+  showPanel('新增待辦');shownVersion=null;
+  const content=el('textarea',{className:'input detail-edit',maxLength:500,rows:3,required:true,placeholder:'要做什麼？例如：週五前把報價單寄給客戶',ariaLabel:'待辦內容'});
+  const team=el('select',{className:'input compact',ariaLabel:'團隊'},...data.teams.map(t=>el('option',{value:t.id,textContent:t.name})));
+  team.value=params.get('team')&&data.teams.some(t=>String(t.id)===params.get('team'))?params.get('team'):String(data.teams[0]?.id??'');
+  const owner=el('select',{className:'input compact',ariaLabel:'負責人'});
+  const due=el('input',{className:'input compact',type:'date',ariaLabel:'到期日'});
+  const series=el('select',{className:'input compact',ariaLabel:'系列'});
+  const create=el('button',{type:'submit',className:'primary-button compact',textContent:'建立'});
+  async function teamChanged(){
+    const id=Number(team.value);
+    owner.replaceChildren(...ownerOptions(id));
+    series.replaceChildren(el('option',{value:'',textContent:'不屬於系列'}));
+    const list=await fetch(`/api/teams/${id}/series`).then(r=>r.ok?r.json():[]).catch(()=>[]);
+    if(String(id)===team.value)series.append(...list.map(s=>el('option',{value:s.id,textContent:s.name})));
+  }
+  team.onchange=teamChanged;
+  const form=el('form',{className:'detail-create'},
+    el('h2',{id:'detailTitle',className:'detail-title',textContent:'新增待辦'}),
+    el('p',{id:'detailError',className:'alert',role:'alert',hidden:true}),
+    content,field('團隊',team),field('負責人',owner),field('到期日',due),
+    field('系列',series,el('span',{className:'muted small',textContent:'選了系列，下次這個系列開會時會帶出來追蹤'})),
+    el('div',{className:'detail-edit-actions'},create,el('button',{type:'button',className:'text-button',textContent:'取消',onclick:closeDetail})));
+  form.onsubmit=async event=>{event.preventDefault();
+    if(!content.value.trim()){content.focus();return}
+    create.disabled=true;panelError('');
+    const response=await fetch('/api/actions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      teamId:Number(team.value),content:content.value,owner:owner.value||null,dueDate:due.value||null,seriesId:series.value?Number(series.value):null})});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok){panelError(typeof result.detail==='string'?result.detail:'建立失敗');create.disabled=false;return}
+    setParam('item',String(result.id));
+    await reload();
+    if(!data.items.some(i=>i.id===result.id)){closeDetail();notice(`已建立 #${result.id}，但不符合目前的篩選條件`)}
+  };
+  content.onkeydown=event=>{if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();form.requestSubmit()}};
+  $('detailBody').replaceChildren(form);
+  await teamChanged();
+  content.focus();
 }
 function closeDetail(){
   $('detail').hidden=true;document.body.classList.remove('detail-open');setParam('item','');
@@ -207,6 +306,12 @@ for(const button of document.querySelectorAll('.quick'))button.onclick=()=>{
 $('filters').onsubmit=event=>{event.preventDefault();setParam('q',$('q').value.trim());reload()};
 $('clear').onclick=()=>{for(const k of ['q','team','owner','due','cancelled'])params.delete(k);$('q').value='';$('team').value='';setParam('q','');notice('');reload()};
 $('detailClose').onclick=closeDetail;
-document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('detail').hidden)closeDetail()});
+$('create').onclick=openCreate;
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'&&!$('detail').hidden)closeDetail();
+  // c: new item, as on a Jira board, unless typing or a dialog is open.
+  const typing=event.target.closest?.('input, textarea, select, [contenteditable="true"]');
+  if(event.key==='c'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!typing&&!document.querySelector('dialog[open]')){event.preventDefault();openCreate()}
+});
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
 window.accountReady.then(reload);

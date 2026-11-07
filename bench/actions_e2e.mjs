@@ -1,7 +1,9 @@
 // End-to-end acceptance for the action board (action-tracking, jira-style-board) in the real pages (Playwright,
 // gstack's install), against a meeting whose minutes have at least one action item. It confirms one if needed,
 // sets its due date to yesterday on the minutes page, then on the board drags it 進行中 → 已完成, drops it on
-// 已取消 (reason required), edits it in the detail panel and puts it back to 未開始. Exits 1 on any failed check.
+// 已取消 (reason required), edits it in the detail panel and puts it back to 未開始. It also creates an item on the
+// board (board-created-actions), edits its content, finds it in the 看板新增 lane and deletes it. Exits 1 on any
+// failed check.
 // Usage: YUQIAO_SESSION=<token> node bench/actions_e2e.mjs <meeting id> <screenshot dir>
 import {homedir} from 'node:os';
 import {join} from 'node:path';
@@ -12,7 +14,7 @@ const app = process.env.YUQIAO_APP || 'http://localhost:18082';
 if (!process.env.YUQIAO_SESSION || !meeting || !out) { console.error('Usage: YUQIAO_SESSION=<token> node bench/actions_e2e.mjs <meeting id> <dir>'); process.exit(2); }
 const {chromium} = (await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE || join(homedir(), '.claude/skills/gstack/node_modules/playwright/index.js')).href)).default;
 const browser = await chromium.launch();
-let failed = false;
+let failed = false, boardItem = null;
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail !== '' ? ` ${JSON.stringify(detail)}` : ''}`); failed ||= !ok; };
 const pad = n => String(n).padStart(2, '0');
 const isoDay = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -137,6 +139,67 @@ try {
   await page.goto(`${app}/actions?due=overdue`); await page.waitForSelector('.board-column');
   check('overdue filter shows the overdue item', await card().count() === 1);
 
+  // New item on the board (board-created-actions): the button and c open the panel; empty content is not sent.
+  await page.goto(`${app}/actions`); await page.waitForSelector('.board-column');
+  await page.click('#create'); await page.waitForSelector('#detail:not([hidden]) .detail-create');
+  check('＋ 新增待辦 opens the new-item panel', await page.textContent('#detailKey') === '新增待辦');
+  await page.keyboard.press('Escape'); await page.waitForSelector('#detail', {state: 'hidden'});
+  await page.locator('body').press('c'); await page.waitForSelector('#detail:not([hidden]) .detail-create');
+  check('c opens the new-item panel', true);
+  let posts = 0;
+  page.on('request', r => { if (r.method() === 'POST' && r.url().endsWith('/api/actions')) posts++; });
+  await page.click('#detail .detail-create button[type=submit]');
+  check('empty content is not sent', posts === 0 && await page.isVisible('#detail .detail-create'));
+  const text = `看板新增驗收 ${Date.now() % 100000}`;
+  await page.fill('#detail textarea[aria-label="待辦內容"]', text);
+  await page.selectOption('#detail select[aria-label="負責人"]', {index: 1});
+  const soon = isoDay(new Date(Date.now() + 3 * 86400000));
+  await page.fill('#detail input[aria-label="到期日"]', soon);
+  const [created] = await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/actions') && r.request().method() === 'POST'),
+    page.click('#detail .detail-create button[type=submit]')]);
+  boardItem = (await created.json()).id;
+  await page.waitForSelector(`.column-todo #action-${boardItem}`);
+  check('the new item is in 未開始 with source 看板新增', created.status() === 201 && (await page.textContent(`#action-${boardItem} .issue-source`)).includes('看板新增'));
+  await page.waitForFunction(id => document.querySelector('#detailKey')?.textContent === `#${id}`, boardItem);
+  check('the panel opens on the new item, with a delete button', await page.locator('#detail .detail-danger button').count() === 1);
+  await page.screenshot({path: join(out, 'board-new-item.png')});
+  // Edit the content in place.
+  await page.click('#detail .detail-title-row button');
+  await page.fill('#detail textarea[aria-label="待辦內容"]', `${text}（改）`);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(([id, t]) => document.querySelector(`#action-${id} .issue-summary`)?.textContent === t
+    && document.querySelector('#detailTitle')?.textContent === t, [boardItem, `${text}（改）`]);
+  check('editing the content updates the card and the panel', true);
+  // Someone else saves first: the refusal stays visible and the text being typed is kept in the editor.
+  await page.click('#detail .detail-title-row button');
+  await page.fill('#detail textarea[aria-label="待辦內容"]', `${text}（衝突）`);
+  await page.evaluate(async id => {
+    const item = (await fetch('/api/actions').then(r => r.json())).items.find(i => i.id === id);
+    await fetch(`/api/actions/${id}`, {method: 'PATCH', headers: {'content-type': 'application/json'}, body: JSON.stringify({version: item.version, dueDate: null})});
+  }, boardItem);
+  await page.locator('#detail textarea[aria-label="待辦內容"]').press('Enter');
+  await page.waitForFunction(() => document.querySelector('#detailError')?.hidden === false
+    && document.querySelector('#detail textarea[aria-label="待辦內容"]')?.value.endsWith('（衝突）'));
+  check('a conflicting edit keeps its message and the typed text', (await page.textContent('#detailError')).includes('其他人'));
+  await page.locator('#detail textarea[aria-label="待辦內容"]').press('Escape');
+  await page.keyboard.press('Escape');
+  // Grouped by source meeting: the 看板新增 lane comes last.
+  await page.selectOption('#group', 'meeting'); await page.waitForSelector('.lane');
+  const laneTitles = await page.locator('.lane-toggle b').allTextContents();
+  check('board items form the 看板新增 lane, last', laneTitles.at(-1) === '看板新增', laneTitles);
+  await page.selectOption('#group', '');
+  // A meeting item cannot be deleted from the board; the board item can, after a second press.
+  await card().click(); await page.waitForSelector('#detail:not([hidden])');
+  check('a meeting item has no delete button', await page.locator('#detail .detail-danger').count() === 0);
+  await page.click(`#action-${boardItem}`); await page.waitForFunction(id => document.querySelector('#detailKey')?.textContent === `#${id}`, boardItem);
+  const remove = page.locator('#detail .detail-danger button');
+  await remove.click();
+  check('delete asks once more', (await remove.textContent()).includes('確定'));
+  await remove.click();
+  await page.waitForSelector(`#action-${boardItem}`, {state: 'detached'});
+  check('deleting removes the item and closes the panel', await page.isHidden('#detail'));
+  boardItem = null;
+
   // A bookmarked team the user is not in falls back to all teams.
   await page.goto(`${app}/actions?team=999999`); await page.waitForSelector('.board-column');
   check('unknown team falls back to all teams', !page.url().includes('team=') && (await page.textContent('#notice')).includes('全部團隊'), page.url());
@@ -154,6 +217,8 @@ try {
 } catch (error) {
   check('run', false, `${error.message.split('\n')[0]} (line ${(error.stack.match(/actions_e2e\.mjs:(\d+)/) || [])[1]})`);
 } finally {
+  // A board item left by a failed check is removed.
+  if (boardItem) await fetch(`${app}/api/actions/${boardItem}`, {method: 'DELETE', headers: {cookie: `yq_session=${process.env.YUQIAO_SESSION}`}}).catch(() => {});
   await browser.close();
 }
 process.exit(failed ? 1 : 0);
