@@ -9,6 +9,9 @@ window.Subtitles=(()=>{
     catch{return {source:false,size:2}}
   }
   function save(){try{localStorage.setItem(KEY,JSON.stringify(settings))}catch{}}
+  // The source toggle and text size are shared with 畫面＋字幕 (overlay.js): either side changes them, both redraw.
+  const getSettings=()=>({...settings});
+  function setSettings(partial){const size=partial.size===undefined?settings.size:Number(partial.size);settings={...settings,...partial,size:Math.min(SIZES,Math.max(1,Number.isFinite(size)?size:2))};save();render();window.Overlay?.refresh()}
   // The last n sentences of a text: split at 。！？!?. and line breaks; Chinese/Japanese sentences join without a space.
   function lastSentences(text,n){
     const parts=(text||'').split(/(?<=[。！？])\s*|(?<=[!?.])(?:\s+|$)|\n+/).map(s=>s.trim()).filter(Boolean).slice(-n);   // 3.5, U.S. stay whole
@@ -41,9 +44,9 @@ window.Subtitles=(()=>{
       +'<button type="button" class="sub-smaller" title="縮小字">A−</button><button type="button" class="sub-bigger" title="放大字">A+</button>'
       +'<span class="sub-title">語橋 Live 字幕</span><button type="button" class="sub-close" title="關閉字幕視窗">✕</button></div>'
       +'<div class="sub-body"><p class="sub-source" hidden></p><p class="sub-text"></p><p class="sub-draft" hidden></p><p class="sub-empty">等待語音…</p></div>';
-    d.querySelector('.sub-toggle-source').onclick=()=>{settings.source=!settings.source;save();render()};
-    d.querySelector('.sub-bigger').onclick=()=>{settings.size=Math.min(SIZES,settings.size+1);save();render()};
-    d.querySelector('.sub-smaller').onclick=()=>{settings.size=Math.max(1,settings.size-1);save();render()};
+    d.querySelector('.sub-toggle-source').onclick=()=>setSettings({source:!settings.source});
+    d.querySelector('.sub-bigger').onclick=()=>setSettings({size:settings.size+1});
+    d.querySelector('.sub-smaller').onclick=()=>setSettings({size:settings.size-1});
     d.querySelector('.sub-close').onclick=()=>opened.close();
     opened.addEventListener('pagehide',()=>{if(win===opened){win=null;button()?.setAttribute('aria-pressed','false')}});
     button()?.setAttribute('aria-pressed','true');
@@ -58,5 +61,5 @@ window.Subtitles=(()=>{
     b.onclick=()=>{if(win)close();else open().catch(error=>{win=null;b.setAttribute('aria-pressed','false');window.toast?.(error.message||'無法開啟字幕視窗')})};
   }
   init();
-  return {open,close,update,lastSentences,supported};
+  return {open,close,update,lastSentences,supported,getSettings,setSettings};
 })();

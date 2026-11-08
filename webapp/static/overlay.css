@@ -1,0 +1,27 @@
+/* 畫面＋字幕 (screen-subtitles): the shared picture full-window, a translucent subtitle box over it. The box is black
+   with white text in both themes (most readable over video); only --ov-alpha follows the opacity slider. */
+#screenView { position: fixed; inset: 0; z-index: 60; background: #000; }
+.toast { z-index: 70; }   /* messages stay above the view */
+#screenView video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.overlay-subs { position: absolute; left: 50%; top: 88%; transform: translate(-50%, -50%); width: min(92vw, 1100px); box-sizing: border-box;
+  padding: 8px 18px 14px; border-radius: 14px; background: rgba(0, 0, 0, var(--ov-alpha, .55)); color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .6); cursor: grab; user-select: none; touch-action: none;
+  font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif; }
+.overlay-subs.dragging { cursor: grabbing; }
+.overlay-subs[data-size="1"] { font-size: 28px; }
+.overlay-subs[data-size="2"] { font-size: 34px; }
+.overlay-subs[data-size="3"] { font-size: 40px; }
+.overlay-subs[data-size="4"] { font-size: 48px; }
+.ov-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 12px; }
+.ov-bar button { height: 26px; padding: 0 10px; border: 1px solid rgba(255, 255, 255, .35); border-radius: 999px; background: rgba(255, 255, 255, .12);
+  color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.ov-bar button:hover { background: rgba(255, 255, 255, .22); }
+.ov-bar button[aria-pressed="true"] { background: var(--accent); border-color: transparent; color: var(--accent-ink, #fff); }
+.ov-opacity { display: flex; align-items: center; gap: 6px; margin-left: auto; color: rgba(255, 255, 255, .85); cursor: default; }
+.ov-opacity input { width: 100px; accent-color: var(--accent); }
+.ov-source, .ov-text, .ov-draft { margin: 0; line-height: 1.35; overflow-wrap: anywhere; }
+.ov-source { margin-top: 4px; font-size: .5em; opacity: .8; }
+.ov-text { margin-top: 4px; font-weight: 600; }
+.ov-draft { margin-top: 2px; font-size: .85em; opacity: .72; }   /* the draft: not final yet */
+.ov-empty { margin: 6px 0 0; font-size: 16px; opacity: .7; }
+#screenView [hidden] { display: none !important; }

@@ -59,7 +59,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - `avatar_e2e.mjs`：成員頭像照片的端到端驗收（團隊管理點頭像後的裁切視窗：預設置中框、取消與 Esc 不上傳、拖曳停在照片邊緣、右下角與滑桿縮放、確定後上傳的是框選範圍；上傳照片為 160×160、看板頭像篩選（按下仍是正圓）、卡片、詳細面板與泳道顯示照片、照片載入失敗退回首字、400px 不橫向捲動、移除後回到首字；頁首選單換自己的照片、看板免重新整理即更新、移除與 Esc 關閉；以系統管理員登入：`YUQIAO_SESSION=… node bench/avatar_e2e.mjs <團隊名稱> <成員帳號> <截圖目錄>`；結束時會移除該成員的照片，並把登入者原本的照片放回去）
 - `minutes_e2e.mjs`：會議紀要的端到端驗收（產生、改負責人並確認、駁回、新增、下載 Markdown、證據側欄、分頁切換與返回；`YUQIAO_SESSION=… node bench/minutes_e2e.mjs <會議 id> <截圖目錄>`）
 - `catalog_e2e.mjs`：會議主題與篩選的端到端驗收（真實頁面、假麥克風；`YUQIAO_SESSION=… node bench/catalog_e2e.mjs <wav> <截圖目錄>`）
-- `translate_e2e.mjs`：即時翻譯模式與浮動字幕的端到端驗收（真實頁面、假麥克風：切換後欄位隱藏與按鈕文案、重新整理後模式仍在、跑一段不建立會議、匯出 `translate-*.txt`；浮動字幕以彈出視窗代替 Document PiP：顯示譯文、暫譯樣式、原文切換、A+、設定在重新整理後仍套用、關閉後按鈕復原、切句範例（含小數）、無 API 時停用；無頭瀏覽器沒有分頁聲音可分享，以假麥克風代替；`YUQIAO_SESSION=… node bench/translate_e2e.mjs <wav> <截圖目錄>`）
+- `translate_e2e.mjs`：即時翻譯模式與浮動字幕的端到端驗收（真實頁面、假麥克風：切換後欄位隱藏與按鈕文案、重新整理後模式仍在、跑一段不建立會議、匯出 `translate-*.txt`；浮動字幕以彈出視窗代替 Document PiP：顯示譯文、暫譯樣式、原文切換、A+、設定在重新整理後仍套用、關閉後按鈕復原、切句範例（含小數）、無 API 時停用；畫面＋字幕以 canvas 影像軌假裝分享的分頁：純麥克風時按鈕停用、分頁來源時可用、覆蓋層顯示畫面與頁面譯文、透明度滑桿只改底色 alpha、拖曳後位置記住並在重新開啟時套用、Esc 關閉、結束後停用；無頭瀏覽器沒有分頁聲音可分享，以假麥克風代替；`YUQIAO_SESSION=… node bench/translate_e2e.mjs <wav> <截圖目錄>`）
 - `catalogcheck.js`：會議預設名稱與「今天／本週／更早」分組（`TZ=Asia/Taipei node bench/catalogcheck.js`）
 - `lagcheck.py`：用人工字幕量測 ASR 文字落後音訊多久，決定校對頁的播放前延
 - `lag_gateway.py`：以指定封包大小把 bench 片段經 `/ws/transcribe`（翻譯模式，不建會議、不寫檔）送給指定引擎，記錄每個事件的到達時間；`--compare` 對另一條軌印出同一段文字晚多少到達（中位數／p10／p90），中日文片段另印文字落後人工字幕多久（`YUQIAO_SESSION=… python bench/lag_gateway.py <片段> <local|mai|hybrid> <封包毫秒> <秒數> <out.jsonl> [--compare 另一條.jsonl]`）

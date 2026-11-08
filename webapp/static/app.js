@@ -53,10 +53,11 @@ applyTheme(savedTheme,false);
 $('themeToggle').onclick=()=>applyTheme(document.documentElement.dataset.theme==='light'?'dark':'light');
 
 function setStatus(text, kind='idle') { $('status').className = `status ${kind}`; $('status').querySelector('span').textContent = text; $('status').title=text; }
-function render(id, value) { if(id==='transcript')window.Subtitles?.update({source:value}); const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72; el.textContent=value; el.classList.toggle('empty', !value); updateCounts(); if(value&&follow) el.scrollTop=el.scrollHeight; }
+function render(id, value) { if(id==='transcript'){window.Subtitles?.update({source:value});window.Overlay?.update({source:value})} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72; el.textContent=value; el.classList.toggle('empty', !value); updateCounts(); if(value&&follow) el.scrollTop=el.scrollHeight; }
 function visibleTranslation(){return translated+(translated&&draftText?'\n':'')+draftText}
 function renderTranslation(){
   window.Subtitles?.update({translation:translated,draft:draftText});   // the floating subtitles (live-translation)
+  window.Overlay?.update({translation:translated,draft:draftText});   // 畫面＋字幕 (screen-subtitles)
   const el=$('translation'),wasEmpty=el.classList.contains('empty');
   const follow=wasEmpty||el.scrollHeight-el.scrollTop-el.clientHeight<72;
   if(!translated&&!draftText){
@@ -163,6 +164,7 @@ async function startMeeting() {
     if(testStream)stopMicTest();setStatus('正在檢查音源…');resetLearnedTerms();
     captureStreams = await acquireAudio();stream=captureStreams[0];
     const label=streamLabel(captureStreams);$('activeMic').textContent=label;setMicStatus(`使用中：${label}`,'ok');
+    window.Overlay?.setTrack(captureStreams[0].getVideoTracks()[0]||null);   // the shared picture for 畫面＋字幕; null with a microphone alone
     if(selectedSource()==='microphone')await refreshMicrophones(stream.getAudioTracks()[0].getSettings().deviceId);
     captureStreams.forEach(media=>media.getTracks().forEach(track=>track.onended=()=>{if(stream && !stopping){stopMeeting(false).then(()=>{setStatus('分享或麥克風已停止','error');setMicStatus('音源已中斷','error')})}}));
     setStatus('正在連線…');
@@ -201,6 +203,7 @@ async function stopMeeting(sendEos=true) {
     await new Promise(resolve=>{const timer=setTimeout(()=>{closingSocket.removeEventListener('close',done);toast('辨識收尾逾時，請核對最後一句',5000);resolve()},20000);function done(){clearTimeout(timer);resolve()}closingSocket.addEventListener('close',done,{once:true});closingSocket.send(EOS)});
   }
   finalizeRemaining=true;
+  window.Overlay?.setTrack(null);
   try{socket?.close();}catch{} captureStreams.forEach(media=>media.getTracks().forEach(track=>{track.onended=null;track.stop()}));
   try{sourceNodes.forEach(node=>node.disconnect());workletNode?.disconnect();await audioContext?.close();}catch{}
   socket=stream=audioContext=null;captureStreams=[];sourceNodes=[];workletNode=null;clearInterval(timerHandle);$('start').innerHTML=translateOnly()?translateStartContent:startButtonContent;$('start').classList.remove('stop');setControls(false);if(topicUsed){$('topic').value='';topicUsed=false}setMicStatus(`已確認：${$('activeMic').textContent}`,'ok');setStatus(transcript?(translateOnly()?'翻譯已結束；未存到伺服器，可按「匯出」下載':'會議已結束'):'系統待機');scheduleTranslation(true);storeTranscript();if(meetingId)window.MeetingSeries?.ended(meetingId);stopping=false;

@@ -68,7 +68,7 @@
   .card-foot { flex: 0 0 30px; min-height: 30px; padding: 5px 12px; font-size: 9px; letter-spacing: 0; }
   .translation-draft { padding: 10px 12px; }
   footer { flex: 0 0 54px; display: flex; align-items: center; gap: 8px; padding: 0; }
-  footer .secure-note, #subtitles { display: none; }   /* no Document PiP on phones */
+  footer .secure-note, #subtitles, #overlay { display: none; }   /* no Document PiP or tab sharing on phones */
   #mobileActionSlot { display: flex; flex: 1; min-width: 0; }
   #mobileActionSlot .primary { width: 100%; min-height: 54px; height: 54px; gap: 8px; border-radius: 12px; }
   #mobileActionSlot .button-copy { text-align: left; }

@@ -21,6 +21,11 @@ try {
   await context.addInitScript(() => localStorage.setItem('interpreter-theme', 'light'));
   // Document Picture-in-Picture is not in headless Chromium: a popup window stands in for it (same document API).
   await context.addInitScript(() => { window.documentPictureInPicture = {requestWindow: async () => window.open('', 'subtitles', 'width=760,height=180')}; });
+  // Headless Chromium has no tab to share: 分頁／系統聲音 gets a canvas picture plus the fake microphone's audio.
+  await context.addInitScript(() => { navigator.mediaDevices.getDisplayMedia = async () => { const c = document.createElement('canvas'); c.width = 320; c.height = 180;
+    const g = c.getContext('2d'); let n = 0; setInterval(() => { g.fillStyle = n++ % 2 ? '#335577' : '#336688'; g.fillRect(0, 0, 320, 180); }, 200);   // frames only flow while the canvas is drawn to
+    const mic = await navigator.mediaDevices.getUserMedia({audio: true});
+    return new MediaStream([...c.captureStream(5).getVideoTracks(), ...mic.getAudioTracks()]); }; });
   await context.addCookies([{name: 'yq_session', value: process.env.YUQIAO_SESSION, url: `${app}/`}]);
   const page = await context.newPage();
   page.on('pageerror', e => check('no page errors', false, e.message));
@@ -40,6 +45,7 @@ try {
   await page.selectOption('#language', 'zh'); await page.selectOption('#audioSource', 'microphone');
   await page.click('#start'); await page.waitForFunction(() => document.querySelector('#status span').textContent === '即時翻譯中', null, {timeout: 15000});
   check('the status says 即時翻譯中 and the mode is locked', await page.isDisabled('#modeMeeting') && await page.isDisabled('#modeTranslate'));
+  check('with a microphone alone 畫面＋字幕 is disabled with the reason', await page.isDisabled('#overlay') && (await page.getAttribute('#overlay', 'title')).includes('分頁／系統聲音'));
   await page.waitForFunction(() => document.getElementById('transcript').textContent.trim().length > 0, null, {timeout: 20000});
   await page.waitForTimeout(6000);
   const transcript = await page.textContent('#transcript');
@@ -98,6 +104,59 @@ try {
     const kept = await second.evaluate(() => ({size: document.body.dataset.size, source: document.querySelector('.sub-toggle-source').getAttribute('aria-pressed')}));
     check('the settings are applied again after a reload', kept.size === '3' && kept.source === 'true', kept); await second.close(); }
   else check('the settings are applied again after a reload', false, 'no window');
+
+  // 畫面＋字幕 with a shared picture: saved settings (the spec's example rows), the overlay, its opacity, dragging, Esc,
+  // and the share ending in the browser. Settings are read when the page loads, so each row needs a reload.
+  await page.evaluate(() => localStorage.setItem('overlay', JSON.stringify({opacity: 30, x: 50, y: 12})));
+  await page.reload(); await page.evaluate(() => window.accountReady);
+  await page.selectOption('#audioSource', 'system');
+  await page.click('#start'); await page.waitForFunction(() => document.querySelector('#status span').textContent === '即時翻譯中', null, {timeout: 15000});
+  check('with 分頁／系統聲音 the button is enabled', await page.isEnabled('#overlay'));
+  await page.click('#overlay');
+  const opened = await page.evaluate(() => ({shown: !document.getElementById('screenView').hidden, video: !!document.querySelector('#screenView video').srcObject, pressed: document.getElementById('overlay').getAttribute('aria-pressed')}));
+  check('the overlay opens with the shared picture', opened.shown && opened.video && opened.pressed === 'true', opened);
+  const frames = await page.waitForFunction(() => document.querySelector('#screenView video').videoWidth > 0, null, {timeout: 10000}).then(() => true).catch(() => false);
+  check('the picture is playing (frames decoded)', frames);
+  const boxState = () => page.evaluate(() => { const v = document.getElementById('screenView').getBoundingClientRect(), r = document.querySelector('#screenView .overlay-subs').getBoundingClientRect();
+    const st = getComputedStyle(document.querySelector('#screenView .overlay-subs'));
+    return {bg: st.backgroundColor, alpha: st.getPropertyValue('--ov-alpha').trim(), cx: (r.left + r.width / 2 - v.left) / v.width * 100, cy: (r.top + r.height / 2 - v.top) / v.height * 100, top: r.top, color: getComputedStyle(document.querySelector('#screenView .ov-text')).color}; });
+  const seeded = await boxState();
+  check('saved settings apply: rgba(0,0,0,.3) at 50% across, 12% down', seeded.bg === 'rgba(0, 0, 0, 0.3)' && Math.abs(seeded.cx - 50) < 1 && Math.abs(seeded.cy - 12) < 2, seeded);
+  await page.waitForFunction(() => (document.querySelector('#screenView .ov-text').textContent + document.querySelector('#screenView .ov-draft').textContent).trim().length > 0, null, {timeout: 60000}).catch(() => {});
+  const ov = await page.evaluate(() => ({text: (document.querySelector('#screenView .ov-text').textContent || document.querySelector('#screenView .ov-draft').textContent).trim(), page: document.getElementById('translation').textContent}));
+  check('the overlay shows the page translation', ov.text.length > 0 && ov.page.includes(ov.text.slice(-6)), ov.text.slice(-30));
+  await page.evaluate(() => { const s = document.querySelector('#screenView .ov-opacity input'); s.value = '45'; s.dispatchEvent(new Event('input', {bubbles: true})); });
+  const slid = await boxState();
+  check('the slider changes only the background alpha', slid.alpha === '0.45' && slid.bg === 'rgba(0, 0, 0, 0.45)' && slid.color === 'rgb(255, 255, 255)', slid);
+  await page.evaluate(() => { localStorage.setItem('subtitles', JSON.stringify({source: true, size: 1})); });   // A− at the smallest size stays there
+  await page.evaluate(() => Subtitles.setSettings({size: 1})); await page.click('#screenView .ov-smaller');
+  check('A− at the smallest size keeps size 1', (await page.evaluate(() => Subtitles.getSettings().size)) === 1 && (await page.getAttribute('#screenView .overlay-subs', 'data-size')) === '1');
+  const box = await page.evaluate(() => { const r = document.querySelector('#screenView .overlay-subs').getBoundingClientRect(); return {x: r.left + r.width / 2, y: r.top + 8, top: r.top}; });
+  await page.mouse.move(box.x, box.y + 60); await page.mouse.down(); await page.mouse.move(box.x - 200, 600, {steps: 8}); await page.mouse.up();
+  const moved = await page.evaluate(() => ({top: document.querySelector('#screenView .overlay-subs').getBoundingClientRect().top, saved: JSON.parse(localStorage.getItem('overlay') || '{}')}));
+  check('dragging moves the box and remembers the position', moved.top > box.top + 100 && moved.saved.y > 40 && moved.saved.x < 50 && moved.saved.opacity === 45, moved);
+  await page.keyboard.press('Escape');
+  check('Esc closes the overlay', await page.evaluate(() => document.getElementById('screenView').hidden && !document.querySelector('#screenView video').srcObject) && (await page.getAttribute('#overlay', 'aria-pressed')) === 'false');
+  await page.click('#overlay');
+  const reopenedBox = await boxState();
+  check('reopening applies the saved position and opacity', Math.abs(reopenedBox.top - moved.top) < 4 && reopenedBox.alpha === '0.45', reopenedBox);
+  await page.screenshot({path: join(out, 'overlay.png')});
+  // The share ends in the browser (Chrome's sharing bar): the session stops, the view closes, the button is disabled.
+  await page.evaluate(() => document.querySelector('#screenView video').srcObject.getVideoTracks()[0].dispatchEvent(new Event('ended')));
+  await page.waitForFunction(() => document.querySelector('#status span').textContent.includes('已停止'), null, {timeout: 30000});
+  check('the share ending closes the overlay and disables the button', await page.evaluate(() => document.getElementById('screenView').hidden) && await page.isDisabled('#overlay'));
+  // An invalid saved value falls back to the defaults.
+  await page.evaluate(() => localStorage.setItem('overlay', '"garbage"'));
+  await page.reload(); await page.evaluate(() => window.accountReady);
+  await page.selectOption('#audioSource', 'system');   // the source is not remembered across reloads
+  await page.click('#start'); await page.waitForFunction(() => document.querySelector('#status span').textContent === '即時翻譯中', null, {timeout: 15000});
+  await page.click('#overlay');
+  const fallback = await boxState();
+  check('an invalid saved value gives rgba(0,0,0,.55) at 50% across, 88% down', fallback.bg === 'rgba(0, 0, 0, 0.55)' && Math.abs(fallback.cx - 50) < 1 && Math.abs(fallback.cy - 88) < 2, fallback);
+  await page.evaluate(() => document.getElementById('start').click());   // the overlay covers the page: stop from behind it
+  await page.waitForFunction(() => /^(翻譯已結束|系統待機)/.test(document.querySelector('#status span').textContent), null, {timeout: 30000});   // 系統待機 when nothing was said yet
+  check('ending the session closes the overlay and disables the button', await page.evaluate(() => document.getElementById('screenView').hidden) && await page.isDisabled('#overlay'));
+  await page.selectOption('#audioSource', 'microphone');
 
   // Without the API the button is disabled and says why.
   const plain = await browser.newContext({viewport: {width: 1440, height: 900}});
