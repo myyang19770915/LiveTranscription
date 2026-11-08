@@ -509,20 +509,23 @@ async def transcribe(browser: WebSocket):
     try:
         raw_header = await browser.receive_text()
         header = json.loads(raw_header)
-        # The meeting must belong to one of the user's teams before any audio leaves for ASR or MAI.
-        try:
-            async with db.connect() as conn:
-                meeting = await team_access.require_member(conn, browser.state.user, header.get("meeting_id", ""))
-        except HTTPException:
-            await browser.close(code=4404, reason="meeting not found")
-            return
-        # The recording is exactly the audio sent to ASR/MAI, so it shares the transcript's timeline.
-        # One connection per meeting: a second one must not truncate the first recording.
-        try:
-            audio = meeting_audio.MeetingAudio(team_access.meeting_dir(meeting) / "audio.wav")
-        except FileExistsError:
-            await browser.close(code=4409, reason="meeting already recorded")
-            return
+        # 即時翻譯 (live-translation): no meeting, nothing kept — audio goes to the engine and the events come back.
+        translate_only = header.get("mode") == "translate"
+        if not translate_only:
+            # The meeting must belong to one of the user's teams before any audio leaves for ASR or MAI.
+            try:
+                async with db.connect() as conn:
+                    meeting = await team_access.require_member(conn, browser.state.user, header.get("meeting_id", ""))
+            except HTTPException:
+                await browser.close(code=4404, reason="meeting not found")
+                return
+            # The recording is exactly the audio sent to ASR/MAI, so it shares the transcript's timeline.
+            # One connection per meeting: a second one must not truncate the first recording.
+            try:
+                audio = meeting_audio.MeetingAudio(team_access.meeting_dir(meeting) / "audio.wav")
+            except FileExistsError:
+                await browser.close(code=4409, reason="meeting already recorded")
+                return
         glossary = str(header.get("system_prompt", ""))[:4000]
         language = header.get("language") if header.get("language") in ("auto", "zh_ja", *LANGUAGES) else "auto"
         bilingual = language == "zh_ja"
@@ -553,7 +556,8 @@ async def transcribe(browser: WebSocket):
                     if event.get("type") == "websocket.disconnect":
                         return
                     if event.get("bytes") is not None:
-                        audio.write(event["bytes"])
+                        if audio is not None:
+                            audio.write(event["bytes"])
                         await upstream.send(event["bytes"])
                     elif event.get("text") is not None:
                         await upstream.send(event["text"])

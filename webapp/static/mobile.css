@@ -68,7 +68,7 @@
   .card-foot { flex: 0 0 30px; min-height: 30px; padding: 5px 12px; font-size: 9px; letter-spacing: 0; }
   .translation-draft { padding: 10px 12px; }
   footer { flex: 0 0 54px; display: flex; align-items: center; gap: 8px; padding: 0; }
-  footer .secure-note { display: none; }
+  footer .secure-note, #subtitles { display: none; }   /* no Document PiP on phones */
   #mobileActionSlot { display: flex; flex: 1; min-width: 0; }
   #mobileActionSlot .primary { width: 100%; min-height: 54px; height: 54px; gap: 8px; border-radius: 12px; }
   #mobileActionSlot .button-copy { text-align: left; }
@@ -98,6 +98,8 @@
   .mobile-settings-fields .mic-test b { font-size: 13px; }
   .mobile-settings-fields .mic-test small, .mobile-settings-fields .mic-health { font-size: 11px; }
   .mobile-settings-fields .source-hint { color: var(--muted); padding: 2px; font-size: 12px; line-height: 1.65; }
+  .mobile-settings-fields .mode-row { padding: 0 2px 4px; }
+  .mobile-settings-fields .mode-note { flex-basis: 100%; font-size: 12px; }
   .mobile-settings-fields .setup-heading { margin: 8px 0 -2px; padding: 0 2px; font-size: 11px; }
   .mobile-settings-fields .setup-heading:first-child { margin-top: 0; }
   .mobile-settings-fields .field-note { font-size: 12px; }

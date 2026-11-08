@@ -2292,6 +2292,20 @@ class MeetingOwnershipTests(AccountTestCase):
                 upstream.assert_not_called()
                 mai.assert_not_called()
 
+    def test_translate_only_session_keeps_nothing_and_needs_no_team(self):
+        # live-translation: a user in no team translates a video; nothing is stored, events carry no audio time.
+        upstream = FakeUpstream([{"msg": {"text": "你好", "language": "Chinese"}}])
+        self.ldap.add("dave", "pw-dave")   # in no team at all
+        with patch("server.websockets.connect", return_value=upstream):
+            with self.signed_in("dave").websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"mode": "translate", "language": "zh"})
+                websocket.send_bytes(b"\x00\x01" * 160)
+                event = websocket.receive_json()
+        self.assertEqual(event["displayText"], "你好")
+        self.assertNotIn("audioMs", event)
+        self.assertEqual(self.query("SELECT count(*) FROM meetings"), [(0,)])
+        self.assertEqual(list(self.output.rglob("*")), [])   # no audio.wav, no meeting folder
+
     def test_meeting_list_shows_only_the_users_teams(self):
         mine, theirs = self.team("研發", "alice"), self.team("業務", "bob")
         self.signed_in("alice").post("/api/meetings", json={"team_id": mine, "language": "zh"})

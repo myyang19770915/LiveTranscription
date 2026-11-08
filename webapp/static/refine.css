@@ -36,6 +36,7 @@ header p { display: none; }
 .controls {
   grid-template-columns: minmax(130px, 1.1fr) 58px minmax(145px, 1.1fr) minmax(155px, 1.2fr) minmax(180px, 1.35fr) 156px !important;
   grid-template-areas:
+    "mode mode mode mode mode mode"
     "h-meeting h-meeting h-meeting h-meeting h-meeting h-meeting"
     "team team topic topic series series"
     "h-audio h-audio h-audio h-audio h-audio h-audio"
@@ -75,6 +76,15 @@ select { padding-top: 9px; }
 .hint-stack { grid-area: hint !important; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 /* Setup groups (meeting-setup-layout): the meeting's own settings and the advanced ones are field cards like the audio ones,
    each group under a small heading. Without an engine choice or cloud refine, the advanced rows are not in the grid at all. */
+/* 開會／即時翻譯 (live-translation): the first row of the setup. */
+#modeRow { grid-area: mode; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 2px 2px 0; }
+.mode-btn { padding: 7px 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 13px; font-weight: 700; cursor: pointer; }
+.mode-btn + .mode-btn { margin-left: -6px; }
+.mode-btn:hover { color: var(--text); border-color: var(--field-border); }
+.mode-btn[aria-pressed="true"] { background: var(--mint); color: var(--accent-ink); border-color: transparent; }
+.mode-btn:disabled { opacity: .6; cursor: not-allowed; }
+.mode-note { color: var(--muted); font-size: 11px; }
+body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-mode #topicRow, body.translate-mode #seriesRow, body.translate-mode #seriesPanel { display: none !important; }
 .setup-heading { margin: 0; padding: 4px 4px 0; color: var(--mint); font-size: 10px; font-weight: 700; letter-spacing: .14em; }
 .setup-heading[hidden], .field[hidden] { display: none; }
 #setupMeeting { grid-area: h-meeting; padding-top: 0; }
@@ -91,7 +101,10 @@ select { padding-top: 9px; }
 .toggle-field input { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--mint); flex: none; }
 .toggle-text b { display: block; font-size: 13px; }
 .toggle-text small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
-.controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "h-meeting h-meeting h-meeting h-meeting h-meeting h-meeting"     "team team topic topic series series"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
+.controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting h-meeting h-meeting"     "team team topic topic series series"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
+/* 即時翻譯 (live-translation): no meeting rows. */
+.controls.translate { grid-template-areas:     "mode mode mode mode mode mode"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "h-adv h-adv h-adv h-adv h-adv h-adv"     "engine engine engine refine refine refine"     "context context context context context start"; }
+.controls.translate:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode mode mode"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
 .source-hint {
   grid-area: hint !important;
   padding: 1px 4px 2px;
@@ -153,6 +166,7 @@ select { padding-top: 9px; }
 footer { padding: 13px 4px 0; }
 .secure-note { color: var(--muted); }
 .text-btn { padding: 8px 11px; }
+#subtitles[aria-pressed="true"] { border-color: var(--accent); color: var(--mint); }
 button:focus-visible, select:focus-visible, input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -163,6 +177,7 @@ button:focus-visible, select:focus-visible, input:focus-visible {
   .controls {
     grid-template-columns: minmax(135px, 1fr) 54px minmax(145px, 1fr) minmax(155px, 1fr) !important;
     grid-template-areas:
+      "mode mode mode mode"
       "h-meeting h-meeting h-meeting h-meeting"
       "team topic topic series"
       "h-audio h-audio h-audio h-audio"
@@ -173,7 +188,9 @@ button:focus-visible, select:focus-visible, input:focus-visible {
       "engine engine refine refine"
       "context context context context";
   }
-  .controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "h-meeting h-meeting h-meeting h-meeting"     "team topic topic series"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
+  .controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting"     "team topic topic series"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
+  .controls.translate { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "h-adv h-adv h-adv h-adv"     "engine engine refine refine"     "context context context context"; }
+  .controls.translate:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
 }
 
 /* Up to 760px mobile.css takes over the controls (one row; the rest moves into the settings dialog); these areas are the
@@ -186,6 +203,7 @@ button:focus-visible, select:focus-visible, input:focus-visible {
   .controls {
     grid-template-columns: minmax(0, 1fr) 54px !important;
     grid-template-areas:
+      "mode mode"
       "h-meeting h-meeting"
       "team team"
       "topic topic"
