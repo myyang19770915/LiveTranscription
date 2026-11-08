@@ -84,7 +84,7 @@
     background: var(--surface); color: var(--text); overflow-y: auto;
     overscroll-behavior: contain; box-shadow: 0 24px 80px #0006;
   }
-  .mobile-settings-dialog::backdrop { background: #060b08b0; backdrop-filter: blur(6px); }
+  .mobile-settings-dialog::backdrop { background: color-mix(in srgb, var(--page) 70%, transparent); backdrop-filter: blur(6px); }
   .mobile-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .mobile-settings-heading h2 { margin: 0; font-size: 19px; }
   .mobile-settings-heading p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
@@ -98,10 +98,7 @@
   .mobile-settings-fields .mic-test small, .mobile-settings-fields .mic-health { font-size: 11px; }
   .mobile-settings-fields .source-hint { color: var(--muted); padding: 2px; font-size: 12px; line-height: 1.65; }
   .mobile-settings-fields :disabled { opacity: .52; cursor: not-allowed; }
-  .mobile-settings-done { flex: 0 0 48px; min-height: 48px; border: 0; border-radius: 12px; color: var(--bg); background: var(--mint); font-size: 14px; font-weight: 600; cursor: pointer; }
-  :root[data-theme="light"] .mobile-settings-fields .field { background: #fffefa; }
-  :root[data-theme="light"] .mobile-tabs button[aria-selected="true"] { background: #fffefa; }
-  :root[data-theme="light"] .mobile-settings-done { color: #fff; }
+  .mobile-settings-done { flex: 0 0 48px; min-height: 48px; border: 0; border-radius: 12px; color: var(--accent-ink); background: var(--mint); font-size: 14px; font-weight: 600; cursor: pointer; }
 }
 
 @media (max-width: 760px) and (max-height: 480px), (max-width: 1000px) and (max-height: 480px) and (pointer: coarse) {

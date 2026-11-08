@@ -129,3 +129,7 @@
   .toolbar-gap { display: none; }
   .board-search { width: 100%; }
 }
+
+/* The contrast colour (brand-palette-blue): the one action that adds something. */
+#create { border-color: var(--accent-2); background: var(--accent-2); color: var(--accent-2-ink); }
+#create:hover { filter: brightness(1.06); }

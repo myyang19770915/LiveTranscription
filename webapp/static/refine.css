@@ -1,19 +1,8 @@
-/* Calm, readable meeting workspace: simplify the visual hierarchy and clarify actions. */
-:root {
-  --bg: #0c100e;
-  --surface: #141a17;
-  --line: #29352f;
-  --soft: #202a24;
-  --text: #f3f6f3;
-  --muted: #a0aaa4;
-  --dim: #748078;
-  --mint: #93efbf;
-  font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif;
-}
-
+/* Calm, readable meeting workspace: simplify the visual hierarchy and clarify actions. Colours are tokens.css's (via the
+   aliases in styles.css), so both themes come from one place. */
 body {
   background:
-    radial-gradient(ellipse 65% 32% at 50% -10%, #1c392a55, transparent 72%),
+    radial-gradient(ellipse 65% 32% at 50% -10%, color-mix(in srgb, var(--glow) 70%, transparent), transparent 72%),
     var(--bg);
 }
 
@@ -22,21 +11,21 @@ nav { min-height: 42px; }
 .brand { gap: 12px; }
 .brand-mark { width: 40px; height: 40px; border-radius: 13px; }
 .brand-mark img { width: 32px; height: 32px; object-fit: contain; display: block; }
-.status { padding: 8px 12px; background: #111713; }
+.status { padding: 8px 12px; background: var(--surface); }
 
 header {
   align-items: center;
   padding: 36px 2px 26px;
 }
 header > div:first-child { max-width: 760px; }
-.eyebrow { color: #9bc9ad; font-size: 9px; letter-spacing: .22em; }
+.eyebrow { color: var(--mint); font-size: 9px; letter-spacing: .22em; }
 h1 {
   margin: 10px 0 9px;
   font-size: clamp(34px, 3.5vw, 48px);
   font-weight: 600;
   letter-spacing: -.04em;
 }
-h1 em { color: #b9c6be; }
+h1 em { color: var(--muted); }
 header p { font-size: 13px; }
 .privacy { min-width: 228px; padding: 13px 16px; }
 
@@ -49,10 +38,10 @@ header p { font-size: 13px; }
   gap: 9px;
   padding: 13px;
   margin-bottom: 14px;
-  border-color: #303b35;
+  border-color: var(--line);
   border-radius: 18px;
-  background: linear-gradient(135deg, #171e1a, #111613 70%);
-  box-shadow: 0 18px 60px #0002, 0 1px #fff07 inset;
+  background: var(--surface);
+  box-shadow: 0 18px 60px #0002;
 }
 .controls > .field,
 .controls > .direction,
@@ -60,34 +49,34 @@ header p { font-size: 13px; }
 .controls > .primary { min-height: 62px; }
 .controls > .field {
   padding: 11px 14px;
-  border-color: #29322d;
-  background: #101512;
+  border-color: var(--line);
+  background: var(--field);
 }
-.controls > .field:focus-within { border-color: #557963; }
-.field label { color: #a8b3ac; font-size: 9px; letter-spacing: .1em; }
+.controls > .field:focus-within { border-color: var(--accent); }
+.field label { color: var(--muted); font-size: 9px; letter-spacing: .1em; }
 select, input { font-size: 13px; }
 select { padding-top: 9px; }
 .language-field { grid-area: source !important; }
 .source-field { grid-area: audio !important; }
-.direction { grid-area: swap !important; min-height: 62px; background: #18211c; }
+.direction { grid-area: swap !important; min-height: 62px; background: var(--field); }
 .target-field { grid-area: target !important; }
 .mic-field { grid-area: mic !important; }
-.mic-test { grid-area: test !important; border-radius: 12px; background: #19221d; }
+.mic-test { grid-area: test !important; border-radius: 12px; background: var(--field); }
 /* The audio hint, learned terms and the cloud switch share the hint cell, stacked. */
 .hint-stack { grid-area: hint !important; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 /* The page-wide select/input rule is width:100%; these sit inline in a hint line (also in the mobile dialog). */
 #cloudRefineRow, #asrEngineRow, #teamRow, #topicRow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 #cloudRefineRow { cursor: pointer; }
-#cloudRefineRow input { width: auto; margin: 0; padding: 0; accent-color: #58d893; }
+#cloudRefineRow input { width: auto; margin: 0; padding: 0; accent-color: var(--mint); }
 #asrEngineRow select, #teamRow select { width: auto; max-width: 100%; padding: 1px 6px; font-size: inherit; color: inherit;
-  border: 1px solid var(--line, #29302d); border-radius: 6px; background: transparent; }
+  border: 1px solid var(--line); border-radius: 6px; background: transparent; }
 #cloudRefineRow span, #asrEngineRow span, #teamRow span { opacity: .75; }
 #topicRow input { width: min(22em, 100%); padding: 2px 8px; font-size: inherit; color: inherit;
-  border: 1px solid var(--line, #29302d); border-radius: 6px; background: transparent; }
+  border: 1px solid var(--line); border-radius: 6px; background: transparent; }
 .source-hint {
   grid-area: hint !important;
   padding: 1px 4px 2px;
-  color: #89968e;
+  color: var(--muted);
   font-size: 10px;
 }
 .context-field { grid-area: context !important; }
@@ -96,9 +85,9 @@ select { padding-top: 9px; }
   grid-area: start !important;
   min-height: 62px;
   border-radius: 12px;
-  box-shadow: 0 6px 20px #58d89312;
+  box-shadow: 0 6px 20px var(--accent-soft);
 }
-.primary:hover { box-shadow: 0 10px 28px #49dd9b25; }
+.primary:hover { box-shadow: 0 10px 28px var(--accent-soft); }
 .button-copy b { font-size: 13px; }
 
 .live-bar {
@@ -107,25 +96,25 @@ select { padding-top: 9px; }
   padding: 0 18px;
   border: 0 solid transparent;
   border-radius: 12px;
-  background: #112019;
+  background: var(--accent-soft);
 }
 .live-bar.visible {
   height: 46px;
   margin: 0 0 12px;
   border-width: 1px;
-  border-color: #254532;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
 }
-.live-bar > span { color: #c8d8cf; font-size: 10px; letter-spacing: .04em; text-transform: none; }
+.live-bar > span { color: var(--text); font-size: 10px; letter-spacing: .04em; text-transform: none; }
 .live-bar strong { font-size: 10px; }
 
 .transcripts { gap: 14px; }
 .transcript-card {
   height: clamp(430px, 54vh, 690px);
-  border-color: #2c3731;
+  border-color: var(--line);
   border-radius: 17px;
-  background: linear-gradient(150deg, #161c19, #111613 72%);
+  background: var(--surface);
 }
-.translation-card { background: linear-gradient(150deg, #15231b, #111713 72%); }
+.translation-card { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
 .card-head { min-height: 76px; padding: 16px 20px; }
 .card-title { gap: 13px; }
 .language-dot { width: 36px; height: 36px; border-radius: 11px; }
@@ -137,16 +126,16 @@ select { padding-top: 9px; }
   line-height: 1.78;
   overflow-wrap: anywhere;
 }
-.translated { color: #d8f2e3; }
+.translated { color: color-mix(in srgb, var(--accent) 25%, var(--text)); }
 .empty-state { max-width: 300px; padding: 18px; }
-.empty-state b { color: #aab5ae; font-size: 13px; }
-.empty-state small { color: #77847c; line-height: 1.65; }
+.empty-state b { color: var(--muted); font-size: 13px; }
+.empty-state small { color: var(--dim); line-height: 1.65; }
 .card-foot { min-height: 42px; align-items: center; padding: 10px 20px; letter-spacing: .045em; }
 footer { padding: 13px 4px 0; }
-.secure-note { color: #88958d; }
+.secure-note { color: var(--muted); }
 .text-btn { padding: 8px 11px; }
 button:focus-visible, select:focus-visible, input:focus-visible {
-  outline: 2px solid #a2efc2;
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 

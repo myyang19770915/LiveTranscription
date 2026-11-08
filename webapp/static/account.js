@@ -27,7 +27,7 @@ window.AvatarPhoto=(()=>{
 .crop-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .crop-actions button{height:38px;padding:0 18px;border:1px solid var(--border,var(--line));border-radius:999px;background:transparent;
   color:var(--text);font:inherit;font-weight:600;cursor:pointer}
-.crop-actions .crop-ok{border-color:transparent;background:var(--accent,var(--mint));color:var(--accent-ink,#06110d)}`;
+.crop-actions .crop-ok{border-color:transparent;background:var(--accent,var(--mint));color:var(--accent-ink)}`;
   function bitmapOf(file){
     if(!file.type.startsWith('image/')||file.type==='image/svg+xml')return Promise.reject(new Error('請選 PNG、JPEG 或 WebP 圖片'));
     return createImageBitmap(file).catch(()=>{throw new Error('讀不到這張圖片，請換一張')});

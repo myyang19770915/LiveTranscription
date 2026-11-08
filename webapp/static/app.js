@@ -29,7 +29,7 @@ function applyTheme(theme, persist=true){
   button.setAttribute('aria-label',light?'切換至暗色主題':'切換至明亮主題');
   button.title=light?'切換至暗色主題':'切換至明亮主題';
   button.querySelector('.theme-label').textContent=light?'暗色':'明亮';
-  $('themeColor').content=light?'#e6dfd1':'#0b0e0d';
+  $('themeColor').content=getComputedStyle(document.documentElement).getPropertyValue('--page').trim();
   if(persist){try{localStorage.setItem('interpreter-theme',selected)}catch{}}
 }
 let savedTheme='dark';

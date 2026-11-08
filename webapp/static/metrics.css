@@ -1,9 +1,9 @@
 /* Outcome metrics page (outcome-metrics). Builds on tokens.css and admin.css. Chart colours are categorical slots 1–3,
-   checked with the dataviz validate_palette script against the panel colour of each theme (#fffefb light, #121715
-   dark); slot 3 is below 3:1 on light, so the split bar prints a part's share where it fits and always has a table. */
+   checked with the dataviz validate_palette script against the panel colour of each theme (#ffffff light, #151f2b
+   dark; brand-palette-blue). The split bar prints a part's share where it fits and always has a table. */
 .metrics-page { width: min(1180px, 100%); }
-:root[data-theme="light"] .metrics-page { --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-rest: #c9c4b8; --grid: #ece7dc; }
-.metrics-page, :root[data-theme="dark"] .metrics-page { --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-rest: #3a443f; --grid: #222b27; }
+:root[data-theme="light"] .metrics-page { --series-1: #1479c7; --series-2: #e07018; --series-3: #189c6c; --series-rest: #b8c1cc; --grid: #e6ebf1; }
+.metrics-page, :root[data-theme="dark"] .metrics-page { --series-1: #2f98e8; --series-2: #e06d22; --series-3: #1fa873; --series-rest: #3a4654; --grid: #22303f; }
 
 .metrics-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .metrics-head h1 { margin: 0 0 6px; }

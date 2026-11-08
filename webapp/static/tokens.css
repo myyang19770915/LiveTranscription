@@ -1,43 +1,50 @@
-/* Colour tokens for the sign-in and administration pages, one set per theme (contrast checked: fields 3:1+). */
+/* Colour tokens for every page, one set per theme (brand-palette-blue: lake blue + warm orange; contrast checked: fields 3:1+,
+   accent against its ink 4.5:1+). The meeting page aliases its older names (--bg, --surface, --line, --mint…) to these in styles.css. */
 :root {
   color-scheme: dark;
-  --page: #0b0e0d;
-  --glow: #1c3a2b;
-  --intro: linear-gradient(160deg, #13201a 0%, #0e1512 65%);
-  --panel: #121715;
-  --border: #26302b;
-  --text: #f1f4f2;
-  --muted: #a3aea8;
-  --faint: #7d8983;
-  --field: #0c100e;
-  --field-border: #5d6c64;       /* 3.2:1 against the field */
-  --field-hover: #7b8b83;
-  --accent: #80efbd;
-  --accent-ink: #072117;
-  --accent-soft: #80efbd26;
-  --danger: #ff8f78;
-  --danger-soft: #ff795d1a;
+  --page: #0d141c;
+  --glow: #163152;
+  --intro: linear-gradient(160deg, #142638 0%, #0f1822 65%);
+  --panel: #151f2b;
+  --border: #263445;
+  --text: #ecf2f8;
+  --muted: #9bacbe;
+  --faint: #7a8b9c;
+  --field: #0b1118;
+  --field-border: #566a80;       /* 3.4:1 against the field */
+  --field-hover: #74889e;
+  --accent: #4cb8ff;
+  --accent-ink: #06192a;
+  --accent-soft: #4cb8ff26;
+  --accent-2: #ff9a4d;           /* the contrast colour: new, hints, the second chart series */
+  --accent-2-ink: #2a1400;
+  --accent-2-soft: #ff9a4d26;
+  --danger: #ff8d72;
+  --danger-soft: #ff795d1f;
   --warn: #f2c66d;
   font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif;
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --page: #ebe4d6;
-  --glow: #fffaf0;
-  --intro: linear-gradient(160deg, #e3eee6 0%, #f3f1ea 70%);
-  --panel: #fffefb;
-  --border: #e2ddd2;
-  --text: #20231f;
-  --muted: #5f645d;
-  --faint: #7a7e76;
+  --page: #f3f6fa;
+  --glow: #dfeafa;
+  --intro: linear-gradient(160deg, #e4eefb 0%, #f3f6fa 70%);
+  --panel: #ffffff;
+  --border: #dbe3ec;
+  --text: #16202b;
+  --muted: #5d6b7a;
+  --faint: #7d8a98;
   --field: #ffffff;
-  --field-border: #8d9389;       /* 3.2:1 against white */
-  --field-hover: #6b7168;
-  --accent: #2f7356;
+  --field-border: #8591a0;       /* 3.1:1 against white */
+  --field-hover: #65717f;
+  --accent: #1479c7;             /* 4.6:1 under white text */
   --accent-ink: #ffffff;
-  --accent-soft: #2f735626;
-  --danger: #b2442f;
-  --danger-soft: #b2442f14;
+  --accent-soft: #1479c71f;
+  --accent-2: #e8781f;
+  --accent-2-ink: #221400;       /* dark ink: white would be 2.9:1 */
+  --accent-2-soft: #e8781f1f;
+  --danger: #c23a24;             /* 4.9:1 under white text and on white */
+  --danger-soft: #c23a2416;
   --warn: #8a5a00;
 }
 

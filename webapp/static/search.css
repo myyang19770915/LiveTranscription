@@ -47,7 +47,7 @@
 .hit-text { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
 .hit-sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .hit-state { margin-left: 6px; color: var(--muted); font-size: 12px; }
-.hit mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--warn) 32%, transparent); color: inherit; }
+.hit mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--accent-2) 32%, transparent); color: inherit; }
 .search-empty { padding: 28px 20px; text-align: center; color: var(--muted); }
 .search-empty b { display: block; margin-bottom: 6px; color: var(--text); font-size: 16px; }
 

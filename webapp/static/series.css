@@ -3,11 +3,11 @@
 #seriesRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 #seriesRow[hidden] { display: none; }
 #seriesRow select, .new-series input { width: auto; max-width: 100%; padding: 1px 6px; font-size: inherit; color: inherit;
-  border: 1px solid var(--line, #29302d); border-radius: 6px; background: transparent; }
+  border: 1px solid var(--line); border-radius: 6px; background: transparent; }
 .new-series { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .new-series[hidden] { display: none; }
 .new-series input { width: min(12em, 100%); padding: 2px 8px; }
-.new-series button { padding: 2px 10px; border: 1px solid var(--line, #29302d); border-radius: 6px; background: transparent; color: var(--text); font-size: inherit; cursor: pointer; }
+.new-series button { padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text); font-size: inherit; cursor: pointer; }
 .new-series button:first-of-type { border-color: var(--mint); color: var(--mint); }
 
 .series-panel { margin: 0 0 12px; padding: 14px 18px; }
@@ -38,4 +38,4 @@
 .series-evidence span { font-family: ui-monospace, monospace; }
 .series-suggestion-actions { display: flex; gap: 6px; }
 .series-suggestion-actions button { padding: 4px 10px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--text); font-size: 12px; cursor: pointer; }
-.series-suggestion-actions .series-apply { border-color: var(--mint); background: var(--mint); color: #092017; font-weight: 700; }
+.series-suggestion-actions .series-apply { border-color: var(--mint); background: var(--mint); color: var(--accent-ink); font-weight: 700; }
