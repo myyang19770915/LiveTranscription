@@ -69,7 +69,8 @@ function card(item){
   const head=el('div',{className:'item-head'},
     el('span',{className:`chip state-${item.state}`,textContent:STATE[item.state]}),
     item.origin==='manual'?el('span',{className:'muted small',textContent:'手動新增'}):null,
-    item.confirmedBy&&item.state==='confirmed'?el('span',{className:'muted small',textContent:`${item.confirmedBy} 確認`}):null);
+    item.confirmedBy&&item.state==='confirmed'?el('span',{className:'muted small',textContent:`${item.confirmedBy} 確認`}):null,
+    evidence(item));   // the cited segments sit in the head row (review-minutes-polish)
   const body=editing===item.id?editor(item):el('p',{className:'item-content',textContent:item.content});
   const fields=item.kind==='action'?el('div',{className:'item-fields'},
     el('label',{},'負責人',ownerSelect(item)),
@@ -82,7 +83,7 @@ function card(item){
     editing===item.id?null:el('button',{type:'button',className:'text-button',textContent:'修改',onclick:()=>{editing=item.id;render()}}));
   // A confirmed action is tracked (action-tracking): status, overdue days and history.
   const tracking=item.kind==='action'&&item.state==='confirmed'?ActionStatus.control(item,{url:itemUrl(item.id),onChange:(next,message)=>{replaceItem(next);notice(message)},onError:notice}):null;
-  return el('article',{className:`card item ${item.state}${peeking?.itemId===item.id?' peeked':''}${item.id===linkedId?' linked':''}`,id:`item-${item.id}`},head,body,fields,tracking,evidence(item),actions);
+  return el('article',{className:`card item ${item.state}${peeking?.itemId===item.id?' peeked':''}${item.id===linkedId?' linked':''}`,id:`item-${item.id}`},head,body,tracking,el('div',{className:'item-foot'},fields,actions));
 }
 function addForm(kind){
   const text=el('textarea',{className:'input editor',rows:2,maxLength:500,placeholder:'內容',ariaLabel:'新條目內容'});

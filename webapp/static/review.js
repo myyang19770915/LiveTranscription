@@ -161,6 +161,7 @@ function row(segment){
   return article;
 }
 function render(){
+  document.querySelector('main').classList.toggle('no-target',!segments.some(s=>s.target));   // no translation at all: no 譯文 column (a retranslation brings it back)
   $('segments').replaceChildren(...segments.map(row));
   const reviewed=segments.filter(s=>s.state!=='unreviewed').length;
   $('progressText').textContent=`已校對 ${reviewed} / ${segments.length} 段`;

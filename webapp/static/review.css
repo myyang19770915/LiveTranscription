@@ -59,6 +59,12 @@ code { padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); fon
 .seg-source, .seg-target { font-size: 16px; line-height: 1.65; overflow-wrap: anywhere; white-space: pre-wrap; }
 .seg-target { color: var(--muted); }
 .seg-target small { display: block; font-size: 12px; }
+/* A meeting without any translation (review-minutes-polish): no 譯文 column (phones have their own two-column rows). */
+main.no-target .seg-target, main.no-target .segment-head span:nth-child(3) { display: none; }
+@media (min-width: 761px) {
+  main.no-target .segment-head, main.no-target .seg { grid-template-columns: 112px minmax(0, 1fr) 76px; }
+  main.no-target .edit-form { grid-column: 2 / 3; }
+}
 .seg .chip { justify-self: end; border-color: var(--border); color: var(--muted); }
 .seg .chip.state-confirmed { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--accent); }
 .seg .chip.state-edited { border-color: color-mix(in srgb, var(--warn) 55%, transparent); color: var(--warn); }
