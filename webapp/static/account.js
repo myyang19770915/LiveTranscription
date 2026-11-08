@@ -172,9 +172,8 @@ window.accountReady=fetch('/api/me').then(response=>{
     const links=[location.pathname==='/'?link('/meetings','會議紀錄'):null,location.pathname!=='/actions'?link('/actions','待辦看板'):null,
       location.pathname!=='/metrics'?link('/metrics','成效指標'):null,
       me.admin&&location.pathname!=='/admin'?link('/admin','團隊管理'):null].filter(Boolean);
-    // Search (meeting-search): an icon, shown on phones too; / opens it from any page.
-    const search=location.pathname==='/search'?null:Object.assign(make('a',{href:'/search',className:'account-search',title:'搜尋（/）',ariaLabel:'搜尋'}),
-      {innerHTML:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>'});
+    // Search (meeting-search): a text button like the others, shown on phones too; / opens it from any page.
+    const search=location.pathname==='/search'?null:make('a',{href:'/search',className:'account-search',title:'搜尋（/）',textContent:'搜尋'});
     slot.replaceChildren(...[search,...links,ownAvatar(me,make),name,out].filter(Boolean));
   }
   return me;

@@ -1,5 +1,5 @@
 // End-to-end acceptance for full-text search (meeting-search) in the real pages (Playwright, gstack's install), against
-// a meeting whose transcript contains <word> (default 合約). Reads only: the header icon and / open the page, results are
+// a meeting whose transcript contains <word> (default 合約). Reads only: the header 搜尋 button and / open the page, results are
 // grouped and marked, a segment hit opens that segment on the review page, the kind filter and the address round-trip,
 // an unmatched word shows the empty state, and 400 px does not scroll sideways. Search feedback (search-feedback-term-limit):
 // a slow search is marked busy and announced, a newer search wins over a slower older one, and more than 5 terms is not
@@ -24,11 +24,22 @@ try {
   page.on('pageerror', e => check('no page errors', false, e.message));
   const searched = () => page.waitForResponse(r => r.url().includes('/api/search?'));
 
-  // Ways in: the header icon, and / from another page.
+  // Ways in: the header 搜尋 button (text, like the other header buttons), and / from another page.
   await page.goto(`${app}/actions`); await page.waitForSelector('#account .account-search');
+  check('the header search button is text like the others', await page.textContent('#account .account-search') === '搜尋'
+    && await page.locator('#account .account-search svg').count() === 0
+    && await page.evaluate(() => { const [a, b] = ['.account-search', 'a[href="/metrics"]'].map(s => document.querySelector('#account ' + s).getBoundingClientRect());
+      return a.height === b.height && a.width > 36; }));
+  await page.screenshot({path: join(out, 'search-header.png'), clip: {x: 0, y: 0, width: 1280, height: 90}});
+  await page.goto(`${app}/`); await page.waitForSelector('#account .account-search');   // the meeting page: its own accounts.css
+  check('the search button is text like the others on the meeting page too', await page.textContent('#account .account-search') === '搜尋'
+    && await page.evaluate(() => { const [a, b] = ['.account-search', 'a[href="/actions"]'].map(s => document.querySelector('#account ' + s));
+      const [ra, rb] = [a, b].map(e => e.getBoundingClientRect()), [sa, sb] = [a, b].map(e => getComputedStyle(e));
+      return ra.height === rb.height && sa.paddingLeft === sb.paddingLeft && sa.borderRadius === sb.borderRadius; }));
+  await page.screenshot({path: join(out, 'search-header-meeting.png'), clip: {x: 0, y: 0, width: 1280, height: 90}});
   await page.click('#account .account-search'); await page.waitForURL(/\/search/);
   await page.waitForFunction(() => document.activeElement?.id === 'q');
-  check('the header search icon opens the search page with the box focused', true);
+  check('the header search button opens the search page with the box focused', true);
   await page.goto(`${app}/actions`); await page.waitForSelector('.board-column');
   await page.locator('body').press('/'); await page.waitForURL(/\/search/);
   check('/ opens the search page', true);
@@ -164,7 +175,9 @@ try {
   await page.goto(`${app}/search?q=${encodeURIComponent(word)}`); await page.waitForSelector('.result-group');
   check('no horizontal scroll at 400 px', !(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)));
   await page.goto(`${app}/actions`); await page.waitForSelector('#account .account-search', {state: 'attached'});
-  check('the search icon stays on a phone', await page.locator('#account .account-search').isVisible());
+  check('the search button stays on a phone, without sideways scroll', await page.locator('#account .account-search').isVisible()
+    && !(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)));
+  await page.screenshot({path: join(out, 'search-header-400.png'), clip: {x: 0, y: 0, width: 400, height: 80}});
   await page.goto(`${app}/search?q=${encodeURIComponent(word)}`); await page.waitForSelector('.result-group');
   await page.screenshot({path: join(out, 'search-400.png'), fullPage: true});
 } catch (error) {
