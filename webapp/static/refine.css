@@ -159,6 +159,7 @@ body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-
   overflow-wrap: anywhere;
 }
 .translated { color: color-mix(in srgb, var(--accent) 25%, var(--text)); }
+#transcript .tentative { color: var(--sub-now); }   /* the cloud engine's text not yet confirmed (mai-intermediate) */
 .empty-state { max-width: 300px; padding: 18px; }
 .empty-state b { color: var(--muted); font-size: 13px; }
 .empty-state small { color: var(--dim); line-height: 1.65; }

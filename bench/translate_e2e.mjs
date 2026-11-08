@@ -82,6 +82,14 @@ try {
   }
   check('the footer note says nothing is stored', (await page.textContent('#storeNote')).includes('不存到伺服器'));
   check('the engine note says the cloud engine is about a second slower', (await page.textContent('#asrEngineRow .field-note')).includes('約慢 1 秒'));
+  // The cloud engine's tentative text (mai-intermediate): shown after the confirmed transcript, part of the current speech, never exported.
+  const tentativeEvent = text => JSON.stringify({status: 'success', msg: {text: '', reset: false, speech_end: false, language: ''}, tentative: text});
+  await page.evaluate(e => onMessage({data: e}), tentativeEvent('正在講的暫定字'));
+  const shownTentative = await page.evaluate(() => ({span: document.querySelector('#transcript .tentative')?.textContent, pending: subtitleParts().pending, transcript}));
+  check('tentative text shows in its own style and in the current speech, not in the transcript', shownTentative.span === '正在講的暫定字' && shownTentative.pending.endsWith('正在講的暫定字') && !shownTentative.transcript.includes('正在講的暫定字'), shownTentative);
+  check('the export leaves the tentative text out', !(await page.evaluate(async () => (await transcriptFile().text()).includes('正在講的暫定字'))));
+  await page.evaluate(e => onMessage({data: e}), tentativeEvent(''));
+  check('an empty tentative removes it', await page.evaluate(() => !document.querySelector('#transcript .tentative')));
 
   // 即時翻譯 segments run-on Chinese at a settled comma from 40 characters; meetings wait for 100 (the spec's example).
   const runOn = '他說我們今天要討論的是這個新的工作流，因為很多同事都還不熟悉，所以我先介紹一下整體的架構，然後再請大家提問，我們有三個部分要說明';

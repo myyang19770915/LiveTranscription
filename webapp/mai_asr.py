@@ -1,7 +1,9 @@
 """Azure MAI-Transcribe-2-Streaming as a second ASR engine behind /ws/transcribe.
 
 The bridge speaks the local ASR gateway's message format, so segmentation and translation are unchanged.
-MAI streams finalized text as deltas but writes no punctuation for Chinese/Japanese and has no server VAD:
+MAI streams finalized text as deltas (about 2 s behind speech) and, on the same session, intermediate text about
+0.7 s behind speech: the tail not yet confirmed by a delta. It goes to the browser as `tentative` (mai-intermediate).
+MAI writes no punctuation for Chinese/Japanese and has no server VAD:
 an energy VAD commits at pauses and each committed item is closed with a punctuation mark (rule-based, or
 punctuated by the cloud text model for Chinese when 雲端精修 is on). English is punctuated by MAI itself,
 and a commit there makes it end the sentence ("That means that despite."), so English only commits at the end.
@@ -110,6 +112,7 @@ class MaiBridge:
         self.events: asyncio.Queue = asyncio.Queue()
         self.audio_since_commit, self.closing, self.eos, self.reconnects = 0, False, False, 0
         self.item_start = 0  # display position where the uncommitted item begins
+        self.tentative = ""  # MAI's intermediate text not yet confirmed by a delta
 
     async def connect(self):
         ws = await websockets.connect(realtime_url(), additional_headers={"api-key": MAI_KEY}, max_size=None, ping_interval=20)
@@ -184,7 +187,8 @@ class MaiBridge:
             await self.events.put({"type": "reconnected"})
 
     async def emit(self, text: str, speech_end: bool = False):
-        payload = {"status": "success", "msg": {"text": text, "reset": False, "speech_end": speech_end, "language": ""}}
+        payload = {"status": "success", "msg": {"text": text, "reset": False, "speech_end": speech_end, "language": ""},
+                   "tentative": self.tentative}
         self.display.annotate(payload)
         await self.browser.send_text(json.dumps(payload, ensure_ascii=False))
 
@@ -225,12 +229,27 @@ class MaiBridge:
                 continue
             kind = event.get("type", "")
             if kind.endswith("transcription.delta") and event.get("delta"):
-                await self.emit(event["delta"])
+                # The tentative tail starts with the words this delta confirms: drop them so no word shows twice.
+                delta = event["delta"]
+                shown, tail = self.display.tentative(delta).lstrip(), self.tentative.lstrip()   # same script as the tentative text
+                rest = tail[len(shown):] if shown and tail.startswith(shown) else ""
+                # Drop only at a word boundary ("robotaxi" confirmed out of "robotaxis" must not leave an "s"); a delta that
+                # covers the tentative text, or cuts into a word, clears it - the next intermediate rebuilds it within ~250 ms.
+                self.tentative = rest if not rest or rest[0].isspace() or not rest[0].isascii() else ""
+                await self.emit(delta)
+            elif kind.endswith("transcription.intermediate"):
+                tentative = self.display.tentative(str(event.get("intermediate") or ""))
+                if tentative != self.tentative:
+                    self.tentative = tentative
+                    await self.emit("")
             elif kind.endswith("transcription.completed"):
+                self.tentative = ""
                 pause = self.items.popleft() if self.items else False
                 await self.close_item(event.get("transcript", ""), pause)
             elif kind == "reconnected":
+                self.tentative = ""
                 self.item_start = len(self.display.raw)
+                await self.emit("")
 
     async def run(self):
         await self.connect()

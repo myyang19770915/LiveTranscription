@@ -500,6 +500,21 @@ class MaiTests(AccountTestCase):
         resumed = self.run_items("ja", self.item("お腹に今二人目がいるんですけれども"), speech=True)
         self.assertEqual(resumed[-1]["displayText"], "お腹に今二人目がいるんですけれども、")
 
+    def test_mai_intermediate_text_is_sent_as_tentative_until_its_delta(self):
+        inter = lambda text: {"type": "conversation.item.input_audio_transcription.intermediate", "intermediate": text}
+        delta = lambda text: {"type": "conversation.item.input_audio_transcription.delta", "delta": text}
+        done = {"type": "conversation.item.input_audio_transcription.completed", "transcript": "这个会议支持实时翻译"}
+        sent = self.run_items("zh", [inter("这个会议"), delta("这个会议"), inter("支持实时"), delta("支持实时翻译"), done])
+        self.assertEqual([(p["msg"]["text"], p["tentative"]) for p in sent],
+                         [("", "這個會議"), ("这个会议", ""), ("", "支持實時"), ("支持实时翻译", ""), ("。", "")])
+        self.assertEqual(sent[-1]["displayText"], "這個會議支持實時翻譯。")
+
+    def test_mai_tentative_text_is_cut_at_word_boundaries_and_cleared_on_reconnect(self):
+        inter = lambda text: {"type": "conversation.item.input_audio_transcription.intermediate", "intermediate": text}
+        delta = lambda text: {"type": "conversation.item.input_audio_transcription.delta", "delta": text}
+        sent = self.run_items("en", [inter(" FSD and robotaxis?"), delta(" FSD"), delta(" and robotaxi"), inter(" or do we"), {"type": "reconnected"}])
+        self.assertEqual([p["tentative"] for p in sent], [" FSD and robotaxis?", " and robotaxis?", "", " or do we", ""])
+
     def test_cloud_punctuation_rewrites_only_the_committed_item(self):
         async def punctuate(context, text, pause):
             self.assertEqual((context, text), ("第一句。", "或许你会说那是你的年代"))

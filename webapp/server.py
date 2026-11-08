@@ -485,6 +485,11 @@ class TranscriptDisplay:
             if not self.bilingual:
                 payload["displayText"] = self.render(TO_TRADITIONAL.convert(self.raw) if self.chinese else self.raw)
 
+    def tentative(self, text: str) -> str:
+        """MAI's intermediate (not yet confirmed) text as the browser shows it: Traditional script for Chinese."""
+        chinese = self.chinese or (self.bilingual and self.detected == "zh")
+        return TO_TRADITIONAL.convert(text) if chinese and text else text
+
     def rewrite(self, start: int, text: str) -> None:
         """Replace the raw transcript from `start` (a punctuated MAI item); shown with the next chunk.
         中日雙向 builds its text per chunk, so it is never rewritten."""

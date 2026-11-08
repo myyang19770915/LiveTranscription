@@ -6,6 +6,8 @@ let recorder, recordingChunks = [], recording, meetingStamp = '', meetingId = ''
 let testStream, testStreams = [], testAudioContext, testSources = [], testAnalyser, testAnimation;
 let transcript = '', translated = '', draftText = '', translationTimer, pauseTimer, activeTranslation;
 let translationOffset = 0, translationHistory = [], translationEpoch = 0, flushRequested = false, lastDraftSource = '';
+let tentative = '';   // the cloud engine's text not yet confirmed (mai-intermediate): shown, drafted, never finalized
+function pendingSource(){return transcript.slice(translationOffset)+tentative}   // the speech being translated now
 let translationFinalNode, translationDraftNode;
 let direction = { source: 'auto', target: 'en' };
 const languageTags = {auto:'AUTO',zh_ja:'中⇄日',zh:'中',en:'EN',ja:'日',ko:'한',fr:'FR',de:'DE',it:'IT',pt:'PT',ru:'RU',es:'ES',ar:'AR'};
@@ -57,11 +59,13 @@ function setStatus(text, kind='idle') { $('status').className = `status ${kind}`
 // two finalized translations and the draft (live-subtitle-segments).
 function subtitleParts(){
   const pending=transcript.slice(translationOffset),last=s=>window.Subtitles?.lastSentences(s,1)||'',two=s=>window.Subtitles?.lastSentences(s,2)||'';
-  if(!translateOnly())return {done:last(transcript.slice(0,translationOffset)),pending,translation:two(translated),draft:draftText};   // 開會: sentences, as before
+  if(!translateOnly())return {done:last(transcript.slice(0,translationOffset)),pending:pending+tentative,translation:two(translated),draft:draftText};   // 開會: sentences, as before
   const finals=finalizedRecords();
-  return {done:finals.at(-1)?.source||'',pending,translation:finals.slice(-2).map(s=>s.target).join(' '),draft:draftText};
+  return {done:finals.at(-1)?.source||'',pending:pending+tentative,translation:finals.slice(-2).map(s=>s.target).join(' '),draft:draftText};
 }
-function render(id, value) { if(id==='transcript'){const parts=subtitleParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72; el.textContent=value; el.classList.toggle('empty', !value); updateCounts(); if(value&&follow) el.scrollTop=el.scrollHeight; }
+function render(id, value) { if(id==='transcript'){const parts=subtitleParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72; el.textContent=value;
+  if(id==='transcript'&&tentative){const span=document.createElement('span');span.className='tentative';span.textContent=tentative;el.append(span)}
+  el.classList.toggle('empty', !value&&!(id==='transcript'&&tentative)); updateCounts(); if((value||tentative)&&follow) el.scrollTop=el.scrollHeight; }
 function visibleTranslation(){return translated+(translated&&draftText?'\n':'')+draftText}
 function renderTranslation(){
   const parts=subtitleParts();
@@ -215,6 +219,7 @@ async function stopMeeting(sendEos=true) {
   window.Overlay?.setTrack(null);
   try{socket?.close();}catch{} captureStreams.forEach(media=>media.getTracks().forEach(track=>{track.onended=null;track.stop()}));
   try{sourceNodes.forEach(node=>node.disconnect());workletNode?.disconnect();await audioContext?.close();}catch{}
+  tentative='';render('transcript',transcript);
   socket=stream=audioContext=null;captureStreams=[];sourceNodes=[];workletNode=null;clearInterval(timerHandle);$('start').innerHTML=translateOnly()?translateStartContent:startButtonContent;$('start').classList.remove('stop');setControls(false);if(topicUsed){$('topic').value='';topicUsed=false}setMicStatus(`已確認：${$('activeMic').textContent}`,'ok');setStatus(transcript?(translateOnly()?'翻譯已結束；未存到伺服器，可按「匯出」下載':'會議已結束'):'系統待機');scheduleTranslation(true);storeTranscript();if(meetingId)window.MeetingSeries?.ended(meetingId);stopping=false;
 }
 // The meeting audio is kept only in this browser and saved next to the exported transcript.
@@ -253,7 +258,7 @@ let transcriptSaveTimer,saveTranscriptNow=null;
 // meeting (maybe another team) and must never be saved into the new meeting's transcript.
 function resetMeetingState(){
   saveTranscriptNow?.();saveSegmentsNow?.();
-  transcript='';sourceRevision=0;finalizeRemaining=false;
+  transcript='';tentative='';sourceRevision=0;finalizeRemaining=false;
   segmentRecords.clear();languageSpans.length=0;utteranceBoundaries.clear();timeMarks.length=0;
   updateTranslationDirection();meetingEpoch=translationEpoch;resetLearnedTerms();render('transcript','');
 }
@@ -288,6 +293,8 @@ function updateTimer(){const sec=Math.floor((Date.now()-startedAt)/1000);$('time
 function onMessage(event){
   let data; try{data=JSON.parse(event.data)}catch{return}
   if(data.status==='error'){setStatus(typeof data.msg==='string'?data.msg:'辨識服務錯誤','error');return}
+  // The cloud engine's tentative tail: shown and drafted now, replaced when the confirming deltas arrive.
+  if(typeof data.tentative==='string'&&data.tentative!==tentative){tentative=data.tentative;sourceRevision++;if(!(data.msg?.text)){render('transcript',transcript);if(pendingSource().trim())scheduleTranslation(false)}}
   const chunk=data.msg?.text||'';
   const markEnd=()=>{if(data.msg?.speech_end&&!incompleteClause(transcript))utteranceBoundaries.add(transcript.length)};
   if(!chunk){markEnd();if(data.msg?.reset&&transcript.length>translationOffset)scheduleTranslation(false);return}
@@ -387,7 +394,7 @@ function segmentPlan(force=false){
 }
 function sentenceBoundary(){const plan=segmentPlan();return plan.final?plan.end:0;}
 function scheduleTranslation(force=false){
-  if(transcript.length<=translationOffset)return;
+  if(!pendingSource().trim())return;
   clearTimeout(pauseTimer);
   if(force)flushRequested=true;
   const boundary=sentenceBoundary();
@@ -397,16 +404,17 @@ function scheduleTranslation(force=false){
     return;
   }
   // A fixed cadence, not a debounce: continuous ASR updates must never postpone the first draft.
-  if(!activeTranslation&&!translationTimer&&transcript.length-translationOffset>=6)translationTimer=setTimeout(()=>{translationTimer=null;runTranslation()},250);
+  if(!activeTranslation&&!translationTimer&&pendingSource().length>=6)translationTimer=setTimeout(()=>{translationTimer=null;runTranslation()},250);
   pauseTimer=setTimeout(()=>{pauseTimer=null;runTranslation()},1000);
 }
 // replay_inject.js wraps this to time every request.
 async function streamTranslation(body,signal){return TranslationContext.translateStream(body,signal)}
 async function runTranslation(){
-  if(activeTranslation||transcript.length<=translationOffset)return;
+  if(activeTranslation||!pendingSource().trim())return;
   const plan=segmentPlan(flushRequested||finalizeRemaining),segmentEnd=plan.end,final=plan.final;
   // A pause mark can arrive after its sentence was already cut (MAI "…です|、しかし"); it belongs to that one.
-  const segment=transcript.slice(translationOffset,segmentEnd).trim().replace(/^[、，,。．.！!？?；;]+\s*/u,'');
+  // A draft of the tail also covers the cloud engine's tentative text; a final never does.
+  const segment=(transcript.slice(translationOffset,segmentEnd)+(!final&&segmentEnd>=transcript.length?tentative:'')).trim().replace(/^[、，,。．.！!？?；;]+\s*/u,'');
   if(!segment)return;
   // Each draft rewrites the visible line; only refresh once a meaningful chunk was added.
   const minGrowth=/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(segment)?12:24;
@@ -457,10 +465,10 @@ async function runTranslation(){
   }finally{
     clearTimeout(watchdog);
     if(activeTranslation===controller)activeTranslation=null;
-    if(mayContinue&&epoch===translationEpoch&&transcript.length>translationOffset){
+    if(mayContinue&&epoch===translationEpoch&&pendingSource().trim()){
       if(final&& !controller.signal.aborted)scheduleTranslation(false);
       else if(sentenceBoundary()||flushRequested)runTranslation();
-      else if(transcript.slice(translationOffset).trim()!==lastDraftSource&&!translationTimer)translationTimer=setTimeout(()=>{translationTimer=null;runTranslation()},650);
+      else if(pendingSource().trim()!==lastDraftSource&&!translationTimer)translationTimer=setTimeout(()=>{translationTimer=null;runTranslation()},650);
     }
   }
 }
