@@ -245,7 +245,7 @@ CurrentUser = Annotated[User, Depends(current_user)]
 
 # Everything else needs a session. Static files under /assets are mounted outside the routes and stay
 # public: the sign-in page needs them, and they hold no meeting data.
-PUBLIC_PATHS = frozenset({"/login", "/api/login", "/api/logout", "/api/health"})
+PUBLIC_PATHS = frozenset({"/login", "/api/login", "/api/logout", "/api/health", "/favicon.ico"})
 
 
 STATE_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})

@@ -125,6 +125,12 @@ app.include_router(qa.router)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Browsers ask the root for it (bookmarks, tabs before the page loads); the pages also link it."""
+    return FileResponse(STATIC_DIR / "favicon.ico", media_type="image/x-icon", headers={"Cache-Control": "public, max-age=86400"})
+
+
 class TranslationRequest(BaseModel):
     text: str = Field(min_length=1, max_length=10_000)
     source: str = Field(pattern=LANGUAGE_PATTERN)

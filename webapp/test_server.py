@@ -2091,9 +2091,12 @@ class SignedOutTests(AccountTestCase):
         self.assertEqual(client.get("/api/health").status_code, 200)
         self.assertIn("登入", client.get("/login").text)
         self.assertEqual(client.get("/assets/login.html").status_code, 200)
+        icon = client.get("/favicon.ico")   # the browser tab icon (site-favicon), fetched before any sign-in
+        self.assertEqual((icon.status_code, icon.headers["content-type"]), (200, "image/x-icon"))
+        self.assertTrue(icon.content.startswith(b"\x00\x00\x01\x00"))
 
     def test_every_other_route_requires_a_session(self):
-        public = {"/login", "/api/login", "/api/logout", "/api/health"}
+        public = {"/login", "/api/login", "/api/logout", "/api/health", "/favicon.ico"}
         client = TestClient(app)
         for route in app.routes:
             path, methods = getattr(route, "path", ""), getattr(route, "methods", None) or set()
