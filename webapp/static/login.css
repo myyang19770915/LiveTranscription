@@ -121,6 +121,62 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 
 @keyframes auth-spin { to { transform: rotate(360deg); } }
 
+/* Motion (login-motion): the left side is alive but calm. Features light up one at a time, clockwise every 2 s, and a
+   packet travels from each one along its dotted line to the hub, which answers with a ripple; Cloud and Local send their
+   own packets. The dashes flow towards the hub, the outer orbit turns slowly, the cards float, two soft glows drift and
+   「會議」shimmers. Everything enters with a short rise. prefers-reduced-motion turns all of it off (the SVG packets are
+   paused in the page script). */
+.auth-intro { position: relative; overflow: hidden; }
+.auth-intro > :not(.auth-glow) { position: relative; z-index: 1; }
+.auth-glow { position: absolute; z-index: 0; width: 44vw; aspect-ratio: 1; border-radius: 50%; filter: blur(70px); pointer-events: none; }
+.glow-a { left: -12%; top: 28%; background: color-mix(in srgb, var(--accent) 20%, transparent); animation: glow-drift-a 18s ease-in-out infinite alternate; }
+.glow-b { right: -14%; bottom: -10%; background: color-mix(in srgb, var(--f2) 14%, transparent); animation: glow-drift-b 22s ease-in-out infinite alternate; }
+@keyframes glow-drift-a { to { transform: translate(28%, -14%) scale(1.15); } }
+@keyframes glow-drift-b { to { transform: translate(-24%, -18%) scale(.9); } }
+
+.auth-title em { background: linear-gradient(90deg, var(--accent) 0%, var(--f2) 35%, var(--accent) 70%); background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent; animation: title-shimmer 6s linear infinite; }
+@keyframes title-shimmer { to { background-position: -200% 0; } }
+
+.auth-brand, .auth-title, .auth-lead, .auth-map { animation: auth-rise .7s cubic-bezier(.2, .7, .2, 1) both; }
+.auth-title { animation-delay: .08s; } .auth-lead { animation-delay: .16s; } .auth-map { animation-delay: .26s; }
+.auth-title em { animation: auth-rise .7s cubic-bezier(.2, .7, .2, 1) .08s both, title-shimmer 6s linear .8s infinite; }
+@keyframes auth-rise { from { opacity: 0; translate: 0 16px; } }
+
+.orbit-outer { stroke-dasharray: 5 9; animation: orbit-turn 50s linear infinite; }
+@keyframes orbit-turn { to { stroke-dashoffset: -560; } }
+.orbit-spoke { animation: spoke-flow 1.4s linear infinite; }
+@keyframes spoke-flow { to { stroke-dashoffset: -14; } }
+.orbit-packets circle { fill: var(--c, var(--accent)); filter: drop-shadow(0 0 6px var(--c, var(--accent))); }   /* the colour of the card it leaves */
+.orbit-packets .packet-alt { fill: var(--accent-2); filter: drop-shadow(0 0 5px var(--accent-2)); }
+
+.auth-hub img { position: relative; }
+.auth-hub { animation: hub-breathe 4s ease-in-out infinite; }
+@keyframes hub-breathe { 50% { box-shadow: 0 18px 54px color-mix(in srgb, var(--accent) 34%, transparent); } }
+.hub-ripple { position: absolute; inset: -1px; border-radius: inherit; border: 2px solid var(--accent); opacity: 0; animation: hub-ripple 2s ease-out infinite; }
+.hub-ripple + .hub-ripple { animation-delay: 1s; }
+@keyframes hub-ripple { from { transform: scale(1); opacity: .5; } to { transform: scale(1.6); opacity: 0; } }
+
+.auth-node svg { animation: node-bob 4s ease-in-out infinite; }
+.node-local svg { animation-delay: -2s; }
+@keyframes node-bob { 50% { translate: 0 -5px; } }
+
+/* Each card: a slow float, and its 2 s turn in the 12 s cycle (feat-1, 2, 4, 6, 5, 3: clockwise, matching the packets). */
+.feat { animation: feat-float 6s ease-in-out var(--float) infinite, feat-active 12s ease-in-out var(--turn) infinite; }
+.feat-icon { animation: feat-icon 12s ease-in-out var(--turn) infinite; }
+.feat-1 { --float: -1s; --turn: 0s; } .feat-2 { --float: -4s; --turn: 2s; } .feat-4 { --float: -2s; --turn: 4s; }
+.feat-6 { --float: -5s; --turn: 6s; } .feat-5 { --float: -3s; --turn: 8s; } .feat-3 { --float: 0s; --turn: 10s; }
+@keyframes feat-float { 50% { translate: 0 -6px; } }
+@keyframes feat-active {
+  0%, 17%, 100% { border-color: var(--card-border); box-shadow: var(--card-shadow); }
+  3%, 12% { border-color: color-mix(in srgb, var(--hue) 65%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--hue) 18%, transparent), 0 16px 36px color-mix(in srgb, var(--hue) 24%, transparent); }
+}
+@keyframes feat-icon {
+  0%, 17%, 100% { transform: none; background: color-mix(in srgb, var(--hue) 14%, var(--card)); }
+  3%, 12% { transform: scale(1.1); background: color-mix(in srgb, var(--hue) 26%, var(--card)); }
+}
+
 /* Narrower: the same cards as a grid, without the orbit. */
 @media (max-width: 1199px) {
   .auth-title { margin-top: 36px; }
@@ -145,4 +201,5 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
+  .orbit-packets, .hub-ripple { display: none; }
 }

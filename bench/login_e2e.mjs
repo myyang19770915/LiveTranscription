@@ -74,6 +74,18 @@ try {
       await context.close();
     }
   }
+  // login-motion: the left side moves (cards take turns, packets travel to the hub); reduced motion stops all of it.
+  for (const reducedMotion of ['no-preference', 'reduce']) {
+    const context = await browser.newContext({viewport: {width: 1440, height: 900}, reducedMotion});
+    const page = await context.newPage();
+    await page.goto(`${app}/login`); await page.waitForTimeout(2500);
+    const motion = await page.evaluate(() => ({running: document.getAnimations().filter(a => a.playState === 'running').length,
+      paused: document.querySelector('.auth-orbit').animationsPaused(),
+      packets: [...document.querySelectorAll('.orbit-packets circle')].filter(c => +getComputedStyle(c).opacity > 0.1 && c.checkVisibility()).length}));
+    if (reducedMotion === 'reduce') check('reduced motion: nothing moves', motion.running === 0 && motion.paused && motion.packets === 0, motion);
+    else check('the left side moves: cards, orbit and a packet on its way', motion.running >= 20 && !motion.paused && motion.packets >= 1, motion);
+    await context.close();
+  }
 } finally {
   await browser.close();
   try {
