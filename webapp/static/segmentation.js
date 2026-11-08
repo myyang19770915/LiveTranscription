@@ -17,8 +17,11 @@
   const jaEnd=s=>[...s.matchAll(jaEnds)].some(m=>m.index+m[0].length===s.length);
   // Unpunctuated kana is only cut at a predicate end, never mid-word ("お待ち|ください").
   const pauseEnds=s=>/[。！？!?；;.]\s*$/u.test(s)||(s.length>=60&&/[，,、]\s*$/u.test(s))||(kana(s)?jaEnd(s):s.length>=120);
-  function plan(text,start,pauses=[],switchAt=0,force=false){
+  // profile 'live' (即時翻譯 subtitles): run-on Chinese/Japanese is cut at a settled comma from 40 characters, so a
+  // finalized segment is one or two subtitle lines; meetings keep 100 (minutes quality, bench scores).
+  function plan(text,start,pauses=[],switchAt=0,force=false,profile='meeting'){
     const pending=text.slice(start),ends=[];
+    const live=profile==='live'&&/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(pending),runOn=live?40:100,minClause=live?16:40;
     const ready=end=>!unfinished(text.slice(start,end))&&(end-start>=24||shortComplete(text.slice(start,end)));
     for(const m of pending.matchAll(/[。！？!?；;]+|\.(?=\s|$)/gu)){
       const end=start+m.index+m[0].length;
@@ -54,9 +57,12 @@
     }
     // Long run-on speech: finalize at the last settled comma (text already follows it) so one
     // draft line does not keep rewriting 150+ characters.
-    if(pending.length>=100){
-      const safe=[...pending.matchAll(/[，,、；;]/gu)].map(m=>start+m.index+1).filter(end=>end-start>=40&&end-start<=160&&text.length-end>=8&&ready(end));
-      if(safe.length)return {end:safe.at(-1),final:true,reason:'long-clause'};
+    if(pending.length>=runOn){
+      const safe=[...pending.matchAll(/[，,、；;]/gu)].map(m=>start+m.index+1).filter(end=>end-start>=minClause&&end-start<=160&&text.length-end>=8&&ready(end));
+      // Text can arrive in bulk (a re-punctuated MAI phrase, a translation that was still running): live keeps a segment
+      // at or under 60 characters by taking the last comma within that, else the earliest.
+      const pick=live?(safe.filter(end=>end-start<=60).at(-1)||safe[0]):safe.at(-1);
+      if(safe.length)return {end:pick,final:true,reason:'long-clause'};
     }
     if(pending.length>=320){
       const safe=[...pending.slice(0,320).matchAll(/[，,、\s]/gu)].map(m=>start+m.index+1).filter(end=>end-start>=100&&ready(end));

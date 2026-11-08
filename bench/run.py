@@ -1,6 +1,6 @@
 """Benchmark: record ASR tracks (3 at a time), then replay each through the real UI sequentially.
 Usage: [ASR_ENGINE=mai|hybrid] python run.py RUN_TAG [case ...]   -> artifacts/replay/<RUN_TAG>_<case>.json/.md
-RUN_TAG starting with "cloud" turns 雲端精修 on; TRACK_PREFIX=mai_ replays tracks from mai_record.py."""
+RUN_TAG starting with "cloud" turns 雲端精修 on; TRACK_PREFIX=mai_ replays tracks from mai_record.py; REPLAY_LIVE=1 replays in 即時翻譯 mode."""
 import json, os, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -27,4 +27,4 @@ print('tracks ready', flush=True)
 for c in cases if tag != 'record' else []:
     subprocess.run([sys.executable, str(WEBAPP / 'replay_browser.py'), args(c).wav, '--start', '0', '--duration', str(c['duration']),
                     '--name', f"{tag}_{c['name']}", '--language', c['language'], '--target', c['target'], '--track', args(c).track, '--engine', args(c).engine,
-                    *(['--cloud-refine'] if tag.startswith('cloud') else [])], check=False)
+                    *(['--cloud-refine'] if tag.startswith('cloud') else []), *(['--live'] if os.getenv('REPLAY_LIVE') else [])], check=False)

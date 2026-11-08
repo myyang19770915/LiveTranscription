@@ -83,6 +83,13 @@ try {
   check('the footer note says nothing is stored', (await page.textContent('#storeNote')).includes('不存到伺服器'));
   check('the engine note says the cloud engine is about a second slower', (await page.textContent('#asrEngineRow .field-note')).includes('約慢 1 秒'));
 
+  // 即時翻譯 segments run-on Chinese at a settled comma from 40 characters; meetings wait for 100 (the spec's example).
+  const runOn = '他說我們今天要討論的是這個新的工作流，因為很多同事都還不熟悉，所以我先介紹一下整體的架構，然後再請大家提問，我們有三個部分要說明';
+  const plans = await page.evaluate(t => [TranslationSegmentation.plan(t, 0, [], 0, false, 'live'), TranslationSegmentation.plan(t, 0, [], 0, false)], runOn);
+  check('the live profile finalizes a 16–60 character clause at a comma; the meeting profile keeps collecting', plans[0].final && plans[0].end >= 16 && plans[0].end <= 60 && /[，,]$/.test(runOn.slice(0, plans[0].end)) && !plans[1].final, plans);
+  const because = '因為很多同事都還不熟悉，所以我先介紹一下整體的架構，然後再請大家提問，我們有三個部分要說明';   // the spec's second row
+  const becausePlan = await page.evaluate(t => TranslationSegmentation.plan(t, 0, [], 0, false, 'live'), because);
+  check('a 因為… clause is never cut right after its comma', becausePlan.final && becausePlan.end !== 12 && becausePlan.end >= 16 && becausePlan.end <= 60, becausePlan);
   // Sentence splitting (the spec's example table).
   const cases = await page.evaluate(() => [
     Subtitles.lastSentences('大家好。今天先看進度。合約下週寄出。', 2), Subtitles.lastSentences('大家好。', 2), Subtitles.lastSentences('Hello there. Second one! Third?', 2),
@@ -94,6 +101,11 @@ try {
   await page.click('#start');
   await page.waitForFunction(() => document.querySelector('#status span').textContent.startsWith('翻譯已結束'), null, {timeout: 30000});
   check('no meeting was created', await meetingCount(page) === before, {before, after: await meetingCount(page)});
+  // subtitleParts(): the last two finalized segments and the previous segment's source (the spec's three-segment row).
+  const parts = await page.evaluate(() => { const e = translationEpoch; segmentRecords.clear();
+    [['大家好。', 'Hi.'], ['今天先看進度。', 'Progress first.'], ['合約下週寄出。', 'Contract next week.']].forEach(([source, target], i) => segmentRecords.set(`${e}:${i * 10}`, {id: `${e}:${i * 10}`, start: i * 10, end: i * 10 + 10, source, target, state: 'finalized'}));
+    return subtitleParts(); });
+  check('subtitleParts gives the last two segments and the previous source', parts.translation === 'Progress first. Contract next week.' && parts.done === '合約下週寄出。', parts);
   const [download] = await Promise.all([page.waitForEvent('download'), page.click('#download')]);
   check('匯出逐字稿 downloads a translate-*.txt', download.suggestedFilename().startsWith('translate-') && download.suggestedFilename().endsWith('.txt'), download.suggestedFilename());
   await page.click('#modeMeeting');   // switching afterwards does not rename the finished session's export
@@ -134,6 +146,9 @@ try {
     const inside = (r, o) => r.bottom <= o.bottom + 1 && r.bottom > o.top;
     return {bodyLines: br.height / line, textLines: t.height / line, boxRatio: b.getBoundingClientRect().height / innerHeight, draftVisible: inside(dr, br), nowVisible: inside(nr, src) && inside(src, br)}; });
   check('long content: translation at most two lines, body under five, the current speech and the draft visible, the box under half the window', sized.textLines <= 2.05 && sized.bodyLines <= 5.2 && sized.boxRatio <= 0.5 && sized.draftVisible && sized.nowVisible, sized);
+  await page.evaluate(() => Overlay.update({done: '上一段原文', pending: '', translation: 'Seg A. Seg B.', draft: ''}));
+  const segs = await page.evaluate(() => ({done: document.querySelector('#screenView .ov-done').textContent, text: document.querySelector('#screenView .ov-text').textContent}));
+  check('the overlay shows the previous segment source and the last two segments as given', segs.done === '上一段原文' && segs.text === 'Seg A. Seg B.', segs);
   await page.evaluate(() => Overlay.update({done: '第一句。', pending: '第二句還在講', translation: 'First.', draft: 'Second being'}));
   const colours = await page.evaluate(() => { const c = s => getComputedStyle(document.querySelector('#screenView ' + s)).color; return {now: c('.ov-now'), draft: c('.ov-draft'), text: c('.ov-text'), done: c('.ov-done'), nowText: document.querySelector('#screenView .ov-now').textContent}; });
   check('the speech being translated and its draft share a colour, distinct from finalized text', colours.now === colours.draft && colours.now !== colours.text && colours.done === colours.text && colours.nowText === '第二句還在講', colours);

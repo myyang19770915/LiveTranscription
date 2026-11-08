@@ -53,11 +53,18 @@ applyTheme(savedTheme,false);
 $('themeToggle').onclick=()=>applyTheme(document.documentElement.dataset.theme==='light'?'dark':'light');
 
 function setStatus(text, kind='idle') { $('status').className = `status ${kind}`; $('status').querySelector('span').textContent = text; $('status').title=text; }
-function sourceParts(){return {done:transcript.slice(0,translationOffset),pending:transcript.slice(translationOffset)}}   // finalized source / the speech being translated now
-function render(id, value) { if(id==='transcript'){const parts=sourceParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72; el.textContent=value; el.classList.toggle('empty', !value); updateCounts(); if(value&&follow) el.scrollTop=el.scrollHeight; }
+// What the subtitle surfaces show: the previous finalized segment's source, the speech being translated now, the last
+// two finalized translations and the draft (live-subtitle-segments).
+function subtitleParts(){
+  const pending=transcript.slice(translationOffset),last=s=>window.Subtitles?.lastSentences(s,1)||'',two=s=>window.Subtitles?.lastSentences(s,2)||'';
+  if(!translateOnly())return {done:last(transcript.slice(0,translationOffset)),pending,translation:two(translated),draft:draftText};   // 開會: sentences, as before
+  const finals=finalizedRecords();
+  return {done:finals.at(-1)?.source||'',pending,translation:finals.slice(-2).map(s=>s.target).join(' '),draft:draftText};
+}
+function render(id, value) { if(id==='transcript'){const parts=subtitleParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72; el.textContent=value; el.classList.toggle('empty', !value); updateCounts(); if(value&&follow) el.scrollTop=el.scrollHeight; }
 function visibleTranslation(){return translated+(translated&&draftText?'\n':'')+draftText}
 function renderTranslation(){
-  const parts={...sourceParts(),translation:translated,draft:draftText};
+  const parts=subtitleParts();
   window.Subtitles?.update(parts);   // the floating subtitles (live-translation)
   window.Overlay?.update(parts);   // 畫面＋字幕 (screen-subtitles)
   const el=$('translation'),wasEmpty=el.classList.contains('empty');
@@ -376,7 +383,7 @@ function segmentPlan(force=false){
     const first=languageSpans.find(s=>s.end>translationOffset&&s.source)?.source;
     switchAt=languageSpans.find(s=>s.start>translationOffset&&s.source&&s.source!==first)?.start||0;
   }
-  return TranslationSegmentation.plan(transcript,translationOffset,utteranceBoundaries,switchAt,force);
+  return TranslationSegmentation.plan(transcript,translationOffset,utteranceBoundaries,switchAt,force,translateOnly()?'live':'meeting');   // subtitle-sized segments in 即時翻譯
 }
 function sentenceBoundary(){const plan=segmentPlan();return plan.final?plan.end:0;}
 function scheduleTranslation(force=false){

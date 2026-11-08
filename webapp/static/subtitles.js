@@ -25,10 +25,10 @@ window.Subtitles=(()=>{
     d.documentElement.dataset.theme=document.documentElement.dataset.theme||'dark';
     d.body.dataset.size=String(settings.size);
     const source=d.querySelector('.sub-source'),text=d.querySelector('.sub-text'),draft=d.querySelector('.sub-draft');
-    // The source line: the last finalized sentence, then the speech being translated now in the draft's colour.
-    source.querySelector('.sub-done').textContent=lastSentences(latest.done,1);source.querySelector('.sub-now').textContent=lastSentences(latest.pending,2);
+    // The source line: the previous finalized segment (即時翻譯) or sentence (開會), then the speech being translated now.
+    source.querySelector('.sub-done').textContent=(latest.done||'').trim();source.querySelector('.sub-now').textContent=lastSentences(latest.pending,2);
     source.hidden=!settings.source||!source.textContent.trim();
-    text.textContent=lastSentences(latest.translation,2);
+    text.textContent=(latest.translation||'').trim();   // app.js already sends the last two finalized segments
     draft.textContent=latest.draft||'';draft.hidden=!latest.draft;
     d.querySelector('.sub-toggle-source').setAttribute('aria-pressed',String(settings.source));
     d.querySelector('.sub-empty').hidden=Boolean(text.textContent||draft.textContent);
@@ -42,7 +42,7 @@ window.Subtitles=(()=>{
     d.documentElement.lang='zh-Hant';
     d.title='語橋 Live 字幕';
     for(const href of ['/assets/tokens.css?v=20261108d','/assets/subtitles.css?v=20261108c']){const link=d.createElement('link');link.rel='stylesheet';link.href=href;d.head.append(link)}
-    d.body.innerHTML='<div class="sub-bar"><button type="button" class="sub-toggle-source" aria-pressed="false" title="顯示最近一句原文">原文</button>'
+    d.body.innerHTML='<div class="sub-bar"><button type="button" class="sub-toggle-source" aria-pressed="false" title="顯示原文：上一段與正在講的">原文</button>'
       +'<button type="button" class="sub-smaller" title="縮小字">A−</button><button type="button" class="sub-bigger" title="放大字">A+</button>'
       +'<span class="sub-title">語橋 Live 字幕</span><button type="button" class="sub-close" title="關閉字幕視窗">✕</button></div>'
       +'<div class="sub-body"><p class="sub-source" hidden><span class="sub-done"></span> <span class="sub-now"></span></p><p class="sub-text"></p><p class="sub-draft" hidden></p><p class="sub-empty">等待語音…</p></div>';

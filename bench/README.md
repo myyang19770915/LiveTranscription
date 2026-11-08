@@ -30,7 +30,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | 產生評分表 | `python bench/evaluate.py TAG` | `bench/results/TAG/<case>.md` |
 | 盲評分組 | `python bench/blindn.py OUT SEED RUN_A RUN_B [RUN_C]` | `bench/results/OUT/<case>.X/Y/Z.md` |
 
-- `TAG` 以 `cloud` 開頭時會開啟雲端精修。
+- `TAG` 以 `cloud` 開頭時會開啟雲端精修。`REPLAY_LIVE=1` 以即時翻譯模式重播（字幕分段，中文 40 字就在逗號定稿），用來和開會模式比較翻譯品質。
 - `ASR_ENGINE=mai`（或 `hybrid`）透過正式 gateway 錄 MAI 軌（檔名加 `_mai`／`_maip`）；`TRACK_PREFIX=mai_` 則重播 `mai_record.py` 錄的軌。
 - 同一批 ASR 軌可重複使用，改翻譯或斷句時比較的是相同輸入。
 - 盲評：每段影片由同一位評審依 `rubric.md` 同時評所有版本（滿分 100），評完才看 `mapping.json` 解盲。
@@ -64,6 +64,19 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - `lagcheck.py`：用人工字幕量測 ASR 文字落後音訊多久，決定校對頁的播放前延
 - `lag_gateway.py`：以指定封包大小把 bench 片段經 `/ws/transcribe`（翻譯模式，不建會議、不寫檔）送給指定引擎，記錄每個事件的到達時間；`--compare` 對另一條軌印出同一段文字晚多少到達（中位數／p10／p90），中日文片段另印文字落後人工字幕多久（`YUQIAO_SESSION=… python bench/lag_gateway.py <片段> <local|mai|hybrid> <封包毫秒> <秒數> <out.jsonl> [--compare 另一條.jsonl]`）
 - `replay_browser.py --save-meeting`：重播存成一場會議（只有段落、沒有錄音），可在校對頁查看
+
+## 2026-11-08 即時翻譯分段比較（live-subtitle-segments，`meetzh` vs `livezh`，盲評 `blindzh`）
+
+即時翻譯模式把中文連續說話的定稿門檻從 100 字降到 40 字（在穩定的逗號切、每段 ≤60 字）。同一批 ASR 軌、同一套上下文機制，重播後依 rubric 盲評：
+
+| 片段 | 開會規則 100 字 | 即時規則 40 字 | 段數（開會→即時） | 每段原文中位數 |
+|---|---|---|---|---|
+| zh_jian（zh→ja） | 77 | 79 | 15 → 33 | 82 → 33 字 |
+| zh_chen（zh→en） | 84 | 83 | 15 → 31 | 82 → 33 字 |
+| zh_fire（zh→ja） | 88 | 86 | 14 → 31 | 82.5 → 31 字 |
+| 平均 | 83.0 | 82.7 | | |
+
+即時版的失分是逗號結尾的短句與少數接續生硬（「會變通，｜改往上跑的」）；開會版的失分是長段造成的主詞誤判與幻覺（「皆さんは心配されますよね」「2歳児のようなものです」）。正確性持平、定稿頻率加倍，即時模式採用 40 字；開會模式不變。
 
 ## 2026-11-08 延遲量測（asr-latency）
 

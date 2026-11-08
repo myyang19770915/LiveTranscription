@@ -1,7 +1,7 @@
 // 畫面＋字幕 (screen-subtitles): the shared tab's picture shown full-window on this page with a translucent subtitle box
 // over it. Document Picture-in-Picture windows cannot be transparent, so the picture comes here instead: the video
-// track getDisplayMedia already gave us. The box shows what the floating subtitles show (Subtitles.lastSentences and
-// its text size); the 原文 toggle (on by default here), background opacity and position live in localStorage.overlay.
+// track getDisplayMedia already gave us. The box shows what the floating subtitles show (app.js subtitleParts(), the
+// shared text size); the 原文 toggle (on by default here), background opacity and position live in localStorage.overlay.
 window.Overlay=(()=>{
   const KEY='overlay',DEFAULTS={opacity:55,x:50,y:88,source:true},NO_TRACK='需要分頁／系統聲音來源',READY='把分享的畫面放大顯示，字幕半透明疊在上面';
   let track=null,latest={done:'',pending:'',translation:'',draft:''},settings=load(),drag=null;
@@ -30,9 +30,9 @@ window.Overlay=(()=>{
     const shared=window.Subtitles?.getSettings?.()||{size:2};
     b.dataset.size=String(shared.size);b.style.setProperty('--ov-alpha',String(settings.opacity/100));
     const source=b.querySelector('.ov-source'),text=b.querySelector('.ov-text'),draft=b.querySelector('.ov-draft');
-    source.querySelector('.ov-done').textContent=window.Subtitles?.lastSentences(latest.done,1)||'';source.querySelector('.ov-now').textContent=window.Subtitles?.lastSentences(latest.pending,2)||'';
+    source.querySelector('.ov-done').textContent=(latest.done||'').trim();source.querySelector('.ov-now').textContent=window.Subtitles?.lastSentences(latest.pending,2)||'';
     source.hidden=!settings.source||!source.textContent.trim();
-    text.textContent=window.Subtitles?.lastSentences(latest.translation,2)||'';
+    text.textContent=(latest.translation||'').trim();   // app.js already sends the last two finalized segments
     draft.textContent=latest.draft||'';draft.hidden=!latest.draft;
     b.querySelector('.ov-toggle-source').setAttribute('aria-pressed',String(settings.source));
     b.querySelector('.ov-opacity input').value=String(settings.opacity);

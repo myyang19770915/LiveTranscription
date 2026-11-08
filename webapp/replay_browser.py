@@ -85,13 +85,14 @@ def main():
     ap.add_argument('--cloud-refine', action='store_true', help='turn 雲端精修 on (needs TRANSLATE_REFINE_* configured)')
     ap.add_argument('--engine', default='local', help='ASR engine for recording the track: local, mai or hybrid')
     ap.add_argument('--save-meeting', action='store_true', help='store the replay as a meeting (segments, no recording) for the review page')
+    ap.add_argument('--live', action='store_true', help='replay in 即時翻譯 mode (subtitle-sized segments) instead of 開會')
     a = ap.parse_args()
     tracks = OUT / 'tracks'; tracks.mkdir(parents=True, exist_ok=True)
     track = json.loads(record_track(a, tracks).read_text(encoding='utf-8'))
     cfg_path, raw = OUT / f'{a.name}.config.json', OUT / f'{a.name}.json'
     cfg_path.write_text(json.dumps({'app': a.app, 'replay': {'track': track, 'duration': a.duration, 'language': a.language,
                                                               'target': a.target, 'context': a.context, 'cloudRefine': a.cloud_refine,
-                                                              'saveMeeting': a.save_meeting}},
+                                                              'saveMeeting': a.save_meeting, 'live': a.live}},
                                     ensure_ascii=False), encoding='utf-8')
     subprocess.run(['node', str(HERE / 'replay_page.mjs'), str(cfg_path), str(raw)], check=True)
     cfg_path.unlink()
