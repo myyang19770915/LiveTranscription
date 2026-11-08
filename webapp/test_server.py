@@ -2854,5 +2854,64 @@ class DiarizeApiTests(ReviewTestCase):
 
 
 
+class ServiceStatusTests(AccountTestCase):
+    """service-status: GET /api/services."""
+
+    def services(self, asr, translate, database):
+        async def service_ok(url):
+            if url == server.ASR_HEALTH_URL:
+                return asr
+            self.assertEqual(url, f"{server.TRANSLATE_URL}/health")
+            return translate
+
+        async def database_ok():
+            return database
+        with patch("server.service_ok", service_ok), patch("server.database_ok", database_ok):
+            response = self.signed_in("alice").get("/api/services")
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_responses_example(self):
+        # Spec example "Responses": ready only when every service is ready; fixed order, generic names.
+        for checks in [(True, True, True), (False, True, True), (True, False, True), (False, False, False)]:
+            body = self.services(*checks)
+            self.assertEqual(body["ready"], all(checks))
+            self.assertEqual([(s["key"], s["name"], s["ok"]) for s in body["services"]],
+                             [("asr", "語音辨識", checks[0]), ("translate", "翻譯", checks[1]), ("database", "資料庫", checks[2])])
+            self.assertEqual(set(body), {"ready", "services"})
+
+    def test_service_ok_counts_only_http_200(self):
+        class Client:
+            def __init__(self, result, **_):
+                self.result = result
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *_):
+                return False
+            async def get(self, url):
+                if isinstance(self.result, Exception):
+                    raise self.result
+                return httpx.Response(self.result)
+        for result, expected in [(200, True), (503, False), (httpx.ConnectError("refused"), False), (httpx.ReadTimeout("slow"), False)]:
+            with patch("server.httpx.AsyncClient", lambda timeout, result=result: Client(result)):
+                self.assertEqual(asyncio.run(server.service_ok("http://asr:8272/health")), expected, result)
+
+    def test_database_ok_with_the_test_database(self):
+        self.assertTrue(asyncio.run(server.database_ok()))
+        with patch("server.db.DATABASE_URL", "postgresql://nobody@127.0.0.1:1/none"):
+            self.assertFalse(asyncio.run(server.database_ok()))
+
+    def test_health_url_example(self):
+        # Spec example "Health URL".
+        self.assertEqual(server.asr_health_url("ws://asr:8272/asr_stream_api_v1"), "http://asr:8272/health")
+        self.assertEqual(server.asr_health_url("wss://asr.example:443/stream"), "https://asr.example:443/health")
+        self.assertEqual(server.asr_health_url("ws://asr:8272/asr_stream_api_v1", "http://asr:9000/ready"), "http://asr:9000/ready")
+
+    def test_signed_out_is_401_and_health_unchanged(self):
+        client = TestClient(app)
+        self.assertEqual(client.get("/api/services").status_code, 401)
+        self.assertEqual(client.get("/api/health").json(), {"status": "ok"})
+
+
 if __name__ == "__main__":
     unittest.main()

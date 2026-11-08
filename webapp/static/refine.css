@@ -12,6 +12,9 @@ nav { min-height: 42px; }
 .brand-mark { width: 40px; height: 40px; border-radius: 13px; }
 .brand-mark img { width: 32px; height: 32px; object-fit: contain; display: block; }
 .status { padding: 8px 12px; background: var(--surface); }
+/* service-status: local services ready while idle; a steady dot, unlike the pulsing one of a running session. */
+.status.ready { color: var(--text); }
+.status.ready i { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 /* One-line header (meeting-setup-layout): the setup is what the page is for, so the title stays small. */
 header {

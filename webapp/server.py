@@ -229,6 +229,47 @@ async def config():
     return {"cloudRefine": bool(REFINE_URL and REFINE_MODEL), "mai": mai_asr.configured(), "minutes": minutes.configured()}
 
 
+def asr_health_url(ws_url: str, override: str = "") -> str:
+    """The local ASR's /health URL: ASR_HEALTH_URL, or ASR_WS_URL with http(s) and the path /health."""
+    if override:
+        return override
+    scheme, _, rest = ws_url.partition("://")
+    return f"{'https' if scheme == 'wss' else 'http'}://{rest.split('/', 1)[0]}/health"
+
+
+ASR_HEALTH_URL = asr_health_url(ASR_WS_URL, os.getenv("ASR_HEALTH_URL", ""))
+SERVICE_TIMEOUT_S = 2.0
+
+
+async def service_ok(url: str) -> bool:
+    """True only when the service answers HTTP 200 within SERVICE_TIMEOUT_S."""
+    try:
+        async with httpx.AsyncClient(timeout=SERVICE_TIMEOUT_S) as client:
+            return (await client.get(url)).status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+async def database_ok() -> bool:
+    async def query():
+        async with db.connect() as conn:
+            await conn.execute("SELECT 1")
+    try:
+        await asyncio.wait_for(query(), SERVICE_TIMEOUT_S)
+        return True
+    except Exception:   # unreachable, timed out or failing: the page only needs "not ready"
+        return False
+
+
+@app.get("/api/services")
+async def services():
+    """Whether the local services meetings depend on are ready (service-status); generic names only, no URLs or errors."""
+    checks = await asyncio.gather(service_ok(ASR_HEALTH_URL), service_ok(f"{TRANSLATE_URL}/health"), database_ok())
+    entries = [{"key": key, "name": name, "ok": ok}
+               for (key, name), ok in zip((("asr", "語音辨識"), ("translate", "翻譯"), ("database", "資料庫")), checks)]
+    return {"ready": all(checks), "services": entries}
+
+
 def asr_engine(choice: str, language: str) -> str:
     """'mai' or 'local'. 混合 keeps Chinese, and the modes that may contain it, on the local model."""
     if not mai_asr.configured():

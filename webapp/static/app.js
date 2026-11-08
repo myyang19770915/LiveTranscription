@@ -360,6 +360,24 @@ async function createMeeting(teamId){
   if(!response.ok)throw new Error((await response.json().catch(()=>({}))).detail||'無法建立會議');
   return (await response.json()).id;
 }
+// 服務狀態 (service-status): while nothing is running, the status says whether the local services are ready. Checked on
+// load, every 30 s while the tab is visible and when it comes back; a session's own status is never overwritten, and the
+// message a session ends with stays until the next scheduled check.
+const SERVICE_CHECK_MS=30000;let serviceTimer=0;
+async function checkServices(){
+  clearTimeout(serviceTimer);
+  if(document.hidden)return;
+  serviceTimer=setTimeout(checkServices,SERVICE_CHECK_MS);
+  let state=null;
+  try{const response=await fetch('/api/services');if(response.status===401)return location.replace('/login');if(response.ok)state=await response.json()}catch{}
+  if(starting||stream||stopping)return;
+  if(!state)return setStatus('無法連線到伺服器','error');
+  const down=state.services.filter(service=>!service.ok).map(service=>service.name);
+  if(!down.length)return setStatus('服務就緒','ready');
+  setStatus(`${down.join('、')}服務未啟動`,'error');$('status').title='請確認 Docker 服務已啟動';
+}
+document.addEventListener('visibilitychange',()=>document.hidden?clearTimeout(serviceTimer):checkServices());
+checkServices();
 fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine,mai})=>{
   $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;$('setupAdvanced').hidden=!(cloudRefine||mai);
   try{$('cloudRefine').checked=localStorage.getItem('cloudRefine')==='1';const engine=localStorage.getItem('asrEngine');if([...$('asrEngine').options].some(o=>o.value===engine))$('asrEngine').value=engine}catch{}

@@ -40,6 +40,25 @@ try {
   await page.screenshot({path: join(out, 'translate-mode.png'), clip: {x: 0, y: 0, width: 1440, height: 520}});
   await page.reload(); await page.evaluate(() => window.accountReady);
   check('the mode survives a reload', await page.getAttribute('#modeTranslate', 'aria-pressed') === 'true' && (await page.textContent('#start')).includes('開始翻譯'));
+  // service-status: the idle status says whether the local services are ready (spec example "Status text").
+  await page.waitForFunction(() => document.querySelector('#status span').textContent === '服務就緒', null, {timeout: 10000});
+  check('with every service up the status reads 服務就緒 with a steady dot', await page.getAttribute('#status', 'class') === 'status ready');
+  const services = down => JSON.stringify({ready: !down.length, services: [['asr', '語音辨識'], ['translate', '翻譯'], ['database', '資料庫']].map(([key, name]) => ({key, name, ok: !down.includes(key)}))});
+  const statusAfter = async reply => {
+    await page.route('**/api/services', route => reply(route));
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForTimeout(400); await page.unroute('**/api/services');
+    return page.evaluate(() => ({text: document.querySelector('#status span').textContent, kind: document.getElementById('status').className, title: document.getElementById('status').title}));
+  };
+  const one = await statusAfter(route => route.fulfill({contentType: 'application/json', body: services(['asr'])}));
+  check('a stopped service turns the status red', one.text === '語音辨識服務未啟動' && one.kind === 'status error' && one.title === '請確認 Docker 服務已啟動', one);
+  const two = await statusAfter(route => route.fulfill({contentType: 'application/json', body: services(['asr', 'translate'])}));
+  check('several stopped services are listed', two.text === '語音辨識、翻譯服務未啟動' && two.kind === 'status error', two);
+  await page.screenshot({path: join(out, 'service-status-down.png'), clip: {x: 0, y: 0, width: 1440, height: 90}});
+  const failed = await statusAfter(route => route.fulfill({status: 502, body: ''}));
+  check('a failed check reads 無法連線到伺服器', failed.text === '無法連線到伺服器' && failed.kind === 'status error', failed);
+  const back = await statusAfter(route => route.continue());
+  check('the status recovers to 服務就緒', back.text === '服務就緒' && back.kind === 'status ready', back);
   // setup-form-polish: readable sizes, 中 ⇆ 日 on the swap button, and the local engine is not named by its model.
   await page.selectOption('#language', 'zh_ja');
   const form = await page.evaluate(() => ({tags: [...document.querySelectorAll('#swap .lang-tag')].map(t => t.textContent),
@@ -52,6 +71,8 @@ try {
   await page.selectOption('#language', 'zh'); await page.selectOption('#audioSource', 'microphone');
   await page.click('#start'); await page.waitForFunction(() => document.querySelector('#status span').textContent === '即時翻譯中', null, {timeout: 15000});
   check('the status says 即時翻譯中 and the mode is locked', await page.isDisabled('#modeMeeting') && await page.isDisabled('#modeTranslate'));
+  const during = await statusAfter(route => route.fulfill({contentType: 'application/json', body: services(['translate'])}));
+  check('a check during live translation does not change the status', during.text === '即時翻譯中' && during.kind === 'status live', during);
   check('with a microphone alone 畫面＋字幕 is disabled with the reason', await page.isDisabled('#overlay') && (await page.getAttribute('#overlay', 'title')).includes('分頁／系統聲音'));
   await page.waitForFunction(() => document.getElementById('transcript').textContent.trim().length > 0, null, {timeout: 20000});
   await page.waitForTimeout(6000);
