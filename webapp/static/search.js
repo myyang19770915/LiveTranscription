@@ -15,6 +15,27 @@ function setParams(next){
 }
 function notice(message){$('notice').textContent=message||'';$('notice').hidden=!message}
 
+// The same limits as webapp/search.py, checked before sending; the reason in the API's own words, '' when it can be sent.
+const QUERY_MAX=100,MAX_TERMS=5;
+function invalidQuery(q){
+  if([...q].length>QUERY_MAX)return `搜尋字最多 ${QUERY_MAX} 個字`;
+  const count=q.split(/\s+/).filter(Boolean).length;
+  return count>MAX_TERMS?`搜尋詞最多 ${MAX_TERMS} 個（目前 ${count} 個），請刪減後再搜尋`:'';
+}
+// Busy while the newest search is under way: the results region says so at once (aria-busy), the old results are dimmed
+// and cannot be clicked, and after 200 ms the polite summary says what is being searched, so quick searches do not flicker.
+// An invalid box is described by the alert saying why; other notices (a dropped filter, a failure) do not describe it.
+function invalidBox(on){
+  for(const [name,value] of [['aria-invalid','true'],['aria-describedby','notice']])on?$('q').setAttribute(name,value):$('q').removeAttribute(name);
+}
+let slowTimer=0;
+function busy(on,q=''){
+  clearTimeout(slowTimer);
+  $('results').setAttribute('aria-busy',String(on));
+  $('results').classList.toggle('is-loading',on);
+  if(on)slowTimer=setTimeout(()=>{$('summary').textContent=`正在搜尋「${q}」…`},200);
+}
+
 // The text with every term wrapped in <mark>, case-insensitively; overlapping terms merge.
 function marked(text,terms){
   const lower=text.toLowerCase(),spans=[];
@@ -74,7 +95,7 @@ function render(result){
 function idle(){
   $('summary').textContent='';
   $('results').replaceChildren(el('div',{className:'card search-empty'},el('b',{textContent:'搜尋逐字稿、紀要與會議主題'}),
-    el('span',{textContent:'多個詞用空白分開，會找同時出現的地方；按 / 可從任何頁面開啟搜尋。'})));
+    el('span',{textContent:'多個詞用空白分開（最多 5 個），會找同時出現的地方；按 / 可從任何頁面開啟搜尋。'})));
 }
 
 // carry: a notice to show with these results (a dropped filter), cleared otherwise.
@@ -83,18 +104,34 @@ async function run(carry=''){
   const next={q,team:$('team').value,series:$('series').value,from:$('from').value,to:$('to').value,kind};
   setParams(next);
   $('clear').hidden=!FILTERS.some(k=>k==='kind'?kind!=='all':next[k]);
-  const ticket=++latest;   // also on an empty box, so a search still under way cannot fill it afterwards
+  const ticket=++latest;   // also on an empty or invalid box, so a search still under way cannot fill it afterwards
   notice(carry);
-  if(!q){idle();return}
-  const response=await fetch(`/api/search?${params}`);
-  const result=await response.json().catch(()=>null);
-  if(ticket!==latest)return;
-  if(!response.ok){
-    // A bookmarked team or series the user cannot see: drop it and search again.
-    if(response.status===404&&(next.team||next.series)){$('team').value='';await loadSeries();return run('找不到這個團隊或系列，已改為搜尋全部')}
-    throw new Error(typeof result?.detail==='string'?result.detail:'搜尋失敗');
+  const problem=q?invalidQuery(q):'';
+  invalidBox(Boolean(problem));
+  if(!q||problem){
+    busy(false);
+    // Not sent: the previous results go, so they are not taken for this query.
+    if(problem){$('summary').textContent='';$('results').replaceChildren();notice(problem)}else idle();
+    return;
   }
-  render(result);
+  busy(true,q);
+  try{
+    const response=await fetch(`/api/search?${params}`);
+    const result=await response.json().catch(()=>null);
+    if(ticket!==latest)return;
+    if(!response.ok){
+      // A bookmarked team or series the user cannot see: drop it and search again.
+      if(response.status===404&&(next.team||next.series)){$('team').value='';await loadSeries();return run('找不到這個團隊或系列，已改為搜尋全部')}
+      throw new Error(typeof result?.detail==='string'?result.detail:'搜尋失敗');
+    }
+    render(result);
+  }catch(error){
+    if(ticket!==latest)return;   // a replaced search fails silently
+    $('summary').textContent='';$('results').replaceChildren();
+    throw error;
+  }finally{
+    if(ticket===latest)busy(false);   // only the newest search ends the busy state
+  }
 }
 const search=(carry='')=>run(carry).catch(error=>notice(error.message));
 
@@ -110,6 +147,8 @@ async function loadSeries(selected=''){
 function pressKind(kind){for(const b of document.querySelectorAll('.kind'))b.setAttribute('aria-pressed',String(b.dataset.kind===kind))}
 
 $('searchForm').onsubmit=event=>{event.preventDefault();search()};
+// Fixing an invalid query clears the mark and its message at once (they are not live-checked while typing otherwise).
+$('q').oninput=()=>{if($('q').hasAttribute('aria-invalid')&&!invalidQuery($('q').value.trim())){invalidBox(false);notice('')}};
 for(const b of document.querySelectorAll('.kind'))b.onclick=()=>{pressKind(b.dataset.kind);search()};
 $('team').onchange=async()=>{await loadSeries();search()};
 for(const id of ['series','from','to'])$(id).onchange=search;

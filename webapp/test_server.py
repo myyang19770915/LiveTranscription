@@ -1829,6 +1829,13 @@ class SearchTests(ReviewTestCase):
         self.assertEqual(self.search("q=%20%20", status=422)["detail"], "請輸入要搜尋的字")
         self.search("q=" + "字" * 100 + "%20")                              # 100 after trimming
         self.assertEqual(self.search("q=" + "字" * 101, status=422)["detail"], "搜尋字最多 100 個字")
+        # At most 5 terms: more are rejected with the count, never cut to the first 5 (spec example "Matching").
+        self.search("q=a b c d e")                                         # 5 terms are searched
+        self.assertEqual(self.hits(self.search("q=合約 下週五 寄給 客戶 前")), [(m, "segment", 1)])
+        self.assertEqual(self.search("q=合約 下週五 寄給 客戶 前 不存在", status=422)["detail"],
+                         "搜尋詞最多 5 個（目前 6 個），請刪減後再搜尋")
+        self.assertEqual(self.hits(self.search("q=合約　客戶")), [(m, "segment", 1)])   # a full-width space separates terms
+        self.assertEqual(self.search("q=a　b c d e f", status=422)["detail"], "搜尋詞最多 5 個（目前 6 個），請刪減後再搜尋")
         self.search("q=x&kind=people", status=422)
 
     def test_grouping_newest_first_and_board_items(self):

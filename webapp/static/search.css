@@ -5,6 +5,7 @@
 .search-box { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; height: 46px; padding: 0 14px; border: 1.5px solid var(--field-border);
   border-radius: 12px; background: var(--field); }
 .search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-box:has(input[aria-invalid="true"]) { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }   /* over 5 terms or 100 characters */
 .search-box svg { flex: none; width: 18px; height: 18px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
 .search-box input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 16px; }
 .search-form .primary-button { width: auto; height: 46px; }
@@ -19,7 +20,10 @@
   color: var(--text); font-size: 13px; }
 
 .search-summary { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
-.results { display: grid; gap: 14px; }
+.results { display: grid; gap: 14px; transition: opacity .2s; }
+/* A search under way (search-feedback-term-limit): the previous results fade after a short delay and cannot be clicked. */
+.results.is-loading { opacity: .45; pointer-events: none; transition-delay: .15s; }
+@media (prefers-reduced-motion: reduce) { .results { transition: none; } }
 .result-group { padding: 14px 16px 6px; }
 .result-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
 .result-head a, .result-head b { color: var(--text); font-size: 16px; font-weight: 700; text-decoration: none; }

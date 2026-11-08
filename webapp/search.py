@@ -21,7 +21,12 @@ SERIES_NOT_FOUND = "找不到這個系列"
 
 
 def terms_of(q: str) -> list[str]:
-    return q.split()[:MAX_TERMS]
+    return q.split()
+
+
+def too_many_terms(count: int) -> str:
+    """The message for a query over MAX_TERMS terms; search.js shows the same words before sending."""
+    return f"搜尋詞最多 {MAX_TERMS} 個（目前 {count} 個），請刪減後再搜尋"
 
 
 def all_terms(column: str, terms: list[str]) -> str:
@@ -43,6 +48,8 @@ async def search(user: auth.CurrentUser, q: str = Query("", max_length=QUERY_MAX
     terms = terms_of(q.strip())
     if not terms:
         raise HTTPException(status_code=422, detail=EMPTY_QUERY)
+    if len(terms) > MAX_TERMS:   # rejected, never cut: the user would think every term was matched
+        raise HTTPException(status_code=422, detail=too_many_terms(len(terms)))
     if kind not in KINDS:
         raise HTTPException(status_code=422, detail="不支援的類型")
     # One more than the cap per kind, so a single kind over the cap is still reported as truncated.

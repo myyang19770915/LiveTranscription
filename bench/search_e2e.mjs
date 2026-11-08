@@ -1,7 +1,9 @@
 // End-to-end acceptance for full-text search (meeting-search) in the real pages (Playwright, gstack's install), against
 // a meeting whose transcript contains <word> (default 合約). Reads only: the header icon and / open the page, results are
 // grouped and marked, a segment hit opens that segment on the review page, the kind filter and the address round-trip,
-// an unmatched word shows the empty state, and 400 px does not scroll sideways. Exits 1 on any failed check.
+// an unmatched word shows the empty state, and 400 px does not scroll sideways. Search feedback (search-feedback-term-limit):
+// a slow search is marked busy and announced, a newer search wins over a slower older one, and more than 5 terms is not
+// sent and says why. Exits 1 on any failed check.
 // Usage: YUQIAO_SESSION=<token> node bench/search_e2e.mjs <meeting id> <screenshot dir> [word]
 import {homedir} from 'node:os';
 import {join} from 'node:path';
@@ -66,6 +68,74 @@ try {
     && await page.getAttribute('.kind[data-kind="items"]', 'aria-pressed') === 'true');
   await Promise.all([searched(), page.click('#clear')]);
   check('清除篩選 goes back to all kinds', await page.getAttribute('.kind[data-kind="all"]', 'aria-pressed') === 'true' && !page.url().includes('kind='));
+
+  // A slow search: busy at once, old results dimmed and not clickable, the summary says so; the answer ends it.
+  const results = () => page.evaluate(() => {
+    const r = document.getElementById('results');
+    return {busy: r.getAttribute('aria-busy'), clickable: getComputedStyle(r).pointerEvents !== 'none', text: r.textContent,
+            summary: document.getElementById('summary').textContent, children: r.children.length};
+  });
+  const waitFor = async get => { while (!get()) await new Promise(r => setTimeout(r, 20)); return get(); };
+  let release = null;
+  await page.route('**/api/search?*', async route => { await new Promise(r => { release = r; }); await route.continue(); });
+  await page.fill('#q', word); await page.press('#q', 'Enter');
+  await page.waitForFunction(() => document.getElementById('summary').textContent.includes('正在搜尋'));
+  let now = await results();
+  await page.waitForTimeout(400);   // the fade starts after 150 ms and lasts 200 ms
+  const faded = await page.evaluate(() => Number(getComputedStyle(document.getElementById('results')).opacity));
+  check('a slow search marks the results busy, dims them and says so', now.busy === 'true' && !now.clickable && faded < 1
+    && now.summary === `正在搜尋「${word}」…` && await page.locator('.result-group').count() > 0, now.summary);
+  (await waitFor(() => release))();
+  await page.waitForFunction(() => document.getElementById('results').getAttribute('aria-busy') === 'false');
+  now = await results();
+  check('the answer ends the busy state', now.clickable && /找到 \d+ 筆/.test(now.summary), now.summary);
+  await page.unroute('**/api/search?*');
+
+  // A newer search wins over a slower older one.
+  const other = '不可能出現的字串xyzzy';
+  release = null;
+  await page.route('**/api/search?*', async route => {
+    if (new URL(route.request().url()).searchParams.get('q') === word) await new Promise(r => { release = r; });
+    await route.continue();
+  });
+  await page.fill('#q', word); await page.press('#q', 'Enter');
+  const slow = await waitFor(() => release);
+  await page.fill('#q', other);
+  await Promise.all([searched(), page.press('#q', 'Enter')]);
+  await page.waitForSelector('.search-empty');
+  const older = page.waitForResponse(r => r.url().includes(encodeURIComponent(word)));
+  slow(); await older; await page.waitForTimeout(150);
+  now = await results();
+  check('a newer search wins over a slower older one', now.busy === 'false' && now.text.includes(other) && now.summary === ''
+    && await page.locator('.result-group').count() === 0, now.summary);
+  await page.unroute('**/api/search?*');
+
+  // More than 5 terms: not sent, the old results go, the alert says why and the box is invalid; fixing it searches again.
+  let sent = 0;
+  const counter = r => { if (r.url().includes('/api/search?')) sent++; };
+  page.on('request', counter);
+  await page.fill('#q', '合約 客戶 報價 週五 寄出 確認'); await page.press('#q', 'Enter');
+  await page.waitForFunction(() => !document.getElementById('notice').hidden);
+  await page.waitForTimeout(150);
+  now = await results();
+  check('more than 5 terms is not sent and says why', sent === 0 && now.children === 0 && now.busy === 'false'
+    && await page.textContent('#notice') === '搜尋詞最多 5 個（目前 6 個），請刪減後再搜尋'
+    && await page.getAttribute('#notice', 'role') === 'alert' && await page.getAttribute('#q', 'aria-invalid') === 'true'
+    && await page.getAttribute('#q', 'aria-describedby') === 'notice', {sent, notice: await page.textContent('#notice')});
+  page.off('request', counter);
+  await page.fill('#q', '合約 客戶 報價 週五 寄出');
+  check('a valid query clears the invalid mark and its message while typing', await page.getAttribute('#q', 'aria-invalid') === null
+    && await page.getAttribute('#q', 'aria-describedby') === null && await page.locator('#notice').isHidden());
+  await page.fill('#q', word);
+  await Promise.all([searched(), page.press('#q', 'Enter')]); await page.waitForSelector('.result-group');
+  check('the fixed query searches again', await page.locator('#notice').isHidden() && new URL(page.url()).searchParams.get('q') === word);
+  // Over 100 characters from a shared address (maxlength only limits typing): not sent either.
+  sent = 0; page.on('request', counter);
+  await page.goto(`${app}/search?q=${encodeURIComponent('字'.repeat(101))}`);
+  await page.waitForFunction(() => !document.getElementById('notice').hidden); await page.waitForTimeout(150);
+  check('over 100 characters is not sent and says why', sent === 0 && await page.textContent('#notice') === '搜尋字最多 100 個字'
+    && await page.getAttribute('#q', 'aria-invalid') === 'true', {sent});
+  page.off('request', counter);
 
   // Filters from a shared address are restored; an unknown series is dropped with a notice that stays.
   const teamId = await page.locator('#team option').nth(1).getAttribute('value');
