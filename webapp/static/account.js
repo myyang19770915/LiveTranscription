@@ -167,20 +167,22 @@ window.accountReady=fetch('/api/me').then(response=>{
     const make=(tag,props)=>Object.assign(document.createElement(tag),props);
     const name=make('span',{className:'account-name'});
     name.append(make('b',{textContent:me.displayName||me.username}));
-    const out=make('button',{type:'button',textContent:'登出',onclick:async()=>{await fetch('/api/logout',{method:'POST'});location.replace('/login')}});
+    const signOut=async()=>{await fetch('/api/logout',{method:'POST'});location.replace('/login')};
+    const out=make('button',{type:'button',className:'account-logout',textContent:'登出',onclick:signOut});
     const link=(href,text)=>make('a',{href,textContent:text});
     const links=[location.pathname==='/'?link('/meetings','會議紀錄'):null,location.pathname!=='/actions'?link('/actions','待辦看板'):null,
       location.pathname!=='/metrics'?link('/metrics','成效指標'):null,
       me.admin&&location.pathname!=='/admin'?link('/admin','團隊管理'):null].filter(Boolean);
     // Search (meeting-search): a text button like the others, shown on phones too; / opens it from any page.
     const search=location.pathname==='/search'?null:make('a',{href:'/search',className:'account-search',title:'搜尋（/）',textContent:'搜尋'});
-    slot.replaceChildren(...[search,...links,ownAvatar(me,make),name,out].filter(Boolean));
+    slot.replaceChildren(...[search,...links,ownAvatar(me,make,signOut),name,out].filter(Boolean));
   }
   return me;
 });
 
 // The header avatar and its menu: 更換照片, and 移除照片 when there is a photo.
-function ownAvatar(me,make){
+// phoneItems: 待辦看板 and 登出 for a header too narrow for their buttons (the meeting page on phones, accounts.css).
+function ownAvatar(me,make,signOut){
   const wrap=make('span',{className:'account-me'});
   const button=make('button',{type:'button',className:'account-avatar',title:'更換我的照片',ariaLabel:'我的照片'});
   button.setAttribute('aria-haspopup','menu');button.setAttribute('aria-expanded','false');
@@ -212,7 +214,7 @@ function ownAvatar(me,make){
     message.hidden=true;
     try{await work()}catch(error){message.textContent=error.message;message.hidden=false;open()}
   };
-  const item=(text,onclick)=>{const node=make('button',{type:'button',textContent:text,onclick});node.setAttribute('role','menuitem');return node};
+  const item=(text,onclick,className='')=>{const node=make('button',{type:'button',textContent:text,onclick,className});node.setAttribute('role','menuitem');return node};
   function render(){
     menu.replaceChildren(...[
       item('更換照片',()=>run(async()=>{
@@ -224,6 +226,8 @@ function ownAvatar(me,make){
         close();
       })),
       me.avatarUrl?item('移除照片',()=>run(async()=>{await AvatarPhoto.remove('/api/me/avatar');changed(null);close()})):null,
+      location.pathname!=='/actions'?item('待辦看板',()=>{location.href='/actions'},'menu-phone'):null,
+      item('登出',signOut,'menu-phone'),
       message].filter(Boolean));
   }
   render();

@@ -1,11 +1,13 @@
 .nav-actions { display: flex; align-items: center; gap: 9px; }
-.theme-toggle {
+.theme-toggle {   /* icon only, like the other pages' toggle (meeting-setup-layout) */
+  width: 38px;
+  height: 38px;
   min-height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0 12px;
+  gap: 0;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--surface);
@@ -17,7 +19,7 @@
 }
 .theme-toggle:hover { border-color: var(--accent); background: var(--soft); transform: translateY(-1px); }
 .theme-toggle svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.theme-moon { display: none; }
+.theme-moon, .theme-label { display: none; }
 
 /* Light theme (brand-palette-blue): colours come from tokens.css; only the layout differences stay here. */
 :root[data-theme="light"] .ambient { display: none; }
@@ -31,7 +33,6 @@
   background: color-mix(in srgb, var(--surface) 55%, var(--page));
   box-shadow: 0 16px 60px rgb(0 0 0 / .04);
 }
-:root[data-theme="light"] header { padding-top: 38px; padding-bottom: 27px; }
 :root[data-theme="light"] .controls :disabled { opacity: .48; }
 .translation-draft { display: block; margin-top: 14px; padding: 12px 16px; border-left: 3px solid var(--mint); border-radius: 0 10px 10px 0; background: var(--accent-soft); color: var(--text); opacity: .84; }
 .translation-draft::before { content: "暫譯 · 句末自動修訂"; display: block; margin-bottom: 5px; color: var(--mint); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
@@ -46,6 +47,5 @@
 }
 @media (max-width: 430px) {
   .nav-actions { gap: 6px; }
-  .theme-toggle { min-height: 34px; gap: 6px; padding-inline: 9px; font-size: 10px; }
   .status { gap: 6px; padding: 7px 9px; font-size: 10px; }
 }

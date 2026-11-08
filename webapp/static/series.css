@@ -1,10 +1,9 @@
 /* Meeting page: series menu, the series' unfinished action items and progress suggestions (meeting-series).
    Uses the meeting page's own tokens (styles.css / themes.css): --line, --muted, --text, --mint, --coral. */
-#seriesRow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 #seriesRow[hidden] { display: none; }
-#seriesRow select, .new-series input { width: auto; max-width: 100%; padding: 1px 6px; font-size: inherit; color: inherit;
+.new-series input { width: auto; max-width: 100%; padding: 1px 6px; font-size: inherit; color: inherit;
   border: 1px solid var(--line); border-radius: 6px; background: transparent; }
-.new-series { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.new-series { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; }
 .new-series[hidden] { display: none; }
 .new-series input { width: min(12em, 100%); padding: 2px 8px; }
 .new-series button { padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text); font-size: inherit; cursor: pointer; }

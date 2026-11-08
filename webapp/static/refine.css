@@ -13,27 +13,36 @@ nav { min-height: 42px; }
 .brand-mark img { width: 32px; height: 32px; object-fit: contain; display: block; }
 .status { padding: 8px 12px; background: var(--surface); }
 
+/* One-line header (meeting-setup-layout): the setup is what the page is for, so the title stays small. */
 header {
   align-items: center;
-  padding: 36px 2px 26px;
+  padding: 12px 2px 10px;
 }
 header > div:first-child { max-width: 760px; }
-.eyebrow { color: var(--mint); font-size: 9px; letter-spacing: .22em; }
+.eyebrow { color: var(--mint); font-size: 9px; letter-spacing: .22em; line-height: 1.2; }
 h1 {
-  margin: 10px 0 9px;
-  font-size: clamp(34px, 3.5vw, 48px);
-  font-weight: 600;
-  letter-spacing: -.04em;
+  margin: 4px 0 0;
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -.02em;
 }
 h1 em { color: var(--muted); }
-header p { font-size: 13px; }
-.privacy { min-width: 228px; padding: 13px 16px; }
+header p { display: none; }
+.privacy { min-width: 0; gap: 8px; padding: 8px 12px; }
+.privacy svg { width: 16px; }
+.privacy span { display: flex; align-items: baseline; gap: 6px; }
+.privacy b { font-size: 11px; }
 
 .controls {
   grid-template-columns: minmax(130px, 1.1fr) 58px minmax(145px, 1.1fr) minmax(155px, 1.2fr) minmax(180px, 1.35fr) 156px !important;
   grid-template-areas:
+    "h-meeting h-meeting h-meeting h-meeting h-meeting h-meeting"
+    "team team topic topic series series"
+    "h-audio h-audio h-audio h-audio h-audio h-audio"
     "source swap target audio mic test"
     "hint hint hint hint hint hint"
+    "h-adv h-adv h-adv h-adv h-adv h-adv"
+    "engine engine engine refine refine refine"
     "context context context context context start";
   gap: 9px;
   padding: 13px;
@@ -62,17 +71,27 @@ select { padding-top: 9px; }
 .target-field { grid-area: target !important; }
 .mic-field { grid-area: mic !important; }
 .mic-test { grid-area: test !important; border-radius: 12px; background: var(--field); }
-/* The audio hint, learned terms and the cloud switch share the hint cell, stacked. */
+/* The audio hint and learned terms share the hint cell, stacked. */
 .hint-stack { grid-area: hint !important; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-/* The page-wide select/input rule is width:100%; these sit inline in a hint line (also in the mobile dialog). */
-#cloudRefineRow, #asrEngineRow, #teamRow, #topicRow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-#cloudRefineRow { cursor: pointer; }
-#cloudRefineRow input { width: auto; margin: 0; padding: 0; accent-color: var(--mint); }
-#asrEngineRow select, #teamRow select { width: auto; max-width: 100%; padding: 1px 6px; font-size: inherit; color: inherit;
-  border: 1px solid var(--line); border-radius: 6px; background: transparent; }
-#cloudRefineRow span, #asrEngineRow span, #teamRow span { opacity: .75; }
-#topicRow input { width: min(22em, 100%); padding: 2px 8px; font-size: inherit; color: inherit;
-  border: 1px solid var(--line); border-radius: 6px; background: transparent; }
+/* Setup groups (meeting-setup-layout): the meeting's own settings and the advanced ones are field cards like the audio ones,
+   each group under a small heading. Without an engine choice or cloud refine, the advanced rows are not in the grid at all. */
+.setup-heading { margin: 0; padding: 4px 4px 0; color: var(--mint); font-size: 10px; font-weight: 700; letter-spacing: .14em; }
+.setup-heading[hidden], .field[hidden] { display: none; }
+#setupMeeting { grid-area: h-meeting; padding-top: 0; }
+#setupAudio { grid-area: h-audio; }
+#setupAdvanced { grid-area: h-adv; }
+#teamRow { grid-area: team; }
+#topicRow { grid-area: topic; }
+#seriesRow { grid-area: series; }
+#asrEngineRow { grid-area: engine; }
+#cloudRefineRow { grid-area: refine; }
+.field-note { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.field-note:empty { display: none; }
+.toggle-field { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+.toggle-field input { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--mint); flex: none; }
+.toggle-text b { display: block; font-size: 13px; }
+.toggle-text small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+.controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "h-meeting h-meeting h-meeting h-meeting h-meeting h-meeting"     "team team topic topic series series"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
 .source-hint {
   grid-area: hint !important;
   padding: 1px 4px 2px;
@@ -144,28 +163,43 @@ button:focus-visible, select:focus-visible, input:focus-visible {
   .controls {
     grid-template-columns: minmax(135px, 1fr) 54px minmax(145px, 1fr) minmax(155px, 1fr) !important;
     grid-template-areas:
+      "h-meeting h-meeting h-meeting h-meeting"
+      "team topic topic series"
+      "h-audio h-audio h-audio h-audio"
       "source swap target audio"
       "mic mic test start"
       "hint hint hint hint"
+      "h-adv h-adv h-adv h-adv"
+      "engine engine refine refine"
       "context context context context";
   }
+  .controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "h-meeting h-meeting h-meeting h-meeting"     "team topic topic series"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
 }
 
+/* Up to 760px mobile.css takes over the controls (one row; the rest moves into the settings dialog); these areas are the
+   fallback order should it not load. */
 @media (max-width: 760px) {
   main { padding: 16px 14px 20px; }
-  header { align-items: flex-start; padding: 30px 2px 22px; }
-  h1 { max-width: 570px; font-size: clamp(32px, 8vw, 40px); line-height: 1.16; }
-  header p { max-width: 360px; font-size: 12px; line-height: 1.65; }
+  header { padding: 14px 2px 10px; }
+  h1 { font-size: 20px; }
   .privacy { display: none; }
   .controls {
     grid-template-columns: minmax(0, 1fr) 54px !important;
     grid-template-areas:
+      "h-meeting h-meeting"
+      "team team"
+      "topic topic"
+      "series series"
+      "h-audio h-audio"
       "source swap"
       "target target"
       "audio audio"
       "mic mic"
       "test test"
       "hint hint"
+      "h-adv h-adv"
+      "engine engine"
+      "refine refine"
       "context context"
       "start start";
     gap: 8px;

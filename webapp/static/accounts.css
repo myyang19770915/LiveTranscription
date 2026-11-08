@@ -4,7 +4,9 @@
 .account a,.account button{background:none;border:1px solid var(--line);border-radius:999px;color:var(--text);padding:5px 12px;font:inherit;cursor:pointer;text-decoration:none}
 @media (max-width:720px){.account .account-name{display:none}}
 @media (max-width:900px){.account a[href="/metrics"]{display:none}}
-@media (max-width:760px){.account a[href="/admin"]{display:none}}   /* as on the other pages' phone header (admin.css) */
+/* Phones (meeting-setup-layout): the header keeps brand, 搜尋, avatar, status and theme; 待辦看板 and 登出 are in the avatar menu. */
+.account-menu .menu-phone{display:none}
+@media (max-width:760px){.account a[href="/admin"],.account>a[href="/actions"],.account>.account-logout{display:none}.account .account-menu .menu-phone{display:block}}
 /* Own avatar and its menu (avatar-self-service). */
 .account-me{position:relative;display:inline-flex}
 .account .account-avatar{width:30px;height:30px;padding:0;display:grid;place-items:center;overflow:hidden;border-radius:50%}

@@ -11,7 +11,7 @@
   $('language').value = cfg.language; updateTranslationDirection();
   if (cfg.target && cfg.language !== 'zh_ja') { $('targetLanguage').value = cfg.target; updateTranslationDirection(); }
   if (cfg.context) $('context').value = cfg.context;
-  if (cfg.cloudRefine) { $('cloudRefineRow').hidden = false; $('cloudRefine').checked = true; }
+  if (cfg.cloudRefine) { $('cloudRefineRow').hidden = false; $('setupAdvanced').hidden = false; $('cloudRefine').checked = true; }
 
   class TrackSocket {
     constructor(track) { this.track = track; this.i = 0; this.readyState = 1; this.closeListeners = []; }

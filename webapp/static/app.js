@@ -323,7 +323,7 @@ async function createMeeting(teamId){
   return (await response.json()).id;
 }
 fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine,mai})=>{
-  $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;
+  $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;$('setupAdvanced').hidden=!(cloudRefine||mai);
   try{$('cloudRefine').checked=localStorage.getItem('cloudRefine')==='1';const engine=localStorage.getItem('asrEngine');if([...$('asrEngine').options].some(o=>o.value===engine))$('asrEngine').value=engine}catch{}
 }).catch(()=>{});
 $('cloudRefine').onchange=()=>{try{localStorage.setItem('cloudRefine',$('cloudRefine').checked?'1':'0')}catch{}};
@@ -459,7 +459,7 @@ const mobileQuery=matchMedia('(max-width: 760px), (max-width: 1000px) and (max-h
 const mobilePanels={transcript:$('transcript').closest('article'),translation:$('translation').closest('article')};
 const mobileFollow={transcript:true,translation:true};
 let mobileView='translation';
-const mobileSettingsNodes=[$('teamRow'),$('topicRow'),$('seriesRow'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('asrEngineRow'),$('cloudRefineRow')];
+const mobileSettingsNodes=[$('setupMeeting'),$('teamRow'),$('topicRow'),$('seriesRow'),$('setupAudio'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('setupAdvanced'),$('asrEngineRow'),$('cloudRefineRow')];
 const movableControls=[...mobileSettingsNodes,$('start')].map(node=>{
   const anchor=document.createComment('responsive-control');node.before(anchor);return{node,anchor};
 });
