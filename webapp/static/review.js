@@ -30,14 +30,14 @@ async function play(seq){
     if(!response.ok)throw new Error((await response.json().catch(()=>({}))).detail||'無法載入錄音');
     if(audioUrl)URL.revokeObjectURL(audioUrl);
     audioUrl=URL.createObjectURL(await response.blob());
-    clip={seq,span};$('player').src=audioUrl;await $('player').play();
+    clip={seq,span};$('player').src=audioUrl;Speakers.stop();await $('player').play();
   }catch(error){notice(error.message)}
 }
 // The play button pauses and resumes the loaded clip; another segment, or a finished clip, loads afresh.
 function togglePlay(seq){
   const player=$('player');
   if(clip?.seq!==seq||player.ended)return play(seq);
-  if(player.paused)player.play().catch(error=>notice(error.message));else player.pause();
+  if(player.paused){Speakers.stop();player.play().catch(error=>notice(error.message))}else player.pause();
   syncPlayer();
 }
 // Buttons and the position read update in place, so a redraw never interrupts an open editor.
@@ -151,7 +151,7 @@ function row(segment){
   const open=selected===segment.seq;
   const target=segment.target.replace(/^\[([^\]]*)\]\n/u,'');
   const label=segment.target.match(/^\[([^\]]*)\]\n/u)?.[1];
-  const article=el('article',{className:`seg ${segment.state}${open?' open':''}`,id:`seg-${segment.seq}`},
+  const article=el('article',{className:`seg ${segment.state}${open?' open':''}${Speakers.speaking()===segment.seq?' speaking':''}`,id:`seg-${segment.seq}`},
     el('button',{type:'button',className:'seg-time',textContent:`${clock(segment.startMs)}–${clock(segment.endMs)}`,title:'播放這段',onclick:()=>select(segment.seq)}),
     editing===segment.seq?editor(segment):el('div',{className:'seg-source',onclick:()=>select(segment.seq)},Speakers.chip(segment),el('span',{textContent:segment.source})),
     el('div',{className:'seg-target',onclick:()=>select(segment.seq)},label?el('small',{className:'muted',textContent:label}):null,el('span',{textContent:target})),

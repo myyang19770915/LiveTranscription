@@ -113,6 +113,8 @@ def test_database_url() -> str:
 
 TEST_DATABASE_URL = test_database_url()
 db.DATABASE_URL = TEST_DATABASE_URL
+# Tests never reach the real diarize service; DiarizeApiTests turn it on with a fake service call.
+diarize.DIARIZE_URL = ""
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -2690,7 +2692,7 @@ class DiarizeApiTests(ReviewTestCase):
         return [s["speaker"] for s in self.alice.get(f"/api/meetings/{self.meeting}").json()["segments"]]
 
     def test_manual_run_labels_segments_and_lists_speakers(self):
-        self.assertEqual(self.speakers()["status"], "none")
+        self.assertEqual((self.speakers()["status"], self.speakers()["turns"]), ("none", []))
         response = self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
         self.assertEqual((response.status_code, response.json()), (202, {"status": "queued"}))
         again = self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
@@ -2771,6 +2773,35 @@ class DiarizeApiTests(ReviewTestCase):
         self.run_queue()
         self.assertEqual([s["shown"] for s in self.speakers()["speakers"]], ["說話者 1", "說話者 2", "說話者 3"])
         self.assertEqual(self.segment_speakers()[:4], [1, 2, 1, 3])
+
+    def test_timeline_turns_duration_and_roles(self):
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue(SERVICE_OUTPUT + "  [  12.10 ->   13.00] S4: Quarterly numbers\n")
+        state = self.speakers()
+        self.assertEqual(state["turns"][0], [480, 1660, 1, "好那就這樣"])
+        self.assertEqual(state["turns"][1], [1800, 5200, 2, "我們下週五前把報價單寄出去吧"])
+        self.assertEqual(state["turns"][-1], [12100, 13000, 4, "Quarterly numbers"])
+        self.assertEqual(state["durationMs"], 12000)
+        self.assertEqual([(s["label"], s["turnMs"]) for s in state["speakers"]], [(1, 1180 + 600), (2, 3400), (3, 5900), (4, 900)])
+        role = self.alice.put(f"/api/meetings/{self.meeting}/speakers/1", json={"name": "Nora", "note": " 主持人 "})
+        self.assertEqual((role.status_code, role.json()["note"], role.json()["shown"], role.json()["turnMs"]), (200, "主持人", "Nora", 1780))
+        self.assertEqual(self.alice.put(f"/api/meetings/{self.meeting}/speakers/1", json={"name": "Nora"}).json()["note"], "主持人")
+        too_long = self.alice.put(f"/api/meetings/{self.meeting}/speakers/1", json={"name": "Nora", "note": "角" * 41})
+        self.assertEqual(too_long.status_code, 422)
+        self.assertEqual(self.speakers()["speakers"][0]["note"], "主持人")
+        added = self.alice.post(f"/api/meetings/{self.meeting}/speakers").json()
+        self.assertEqual((added["turnMs"], added["note"]), (0, ""))
+        # A new diarization replaces roles too.
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue()
+        self.assertEqual([s["note"] for s in self.speakers()["speakers"]], ["", "", ""])
+
+    def test_timeline_turns_example(self):
+        """Spec example table: stored turns come back with Chinese in Traditional script and other text as it is."""
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("INSERT INTO diarizations (meeting_id, status, turns) VALUES (%s, 'done', %s)",
+                         (self.meeting, json.dumps([[0, 1660, 1, "好那就这样"], [1800, 5200, 2, "Quarterly numbers"]], ensure_ascii=False)))
+        self.assertEqual(self.speakers()["turns"], [[0, 1660, 1, "好那就這樣"], [1800, 5200, 2, "Quarterly numbers"]])
 
     def test_minutes_lines_carry_speaker_names(self):
         self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")

@@ -42,7 +42,7 @@ STILL_RECORDING = "會議還在錄音，結束後會自動辨識說話者"
 INTERRUPTED, STUCK = "app 重新啟動，已重新排入", "辨識超過時限沒有結果"
 TURN_LINE = re.compile(r"^\s*\[\s*(\d+(?:\.\d+)?)\s*->\s*(\d+(?:\.\d+)?)\]\s*S(\d+):[ \t]?(.*)$", re.MULTILINE)
 TO_TRADITIONAL = OpenCC("s2tw")
-_wake = asyncio.Event()
+_wake: asyncio.Event | None = None   # created by the worker, on its own event loop
 
 
 class Turn(NamedTuple):
@@ -114,7 +114,7 @@ async def enqueue(conn, meeting_id, requested_by: str | None) -> bool:
         "ON CONFLICT (meeting_id) DO UPDATE SET status = 'queued', message = '', requested_by = excluded.requested_by, "
         "queued_at = now(), started_at = NULL, finished_at = NULL WHERE diarizations.status NOT IN ('queued', 'running') "
         "RETURNING meeting_id", (meeting_id, requested_by))).fetchone()
-    if row:
+    if row and _wake:
         _wake.set()
     return row is not None
 
@@ -204,6 +204,8 @@ async def expire_stuck() -> None:
 
 async def worker() -> None:
     """Run queued diarizations one at a time for as long as the app runs."""
+    global _wake
+    _wake = asyncio.Event()
     await recover()
     while True:
         try:
@@ -244,15 +246,30 @@ SEGMENTS_WITH_SPEAKERS = (
 
 # --- API -------------------------------------------------------------------------------------------
 
-async def speakers_payload(conn, meeting_id) -> list[dict]:
+async def stored_turns(conn, meeting_id) -> list[Turn]:
+    """The turns of the last finished diarization (kept while a new one is queued or running)."""
+    row = await (await conn.execute("SELECT turns FROM diarizations WHERE meeting_id = %s", (meeting_id,))).fetchone()
+    return [Turn(*t) for t in row["turns"]] if row else []
+
+
+def timeline_turns(turns: list[Turn]) -> list[list]:
+    """Turns for the page's timeline: [start_ms, end_ms, label, text], Chinese in Traditional script."""
+    return [[t.start_ms, t.end_ms, t.label, TO_TRADITIONAL.convert(t.text)] for t in turns]
+
+
+async def speakers_payload(conn, meeting_id, turns: list[Turn] | None = None) -> list[dict]:
+    turns = await stored_turns(conn, meeting_id) if turns is None else turns
+    talk: dict[int, int] = {}
+    for t in turns:
+        talk[t.label] = talk.get(t.label, 0) + t.end_ms - t.start_ms
     rows = await (await conn.execute(
-        f"SELECT s.label, s.name, s.username, {SHOWN} AS shown, "
+        f"SELECT s.label, s.name, s.username, s.note, {SHOWN} AS shown, "
         "count(g.seq) AS segments, coalesce(sum(g.end_ms - g.start_ms), 0) AS ms FROM meeting_speakers s "
         "LEFT JOIN users u ON u.username = s.username "
         "LEFT JOIN segments g ON g.meeting_id = s.meeting_id AND g.speaker = s.label "
-        "WHERE s.meeting_id = %s GROUP BY s.label, s.name, s.username, u.display_name ORDER BY s.label", (meeting_id,))).fetchall()
-    return [{"label": r["label"], "name": r["name"], "username": r["username"], "shown": r["shown"],
-             "segments": r["segments"], "ms": int(r["ms"])} for r in rows]
+        "WHERE s.meeting_id = %s GROUP BY s.label, s.name, s.username, s.note, u.display_name ORDER BY s.label", (meeting_id,))).fetchall()
+    return [{"label": r["label"], "name": r["name"], "username": r["username"], "shown": r["shown"], "note": r["note"],
+             "segments": r["segments"], "ms": int(r["ms"]), "turnMs": talk.get(r["label"], 0)} for r in rows]
 
 
 @router.get("/api/meetings/{meeting_id}/speakers")
@@ -260,7 +277,8 @@ async def get_speakers(meeting_id: str, user: auth.CurrentUser):
     async with db.connect() as conn:
         meeting = await team_access.require_member(conn, user, meeting_id)
         job = await (await conn.execute("SELECT * FROM diarizations WHERE meeting_id = %s", (meeting["id"],))).fetchone()
-        speakers = await speakers_payload(conn, meeting["id"])
+        turns = [Turn(*t) for t in job["turns"]] if job else []
+        speakers = await speakers_payload(conn, meeting["id"], turns)
         members = await (await conn.execute(
             "SELECT m.username, coalesce(nullif(u.display_name, ''), m.username) AS display_name FROM team_members m "
             "LEFT JOIN users u USING (username) WHERE m.team_id = %s ORDER BY m.username", (meeting["team_id"],))).fetchall()
@@ -268,6 +286,7 @@ async def get_speakers(meeting_id: str, user: auth.CurrentUser):
     return {"configured": configured(), "status": job["status"] if job else "none", "message": job["message"] if job else "",
             "queuedAt": stamp(job and job["queued_at"]), "startedAt": stamp(job and job["started_at"]),
             "finishedAt": stamp(job and job["finished_at"]), "speakers": speakers,
+            "turns": timeline_turns(turns), "durationMs": await asyncio.to_thread(team_access.recorded_ms, meeting, False),
             "members": [{"username": m["username"], "displayName": m["display_name"]} for m in members]}
 
 
@@ -290,19 +309,20 @@ async def run(meeting_id: str, user: auth.CurrentUser):
 class SpeakerIn(BaseModel):
     name: str = Field(default="", max_length=MAX_NAME)
     username: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=MAX_NAME)   # role, e.g. 主持人; None leaves it as it is
 
 
 @router.put("/api/meetings/{meeting_id}/speakers/{label}")
 async def name_speaker(meeting_id: str, label: int, body: SpeakerIn, user: auth.CurrentUser):
-    """Name a speaker as a team member (username) or with free text (name); both empty clears the name."""
+    """Name a speaker as a team member (username) or with free text (name); both empty clears the name. note: its role."""
     async with db.connect() as conn:
         meeting = await team_access.require_member(conn, user, meeting_id)
         username = (body.username or "").strip().lower() or None
         if username and not await team_access.is_member(conn, username, meeting["team_id"]):
             raise HTTPException(status_code=422, detail="只能指定為這個團隊的成員")
         updated = await (await conn.execute(
-            "UPDATE meeting_speakers SET name = %s, username = %s WHERE meeting_id = %s AND label = %s RETURNING label",
-            ("" if username else body.name.strip(), username, meeting["id"], label))).fetchone()
+            "UPDATE meeting_speakers SET name = %s, username = %s, note = coalesce(%s, note) WHERE meeting_id = %s AND label = %s RETURNING label",
+            ("" if username else body.name.strip(), username, None if body.note is None else body.note.strip(), meeting["id"], label))).fetchone()
         if not updated:
             raise HTTPException(status_code=404, detail="沒有這位說話者")
         return next(s for s in await speakers_payload(conn, meeting["id"]) if s["label"] == label)
