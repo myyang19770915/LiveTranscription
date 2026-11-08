@@ -17,6 +17,7 @@ body[data-size="4"] { font-size: 48px; }
 .sub-source, .sub-text, .sub-draft { margin: 0 16px; line-height: 1.35; overflow-wrap: anywhere; }
 .sub-source { margin-top: 8px; color: var(--muted); font-size: .5em; }
 .sub-text { margin-top: 8px; font-size: 1em; font-weight: 600; }
-.sub-draft { margin: 4px 16px 8px; color: var(--muted); font-size: .85em; }   /* the draft: not final yet */
+.sub-draft { margin: 4px 16px 8px; color: var(--sub-now); font-size: .85em; }   /* the draft: not final yet */
+.sub-now { color: var(--sub-now); }   /* the speech being translated now: same colour as its draft */
 .sub-empty { margin: auto; color: var(--faint); font-size: 16px; }
 [hidden] { display: none !important; }

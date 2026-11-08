@@ -72,6 +72,9 @@ try {
     const example = await popup.evaluate(() => { const t = document.querySelector('.sub-text'), d = document.querySelector('.sub-draft');
       return {text: t.textContent, draft: d.textContent, draftShown: !!d.offsetParent, distinct: getComputedStyle(d).color !== getComputedStyle(t).color || getComputedStyle(d).fontSize !== getComputedStyle(t).fontSize}; });
     check('the draft shows in its own style', example.text === '大家好。' && example.draft === '今天先' && example.draftShown && example.distinct, example);
+    await page.evaluate(() => Subtitles.update({done: '第一句。', pending: '第二句還在講', translation: 'First.', draft: 'Second being'}));
+    const pipColours = await popup.evaluate(() => { const c = s => getComputedStyle(document.querySelector(s)).color; return {now: c('.sub-now'), draft: c('.sub-draft'), text: c('.sub-text'), nowText: document.querySelector('.sub-now').textContent}; });
+    check('the floating window colours the current speech like its draft', pipColours.now === pipColours.draft && pipColours.now !== pipColours.text && pipColours.nowText === '第二句還在講', pipColours);
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('subtitles') || '{}'));
     check('both settings are remembered', saved.source === true && saved.size === 3, saved);
     await popup.close(); await page.waitForTimeout(300);
@@ -107,7 +110,7 @@ try {
 
   // 畫面＋字幕 with a shared picture: saved settings (the spec's example rows), the overlay, its opacity, dragging, Esc,
   // and the share ending in the browser. Settings are read when the page loads, so each row needs a reload.
-  await page.evaluate(() => localStorage.setItem('overlay', JSON.stringify({opacity: 30, x: 50, y: 12})));
+  await page.evaluate(() => localStorage.setItem('overlay', JSON.stringify({opacity: 30, x: 50, y: 12, source: false})));
   await page.reload(); await page.evaluate(() => window.accountReady);
   await page.selectOption('#audioSource', 'system');
   await page.click('#start'); await page.waitForFunction(() => document.querySelector('#status span').textContent === '即時翻譯中', null, {timeout: 15000});
@@ -122,12 +125,27 @@ try {
     return {bg: st.backgroundColor, alpha: st.getPropertyValue('--ov-alpha').trim(), cx: (r.left + r.width / 2 - v.left) / v.width * 100, cy: (r.top + r.height / 2 - v.top) / v.height * 100, top: r.top, color: getComputedStyle(document.querySelector('#screenView .ov-text')).color}; });
   const seeded = await boxState();
   check('saved settings apply: rgba(0,0,0,.3) at 50% across, 12% down', seeded.bg === 'rgba(0, 0, 0, 0.3)' && Math.abs(seeded.cx - 50) < 1 && Math.abs(seeded.cy - 12) < 2, seeded);
+  check('a saved source:false keeps 原文 hidden after the reload', (await page.getAttribute('#screenView .ov-toggle-source', 'aria-pressed')) === 'false' && await page.evaluate(() => document.querySelector('#screenView .ov-source').hidden));
+  await page.click('#screenView .ov-toggle-source');   // on for the checks below
+  // Long content stays subtitle-sized: each part at most two of its lines, the current speech and the draft (newest) visible, the box under half the window.
+  await page.evaluate(() => Overlay.update({done: '這是一段很長的中文原文，用來確認原文那一行不會把字幕框撐高。', pending: '現在正在講的這一句也很長，長到會換行，最新的字必須看得到才對。', translation: Array.from({length: 8}, (_, i) => `Sentence number ${i + 1} of a long English translation that wraps across the whole subtitle box width.`).join(' '), draft: 'and the draft keeps going with even more words that must remain visible at the bottom'}));
+  const sized = await page.evaluate(() => { const b = document.querySelector('#screenView .overlay-subs'), body = b.querySelector('.ov-body'), d = b.querySelector('.ov-draft');
+    const line = parseFloat(getComputedStyle(b).fontSize) * 1.35, br = body.getBoundingClientRect(), dr = d.getBoundingClientRect(), t = b.querySelector('.ov-text').getBoundingClientRect(), src = b.querySelector('.ov-source').getBoundingClientRect(), nr = b.querySelector('.ov-now').getBoundingClientRect();
+    const inside = (r, o) => r.bottom <= o.bottom + 1 && r.bottom > o.top;
+    return {bodyLines: br.height / line, textLines: t.height / line, boxRatio: b.getBoundingClientRect().height / innerHeight, draftVisible: inside(dr, br), nowVisible: inside(nr, src) && inside(src, br)}; });
+  check('long content: translation at most two lines, body under five, the current speech and the draft visible, the box under half the window', sized.textLines <= 2.05 && sized.bodyLines <= 5.2 && sized.boxRatio <= 0.5 && sized.draftVisible && sized.nowVisible, sized);
+  await page.evaluate(() => Overlay.update({done: '第一句。', pending: '第二句還在講', translation: 'First.', draft: 'Second being'}));
+  const colours = await page.evaluate(() => { const c = s => getComputedStyle(document.querySelector('#screenView ' + s)).color; return {now: c('.ov-now'), draft: c('.ov-draft'), text: c('.ov-text'), done: c('.ov-done'), nowText: document.querySelector('#screenView .ov-now').textContent}; });
+  check('the speech being translated and its draft share a colour, distinct from finalized text', colours.now === colours.draft && colours.now !== colours.text && colours.done === colours.text && colours.nowText === '第二句還在講', colours);
+  await page.evaluate(() => Overlay.update({done: '', pending: '', translation: '', draft: ''}));
   await page.waitForFunction(() => (document.querySelector('#screenView .ov-text').textContent + document.querySelector('#screenView .ov-draft').textContent).trim().length > 0, null, {timeout: 60000}).catch(() => {});
   const ov = await page.evaluate(() => ({text: (document.querySelector('#screenView .ov-text').textContent || document.querySelector('#screenView .ov-draft').textContent).trim(), page: document.getElementById('translation').textContent}));
   check('the overlay shows the page translation', ov.text.length > 0 && ov.page.includes(ov.text.slice(-6)), ov.text.slice(-30));
   await page.evaluate(() => { const s = document.querySelector('#screenView .ov-opacity input'); s.value = '45'; s.dispatchEvent(new Event('input', {bubbles: true})); });
   const slid = await boxState();
   check('the slider changes only the background alpha', slid.alpha === '0.45' && slid.bg === 'rgba(0, 0, 0, 0.45)' && slid.color === 'rgb(255, 255, 255)', slid);
+  await page.click('#screenView .ov-toggle-source');   // off here, and the floating window's own setting is untouched
+  check("turning 原文 off is this view's own setting", (await page.evaluate(() => JSON.parse(localStorage.getItem('overlay')).source)) === false && (await page.evaluate(() => Subtitles.getSettings().source)) === true);
   await page.evaluate(() => { localStorage.setItem('subtitles', JSON.stringify({source: true, size: 1})); });   // A− at the smallest size stays there
   await page.evaluate(() => Subtitles.setSettings({size: 1})); await page.click('#screenView .ov-smaller');
   check('A− at the smallest size keeps size 1', (await page.evaluate(() => Subtitles.getSettings().size)) === 1 && (await page.getAttribute('#screenView .overlay-subs', 'data-size')) === '1');
@@ -152,7 +170,7 @@ try {
   await page.click('#start'); await page.waitForFunction(() => document.querySelector('#status span').textContent === '即時翻譯中', null, {timeout: 15000});
   await page.click('#overlay');
   const fallback = await boxState();
-  check('an invalid saved value gives rgba(0,0,0,.55) at 50% across, 88% down', fallback.bg === 'rgba(0, 0, 0, 0.55)' && Math.abs(fallback.cx - 50) < 1 && Math.abs(fallback.cy - 88) < 2, fallback);
+  check('an invalid saved value gives rgba(0,0,0,.55) at 50% across, 88% down, 原文 shown by default', fallback.bg === 'rgba(0, 0, 0, 0.55)' && Math.abs(fallback.cx - 50) < 1 && Math.abs(fallback.cy - 88) < 2 && (await page.getAttribute('#screenView .ov-toggle-source', 'aria-pressed')) === 'true', fallback);
   await page.evaluate(() => document.getElementById('start').click());   // the overlay covers the page: stop from behind it
   await page.waitForFunction(() => /^(翻譯已結束|系統待機)/.test(document.querySelector('#status span').textContent), null, {timeout: 30000});   // 系統待機 when nothing was said yet
   check('ending the session closes the overlay and disables the button', await page.evaluate(() => document.getElementById('screenView').hidden) && await page.isDisabled('#overlay'));

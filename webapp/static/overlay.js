@@ -1,16 +1,16 @@
 // 畫面＋字幕 (screen-subtitles): the shared tab's picture shown full-window on this page with a translucent subtitle box
 // over it. Document Picture-in-Picture windows cannot be transparent, so the picture comes here instead: the video
 // track getDisplayMedia already gave us. The box shows what the floating subtitles show (Subtitles.lastSentences and
-// its source/size settings); its own background opacity and position live in localStorage.overlay.
+// its text size); the 原文 toggle (on by default here), background opacity and position live in localStorage.overlay.
 window.Overlay=(()=>{
-  const KEY='overlay',DEFAULTS={opacity:55,x:50,y:88},NO_TRACK='需要分頁／系統聲音來源',READY='把分享的畫面放大顯示，字幕半透明疊在上面';
-  let track=null,latest={source:'',translation:'',draft:''},settings=load(),drag=null;
+  const KEY='overlay',DEFAULTS={opacity:55,x:50,y:88,source:true},NO_TRACK='需要分頁／系統聲音來源',READY='把分享的畫面放大顯示，字幕半透明疊在上面';
+  let track=null,latest={done:'',pending:'',translation:'',draft:''},settings=load(),drag=null;
   const $=id=>document.getElementById(id);
   const view=()=>$('screenView'),box=()=>view()?.querySelector('.overlay-subs'),button=()=>$('overlay');
   function load(){
     try{
       const s=JSON.parse(localStorage.getItem(KEY)||'{}')||{},num=v=>typeof v==='number'&&Number.isFinite(v),pct=(v,d)=>num(v)?Math.min(100,Math.max(0,v)):d;
-      return {opacity:num(s.opacity)?Math.min(100,Math.max(20,Math.round(s.opacity/5)*5)):DEFAULTS.opacity,x:pct(s.x,DEFAULTS.x),y:pct(s.y,DEFAULTS.y)};
+      return {opacity:num(s.opacity)?Math.min(100,Math.max(20,Math.round(s.opacity/5)*5)):DEFAULTS.opacity,x:pct(s.x,DEFAULTS.x),y:pct(s.y,DEFAULTS.y),source:typeof s.source==='boolean'?s.source:DEFAULTS.source};
     }catch{return {...DEFAULTS}}
   }
   function save(){try{localStorage.setItem(KEY,JSON.stringify(settings))}catch{}}
@@ -27,15 +27,17 @@ window.Overlay=(()=>{
   }
   function render(){
     const b=box();if(!b||!isOpen())return;
-    const shared=window.Subtitles?.getSettings?.()||{source:false,size:2};
+    const shared=window.Subtitles?.getSettings?.()||{size:2};
     b.dataset.size=String(shared.size);b.style.setProperty('--ov-alpha',String(settings.opacity/100));
     const source=b.querySelector('.ov-source'),text=b.querySelector('.ov-text'),draft=b.querySelector('.ov-draft');
-    source.textContent=window.Subtitles?.lastSentences(latest.source,1)||'';source.hidden=!shared.source||!source.textContent;
+    source.querySelector('.ov-done').textContent=window.Subtitles?.lastSentences(latest.done,1)||'';source.querySelector('.ov-now').textContent=window.Subtitles?.lastSentences(latest.pending,2)||'';
+    source.hidden=!settings.source||!source.textContent.trim();
     text.textContent=window.Subtitles?.lastSentences(latest.translation,2)||'';
     draft.textContent=latest.draft||'';draft.hidden=!latest.draft;
-    b.querySelector('.ov-toggle-source').setAttribute('aria-pressed',String(shared.source));
+    b.querySelector('.ov-toggle-source').setAttribute('aria-pressed',String(settings.source));
     b.querySelector('.ov-opacity input').value=String(settings.opacity);
     b.querySelector('.ov-empty').hidden=Boolean(text.textContent||draft.textContent);
+    for(const part of [source,text,draft])part.scrollTop=part.scrollHeight;   // the newest words of each part stay in view
     place();
   }
   function open(){
@@ -76,7 +78,7 @@ window.Overlay=(()=>{
     if(!v||!b||!btn)return;
     btn.disabled=true;btn.title=NO_TRACK;
     btn.onclick=()=>{if(isOpen())close();else open()};
-    b.querySelector('.ov-toggle-source').onclick=()=>window.Subtitles?.setSettings({source:!window.Subtitles.getSettings().source});
+    b.querySelector('.ov-toggle-source').onclick=()=>{settings.source=!settings.source;save();render()};   // this view's own toggle
     b.querySelector('.ov-bigger').onclick=()=>window.Subtitles?.setSettings({size:window.Subtitles.getSettings().size+1});   // Subtitles clamps 1–4
     b.querySelector('.ov-smaller').onclick=()=>window.Subtitles?.setSettings({size:window.Subtitles.getSettings().size-1});
     b.querySelector('.ov-opacity input').oninput=event=>{settings.opacity=Number(event.target.value);save();render()};

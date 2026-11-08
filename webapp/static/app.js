@@ -53,11 +53,13 @@ applyTheme(savedTheme,false);
 $('themeToggle').onclick=()=>applyTheme(document.documentElement.dataset.theme==='light'?'dark':'light');
 
 function setStatus(text, kind='idle') { $('status').className = `status ${kind}`; $('status').querySelector('span').textContent = text; $('status').title=text; }
-function render(id, value) { if(id==='transcript'){window.Subtitles?.update({source:value});window.Overlay?.update({source:value})} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72; el.textContent=value; el.classList.toggle('empty', !value); updateCounts(); if(value&&follow) el.scrollTop=el.scrollHeight; }
+function sourceParts(){return {done:transcript.slice(0,translationOffset),pending:transcript.slice(translationOffset)}}   // finalized source / the speech being translated now
+function render(id, value) { if(id==='transcript'){const parts=sourceParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72; el.textContent=value; el.classList.toggle('empty', !value); updateCounts(); if(value&&follow) el.scrollTop=el.scrollHeight; }
 function visibleTranslation(){return translated+(translated&&draftText?'\n':'')+draftText}
 function renderTranslation(){
-  window.Subtitles?.update({translation:translated,draft:draftText});   // the floating subtitles (live-translation)
-  window.Overlay?.update({translation:translated,draft:draftText});   // 畫面＋字幕 (screen-subtitles)
+  const parts={...sourceParts(),translation:translated,draft:draftText};
+  window.Subtitles?.update(parts);   // the floating subtitles (live-translation)
+  window.Overlay?.update(parts);   // 畫面＋字幕 (screen-subtitles)
   const el=$('translation'),wasEmpty=el.classList.contains('empty');
   const follow=wasEmpty||el.scrollHeight-el.scrollTop-el.clientHeight<72;
   if(!translated&&!draftText){

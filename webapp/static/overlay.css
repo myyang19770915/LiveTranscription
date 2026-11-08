@@ -3,7 +3,7 @@
 #screenView { position: fixed; inset: 0; z-index: 60; background: #000; }
 .toast { z-index: 70; }   /* messages stay above the view */
 #screenView video { width: 100%; height: 100%; object-fit: contain; display: block; }
-.overlay-subs { position: absolute; left: 50%; top: 88%; transform: translate(-50%, -50%); width: min(92vw, 1100px); box-sizing: border-box;
+.overlay-subs { position: absolute; left: 50%; top: 88%; transform: translate(-50%, -50%); width: min(92vw, 1100px); max-height: 50vh; box-sizing: border-box;
   padding: 8px 18px 14px; border-radius: 14px; background: rgba(0, 0, 0, var(--ov-alpha, .55)); color: #fff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, .6); cursor: grab; user-select: none; touch-action: none;
   font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif; }
@@ -19,9 +19,16 @@
 .ov-bar button[aria-pressed="true"] { background: var(--accent); border-color: transparent; color: var(--accent-ink, #fff); }
 .ov-opacity { display: flex; align-items: center; gap: 6px; margin-left: auto; color: rgba(255, 255, 255, .85); cursor: default; }
 .ov-opacity input { width: 100px; accent-color: var(--accent); }
-.ov-source, .ov-text, .ov-draft { margin: 0; line-height: 1.35; overflow-wrap: anywhere; }
-.ov-source { margin-top: 4px; font-size: .5em; opacity: .8; }
+/* Subtitle-sized: at most four lines of the translation size, hugging the bottom so the newest words stay in view. */
+/* Subtitle-sized: each part keeps at most two of its own lines, hugging its bottom so the newest words stay in view;
+   the source line and the draft are never pushed out by a long finalized translation. */
+.overlay-subs { --sub-now: #ffd86b; }   /* the box is black in both themes */
+.ov-body { overflow: hidden; }
+.ov-source, .ov-text, .ov-draft { margin: 0; line-height: 1.35; overflow-wrap: anywhere; max-height: calc(1.35em * 2); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+.ov-source { margin-top: 4px; font-size: .5em; display: block; }
+.ov-done { opacity: .75; }
 .ov-text { margin-top: 4px; font-weight: 600; }
-.ov-draft { margin-top: 2px; font-size: .85em; opacity: .72; }   /* the draft: not final yet */
+.ov-draft { margin-top: 2px; font-size: .85em; color: var(--sub-now); }   /* the draft: not final yet */
+.ov-now { color: var(--sub-now); }   /* the speech being translated now: same colour as its draft */
 .ov-empty { margin: 6px 0 0; font-size: 16px; opacity: .7; }
 #screenView [hidden] { display: none !important; }

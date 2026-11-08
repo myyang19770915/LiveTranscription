@@ -1,6 +1,7 @@
 /* Colour tokens for every page, one set per theme (brand-palette-blue: lake blue + warm orange; contrast checked: fields 3:1+,
    accent against its ink 4.5:1+). The meeting page aliases its older names (--bg, --surface, --line, --mint…) to these in styles.css. */
 :root {
+  --sub-now: #ffd86b;            /* subtitles: the speech being translated now and its draft (dark panels) */
   color-scheme: dark;
   --page: #0d141c;
   --glow: #163152;
@@ -26,6 +27,7 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
+  --sub-now: #8a5a00;            /* the same role on the light panel: 5.9:1 on #f3f6fa */
   --page: #f3f6fa;
   --glow: #dfeafa;
   --intro: linear-gradient(160deg, #e4eefb 0%, #f3f6fa 70%);

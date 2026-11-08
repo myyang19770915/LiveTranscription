@@ -57,7 +57,7 @@ tests:
 ---
 ### Requirement: Floating subtitles window
 
-The live page SHALL offer 浮動字幕: a separate always-on-top window (Document Picture-in-Picture) that the user can move and resize, showing the last two finalized translated sentences and the current draft translation in a distinct style, kept in step with the page's translation. The window SHALL let the user show or hide the last source sentence and choose one of four text sizes; both choices SHALL be remembered in the browser. Closing the window SHALL return the button to its closed state. In a browser without Document Picture-in-Picture the button SHALL be disabled with the reason 需要桌面版 Chrome 或 Edge 116 以上.
+The live page SHALL offer 浮動字幕: a separate always-on-top window (Document Picture-in-Picture) that the user can move and resize, showing the last two finalized translated sentences and the current draft translation in a distinct style, kept in step with the page's translation. The window SHALL let the user show or hide a source line (the last finalized source sentence followed by the source text still being translated) and choose one of four text sizes; both choices SHALL be remembered in the browser. The source text still being translated and the draft translation SHALL share one highlight colour, distinct from finalized text. Closing the window SHALL return the button to its closed state. In a browser without Document Picture-in-Picture the button SHALL be disabled with the reason 需要桌面版 Chrome 或 Edge 116 以上.
 
 #### Scenario: Subtitles follow the translation
 
@@ -67,7 +67,12 @@ The live page SHALL offer 浮動字幕: a separate always-on-top window (Documen
 #### Scenario: Showing the source
 
 - **WHEN** the user turns on 原文 in the subtitles window and presses A+
-- **THEN** the last source sentence appears above the translation, the text grows one size, and both settings are kept after the page reloads
+- **THEN** the source line appears above the translation, the text grows one size, and both settings are kept after the page reloads
+
+#### Scenario: Current speech and its draft share a colour
+
+- **WHEN** the source still being translated is 第二句還在講 and the draft is Second being
+- **THEN** both are shown in the same highlight colour, distinct from the finalized translation
 
 ##### Example: Last two sentences
 
@@ -76,36 +81,38 @@ The live page SHALL offer 浮動字幕: a separate always-on-top window (Documen
 | 大家好。今天先看進度。合約下週寄出。 | （無） | 今天先看進度。合約下週寄出。 |
 | 大家好。 | 今天先 | 大家好。＋暫譯「今天先」 |
 
+
 <!-- @trace
-source: live-translation
+source: overlay-compact
 updated: 2026-11-08
 code:
+  - README.md
   - 20261029_185428.mp4
-  - bench/README.md
+  - webapp/static/overlay.css
+  - webapp/static/subtitles.js
+  - bench/translate_e2e.mjs
+  - meeting-2026-11-01T00-16-53.txt
+  - webapp/static/subtitles.css
   - webapp/static/app.js
   - webapp/static/index.html
-  - webapp/static/mobile.css
-  - webapp/static/refine.css
-  - webapp/static/subtitles.js
-  - webapp/static/subtitles.css
-  - bench/translate_e2e.mjs
-  - webapp/server.py
-  - meeting-2026-11-01T00-16-53.txt
-  - README.md
-  - docs/roadmap.md
-tests:
-  - webapp/test_server.py
+  - webapp/static/overlay.js
+  - webapp/static/tokens.css
 -->
 
 ---
 ### Requirement: Screen view with subtitles
 
-When the session's audio source includes the shared tab or screen (分頁／系統聲音 or 麥克風＋系統聲音), the live page SHALL offer 畫面＋字幕: an in-page full-window view showing the shared picture with a subtitle box laid over it. The box SHALL show the same content as the floating subtitles window (the last two finalized translated sentences, the draft in a distinct style, optionally the last source sentence) and SHALL share its source toggle and text size setting with that window. The box SHALL have a background opacity slider from 20% to 100% (default 55%) that changes only the background, SHALL be draggable to any position, and the opacity and position SHALL be remembered in the browser. The view SHALL offer full screen and SHALL close on its close button or Esc. The shared picture SHALL be shown locally only: never recorded or sent to the server. Without a shared picture (microphone-only source, or no session) the button SHALL be disabled with the reason 需要分頁／系統聲音來源, and ending the session SHALL close the view.
+When the session's audio source includes the shared tab or screen (分頁／系統聲音 or 麥克風＋系統聲音), the live page SHALL offer 畫面＋字幕: an in-page full-window view showing the shared picture with a subtitle box laid over it. The box SHALL show the last two finalized translated sentences and the draft in a distinct style, and, when its 原文 toggle is on (on by default, remembered in the browser for this view), a source line with the last finalized source sentence followed by the source text still being translated. The source text still being translated and the draft translation SHALL share one highlight colour, distinct from the colour of finalized source and translation, so the reader can match what is being said to its translation. Each part of the box (source line, finalized translation, draft) SHALL be at most two lines of its own text size and the whole box at most half the window height; when a part is longer, its newest text SHALL stay visible and the oldest be cut, so a long finalized translation never hides the source line or the draft. The box SHALL share its text size with the floating subtitles window, SHALL have a background opacity slider from 20% to 100% (default 55%) that changes only the background, SHALL be draggable to any position, and the opacity, position and 原文 toggle SHALL be remembered in the browser. The view SHALL offer full screen and SHALL close on its close button or Esc. The shared picture SHALL be shown locally only: never recorded or sent to the server. Without a shared picture (microphone-only source, or no session) the button SHALL be disabled with the reason 需要分頁／系統聲音來源, and ending the session SHALL close the view.
 
 #### Scenario: Subtitles over the shared tab
 
 - **WHEN** a user starts with 分頁／系統聲音, presses 畫面＋字幕, sets the opacity slider to 30 and drags the subtitle box to the top of the picture
-- **THEN** the shared picture fills the window with the subtitle box over it showing the page's latest translation, the box background is 30% opaque while the text is unchanged, and after closing and reopening the view the box is at the top with the same opacity
+- **THEN** the shared picture fills the window with the subtitle box over it showing the last source sentence above the page's latest translation, the box background is 30% opaque while the text is unchanged, and after closing and reopening the view the box is at the top with the same opacity
+
+#### Scenario: Long translation stays subtitle-sized
+
+- **WHEN** the two latest translated sentences and the draft together take more than four lines
+- **THEN** the finalized translation shows at most two lines with its oldest words cut off, the source line and the draft stay visible, and the box is no taller than half the window
 
 #### Scenario: Microphone-only session
 
@@ -117,26 +124,31 @@ When the session's audio source includes the shared tab or screen (分頁／系�
 - **WHEN** the view is open and the user stops the session or the share is ended in the browser
 - **THEN** the view closes and the button is disabled again
 
+#### Scenario: Current speech and its draft share a colour
+
+- **WHEN** the finalized source is 第一句。, the source still being translated is 第二句還在講, the translation is First. and the draft is Second being
+- **THEN** 第二句還在講 and Second being are shown in the same highlight colour, and 第一句。 and First. in the normal colour
+
 ##### Example: Saved overlay settings
 
-| localStorage.overlay | Box background | Box centre |
-| --- | --- | --- |
-| `{"opacity":30,"x":50,"y":12}` | rgba(0,0,0,.3) | 50% across, 12% down |
-| missing or invalid | rgba(0,0,0,.55) | 50% across, 88% down |
+| localStorage.overlay | Box background | Box centre | 原文 |
+| --- | --- | --- | --- |
+| `{"opacity":30,"x":50,"y":12,"source":false}` | rgba(0,0,0,.3) | 50% across, 12% down | hidden |
+| missing or invalid | rgba(0,0,0,.55) | 50% across, 88% down | shown |
 
 <!-- @trace
-source: screen-subtitles
+source: overlay-compact
 updated: 2026-11-08
 code:
-  - webapp/static/mobile.css
-  - meeting-2026-11-01T00-16-53.txt
-  - webapp/static/subtitles.js
-  - webapp/static/overlay.css
-  - 20261029_185428.mp4
   - README.md
+  - 20261029_185428.mp4
+  - webapp/static/overlay.css
+  - webapp/static/subtitles.js
+  - bench/translate_e2e.mjs
+  - meeting-2026-11-01T00-16-53.txt
+  - webapp/static/subtitles.css
+  - webapp/static/app.js
   - webapp/static/index.html
   - webapp/static/overlay.js
-  - webapp/static/app.js
-  - bench/README.md
-  - bench/translate_e2e.mjs
+  - webapp/static/tokens.css
 -->
