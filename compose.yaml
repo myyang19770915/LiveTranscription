@@ -59,6 +59,45 @@ services:
       retries: 80
       start_period: 15m
 
+  # Embeddings for 問答 (meeting-qa): llama.cpp on CPU, OpenAI-compatible /v1/embeddings. The app works without it
+  # (問答 falls back to keyword retrieval). bge-m3 was chosen with bench/qa_eval.py (see the meeting-qa design); the first
+  # start downloads it.
+  embed:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    command:
+      - --hf-repo
+      - ${EMBED_MODEL_REPO:-ggml-org/bge-m3-Q8_0-GGUF}
+      - --hf-file
+      - ${EMBED_MODEL_FILE:-bge-m3-q8_0.gguf}
+      - --embeddings
+      # The pooling the model was trained with: bge-m3 cls, Qwen3-Embedding last, embeddinggemma mean.
+      - --pooling
+      - ${EMBED_POOLING:-cls}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5001"
+      - --ctx-size
+      - "8192"
+      - --batch-size
+      - "2048"
+      - --ubatch-size
+      - "2048"
+      - --parallel
+      - "4"
+      - --threads
+      - ${EMBED_THREADS:-8}
+      - --no-webui
+    volumes:
+      - embed-model-cache:/root/.cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5001/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 10m
+
   app:
     build: ./webapp
     volumes:
@@ -97,6 +136,9 @@ services:
       MINUTES_URL: ${MINUTES_URL:-}
       MINUTES_MODEL: ${MINUTES_MODEL:-}
       MINUTES_KEY: ${MINUTES_KEY:-}
+      # 問答 (meeting-qa): the embed service above; the file name picks the model's query/document prefixes.
+      EMBED_URL: ${EMBED_URL:-http://embed:5001}
+      EMBED_MODEL_FILE: ${EMBED_MODEL_FILE:-bge-m3-q8_0.gguf}
     ports:
       - "${APP_PORT:-18082}:8080"
     depends_on:
@@ -110,7 +152,9 @@ services:
 
   # Meetings, accounts and teams. Reachable only inside the Compose network.
   db:
-    image: postgres:17
+    # PostgreSQL 17 with pgvector (meeting-qa), on the same Debian release as the former postgres:17 image so the
+    # data directory and its collations carry over unchanged.
+    image: pgvector/pgvector:0.8.7-pg17-trixie
     environment:
       POSTGRES_USER: yuqiao
       POSTGRES_DB: yuqiao
@@ -141,4 +185,5 @@ services:
 volumes:
   model-cache:
   translation-model-cache:
+  embed-model-cache:
   meeting-db:

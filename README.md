@@ -18,6 +18,7 @@
 - 桌面雙欄；手機採逐字稿／翻譯分頁、固定會議操作列和設定視窗，支援直向與橫向；可提供姓名、品牌或專有名詞作為會議情境。
 - 右上角可切換明亮／暗色主題，選擇會保存在目前瀏覽器。
 - 本機 Docker 部署，不依賴雲端 ASR 或翻譯 API。
+- 會後：逐字稿校對、AI 會議紀要與待辦追蹤、全文搜尋，以及用一句話問會議內容的「問答」（每句附出處）。
 
 ## 技術與服務架構
 
@@ -41,15 +42,21 @@ flowchart LR
     translate[translate<br/>llama.cpp + Gemma 4<br/>GPU 文字翻譯]
     asrCache[(model-cache<br/>ASR 與 VAD 權重)]
     translateCache[(translation-model-cache<br/>GGUF 權重)]
+    db[(db<br/>PostgreSQL 17 + pgvector)]
+    embed[embed<br/>llama.cpp CPU<br/>bge-m3 embedding]
+    embedCache[(embed-model-cache<br/>embedding 權重)]
   end
   browser <-->|HTTP、WebSocket、SSE<br/>localhost:18082| app
   app <-->|內部 WebSocket<br/>asr:8272| asr
   app <-->|內部 HTTP<br/>translate:5000| translate
   asrCache --- asr
   translateCache --- translate
+  app <-->|內部 SQL<br/>db:5432| db
+  app -->|內部 HTTP<br/>embed:5001| embed
+  embedCache --- embed
 ```
 
-Compose 定義 `app`、`asr`、`translate` 三個服務。`asr` 與 `translate` 僅在 Compose 內網提供服務，預設只有 `app` 的主機連接埠 `18082` 對外映射；兩個 named volume 保留下載的權重。`app` 啟動時會等待另兩個服務的健康檢查通過。
+Compose 定義 `app`、`asr`、`translate`、`db`、`embed` 五個服務（另有開發用的 `dev-ldap`）。除了 `app` 的主機連接埠 `18082`，其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`translate`、`db` 的健康檢查通過；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料。
 
 ### Docker image 與模型權重分別下載在哪裡
 
@@ -59,9 +66,11 @@ Docker image 是「執行環境」，模型權重是服務啟動時載入的「�
 | --- | --- | --- | --- |
 | `asr` | [`qwenllm/qwen3-asr:latest`](https://hub.docker.com/r/qwenllm/qwen3-asr)，由 Docker Hub 下載 ASR 執行環境 | 啟動 ASR server 時載入 Hugging Face 上的 `netease-youdao/Confucius4-R2T2`；entrypoint 另以 `hf download` 下載 `FireRedTeam/FireRedVAD` 的 Stream-VAD | [`compose.yaml`](compose.yaml) 的 `asr.image`；[`docker/asr/entrypoint.sh`](docker/asr/entrypoint.sh) |
 | `translate` | [`ghcr.io/ggml-org/llama.cpp:server-cuda`](https://github.com/ggml-org/llama.cpp/pkgs/container/llama.cpp)，由 GitHub Container Registry 下載含 CUDA 的 llama.cpp server | llama.cpp 啟動時依 `--hf-repo`、`--hf-file` 從 Hugging Face 下載 Gemma GGUF | [`compose.yaml`](compose.yaml) 的 `translate.image` 與 `command` |
+| `db` | [`pgvector/pgvector:0.8.7-pg17-trixie`](https://hub.docker.com/r/pgvector/pgvector)：PostgreSQL 17 加上 pgvector，與原本的 `postgres:17` 同為 Debian trixie，既有資料目錄可直接沿用 | 不需要模型；資料在 `meeting-db` volume | [`compose.yaml`](compose.yaml) 的 `db` |
+| `embed` | [`ghcr.io/ggml-org/llama.cpp:server`](https://github.com/ggml-org/llama.cpp/pkgs/container/llama.cpp)（CPU 版） | 依 `EMBED_MODEL_REPO`、`EMBED_MODEL_FILE` 從 Hugging Face 下載 embedding GGUF（預設 `ggml-org/bge-m3-Q8_0-GGUF`，約 600 MB） | [`compose.yaml`](compose.yaml) 的 `embed` |
 | `app` | 不使用預先發佈的專案 image；Compose 由 `build: ./webapp` 本機建置。[`webapp/Dockerfile`](webapp/Dockerfile) 以 `python:3.12-slim` 為基底，安裝 `webapp/requirements.txt` | 不下載或保存 ASR／翻譯模型；執行 FastAPI 與靜態 Web UI | [`compose.yaml`](compose.yaml) 的 `app.build`、[`webapp/Dockerfile`](webapp/Dockerfile) |
 
-模型快取位置也分開：ASR 與 VAD 共用 `model-cache`，掛載到 ASR 容器的 `/models`，Hugging Face 快取目錄是 `/models/huggingface`；Gemma 權重使用 `translation-model-cache`，掛載至翻譯容器的 `/root/.cache`。因此一般執行 `docker compose down` 後仍會保留模型；只有 `docker compose down -v` 才會刪除這些 named volumes。
+模型快取位置也分開：ASR 與 VAD 共用 `model-cache`，掛載到 ASR 容器的 `/models`，Hugging Face 快取目錄是 `/models/huggingface`；Gemma 權重使用 `translation-model-cache`，掛載至翻譯容器的 `/root/.cache`；embedding 權重使用 `embed-model-cache`。因此一般執行 `docker compose down` 後仍會保留模型；只有 `docker compose down -v` 才會刪除這些 named volumes。
 
 啟動順序由 Compose 管理：`docker compose up --build -d` 先準備／下載 images，啟動 `asr` 與 `translate`，兩者健康檢查成功後才啟動 `app`。ASR、VAD、Gemma 權重會在各自容器第一次啟動時下載或載入，日後重啟會使用快取。可在 [`compose.yaml`](compose.yaml) 查看 image、GPU、命令、環境變數、volume 與健康檢查的完整設定。
 
@@ -289,7 +298,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - **會議主題**：開始會議前可在「團隊」旁填主題（選填，最多 100 字）；沒填時顯示「MM/DD HH:mm 的會議」。會後在校對頁按「修改主題」可改或清空，團隊成員都能改。
 - **找會議**：列表可依團隊、建立者、開始日期區間篩選，並以關鍵字搜尋主題（不分大小寫；逐字稿內容不在搜尋範圍內）。結果依「今天」「本週」（週一起算）「更早」分組；篩選條件會寫進網址，重新整理或分享連結都會保留。
 
-- **對照錄音**：轉錄、譯文、錄音三者用同一條時間軸。伺服器把送去辨識的同一份音訊存成 `audio.wav`，每個辨識事件附上當下的音訊位置（`audioMs`），每段因此知道自己在錄音的哪裡。點一段就播放那段；文字比聲音晚到，所以播放會往前多放 3 秒、往後 0.5 秒（`bench/lagcheck.py` 實測中日文落後中位 0.5–3.8 秒），還可以再「往前 2 秒」「往後 2 秒」。播放鍵可以暫停、再按「繼續」從原處接著聽，旁邊顯示目前位置；空白鍵也能播放／暫停。紀要頁證據側欄的 ▶ 一樣可以暫停與繼續。
+- **對照錄音**：轉錄、譯文、錄音三者用同一條時間軸。伺服器把送去辨識的同一份音訊存成 `audio.wav`，每個辨識事件附上當下的音訊位置（`audioMs`），每段因此知道自己在錄音的哪裡。點一段就播放那段；文字比聲音晚到，所以播放會往前多放 3 秒、往後 0.5 秒（`bench/lagcheck.py` 實測中日文落後中位 0.5–3.8 秒），還可以再「往前 2 秒」「往後 2 秒」。播放鍵可以暫停、再按「繼續」從原處接著聽，旁邊顯示目前位置；空白鍵也能播放／暫停。紀要頁證據側欄與問答頁出處側欄的 ▶ 一樣可以暫停與繼續，側欄有焦點時空白鍵也可以。
 - **修正轉錄**：按「修改原文」，改完「儲存並重譯」。重譯和會議中的精修用同一份程式（`webapp/static/translation-context.js`）：前兩段原文與譯文作上下文、附後一段開頭、會議詞彙、自動學習詞彙，可勾選雲端精修，並套用相同的防重複檢查。完成後可「一併重譯下一段」（它的前文變了）。
 - **確認正確**：沒有錯的段落可直接確認，也會留下紀錄。
 - **修改紀錄**：每次修改、重譯、確認都新增一筆（誰、何時、前後原文與譯文），不會覆蓋；ASR 原文永遠保留。「歷程」可查看。
@@ -339,6 +348,18 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - 搜尋中：送出或切換篩選後，舊結果會變淡且不能點，結果區標記為忙碌中（`aria-busy`）；超過 0.2 秒還沒回來時，摘要顯示「正在搜尋「…」…」（螢幕閱讀器會念出）。連續送出時只顯示最後一次的結果。
 - 結果依會議分組，新的在前，符合的字會標示出來：逐字稿結果附時間點，點了直接開到校對頁那一段（可播放）；紀要結果開到紀要頁那一條；看板新增的待辦開到看板。超過 300 筆只列前 300 筆，並提示縮小範圍。
 - 使用 Postgres 的 `pg_trgm` 索引（migration 010）。
+- 標題旁的「全文搜尋｜問答」可切換到[問答](#問答)，輸入的字與篩選會一起帶過去。
+
+## 問答
+
+`/ask`（搜尋頁標題旁切換）可以用一句話問所屬團隊的會議，例如「上次跟客戶談價格的結論是什麼？」。回答只根據會議逐字稿與紀要條目，每句句尾都有 `[n]`。點 `[n]` 或下方的出處，會在右側側欄打開那個出處，不離開問答頁：逐字稿出處顯示那一段與前後各一段，紀要條目顯示內容與它的證據段落；有錄音的會議可以直接按 ▶（或空白鍵）聽、暫停、繼續，需要修改時點「到校對頁修正」。Esc 關閉側欄。要開新頁看整場時，Ctrl／⌘ 點出處即可。找不到依據時會直接說找不到，並提供改用全文搜尋的連結。
+
+- **怎麼找資料（混合檢索）**：同時用關鍵字（問題切成英數詞與中文雙字詞；一筆資料要命中兩個詞，或命中英數詞如人名、料號、版本號，才算數，越少見的詞分數越高）與語意相近程度（embedding 向量的餘弦距離）各找 30 筆，以 RRF 合併後取前 8 筆交給紀要模型（`MINUTES_*`）回答。所以換句話說、英文問中文會議都找得到，人名、料號這類確切字詞也不會漏。範圍、團隊／系列／日期篩選與全文搜尋相同。
+- **出處檢查**：模型引用了不存在的編號會被移除；一個有效出處都沒有的回答一律當作找不到。回答由模型整理，重要決定請點開出處核對原文。
+- **索引**：`embed` 服務（llama.cpp，CPU）在背景把每段逐字稿（本段原文與譯文；不含前後段，評測顯示加了前後段反而讓鄰近段落排到前面）與待確認、已確認的紀要條目轉成向量，存在 `passage_vectors`（migration 011）。校對修改後下一輪（15 秒內）自動重算；換模型時全部重建。索引還沒跑完時，問答頁會顯示進度。
+- **模型**：預設 `bge-m3`（MIT 授權），由 `bench/qa_eval.py` 與 Qwen3-Embedding-0.6B、embeddinggemma-300M 比較後選定：三者在擬真資料上的回答正確率相同。第二輪調整後（只用本段文字、關鍵字門檻），正確出處平均排名指標 MRR 在調整用的 30 題為 0.90、另寫的 22 題驗證題為 0.93；60 題中可回答的 52 題有 50 題引用到正確出處，8 題無解全部回找不到。rerank（Qwen3-Reranker、bge-reranker-v2-m3）實測沒有改善，未採用。細節見 Spectra 變更 meeting-qa 的 design。要換模型時在 `.env` 設定 `EMBED_MODEL_REPO`、`EMBED_MODEL_FILE`、`EMBED_POOLING`，再 `docker compose up -d embed app`。
+- **`embed` 停掉時**：問答只用關鍵字找資料，回答下方會註明，換句話說的問題可能找不到。紀要模型未設定時問答無法使用。
+- 問題與篩選會寫在網址，但打開網址不會自動送出（每次問答都會呼叫模型）。問答內容不會保存。問題與找到的資料會送到紀要模型服務。
 
 ## 成效指標
 
@@ -388,7 +409,11 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `LDAP_CA_FILE` | 空 | ldaps 使用自簽 CA 時，容器內可讀到的 CA 憑證路徑 |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 前面有 HTTPS 反向代理時，填代理的 IP，app 才會相信它轉來的 `https` |
 | `MEETING_TIMEZONE` | `Asia/Taipei` | 會議列表的日期篩選、紀要的會議日期與 ASR 微調資料匯出，都以這個時區計算 |
-| `MINUTES_URL` / `_MODEL` / `_KEY` | 空（沿用 `TRANSLATE_REFINE_*`） | 產生會議紀要的模型（OpenAI 相容，整場一次送出，需足夠的 context） |
+| `MINUTES_URL` / `_MODEL` / `_KEY` | 空（沿用 `TRANSLATE_REFINE_*`） | 產生會議紀要的模型（OpenAI 相容，整場一次送出，需足夠的 context）；問答也用它回答 |
+| `EMBED_MODEL_REPO` / `EMBED_MODEL_FILE` | `ggml-org/bge-m3-Q8_0-GGUF` / `bge-m3-q8_0.gguf` | 問答的 embedding 模型（`embed` 服務下載）；檔名也決定查詢與文件的前綴，換模型後背景重建索引 |
+| `EMBED_POOLING` | `cls` | 模型訓練時用的 pooling：bge-m3 `cls`、Qwen3-Embedding `last`、embeddinggemma `mean` |
+| `EMBED_THREADS` | `8` | `embed` 使用的 CPU 執行緒數 |
+| `EMBED_URL` | `http://embed:5001` | app 連到 embedding 服務的位址；設為空字串則問答只用關鍵字 |
 | `SESSION_COOKIE_SECURE` | 空 | 以 HTTPS 對外提供時設 `1`，登入 cookie 一律加上 Secure，不會經由明文 HTTP 送出 |
 
 **辨識引擎**（頁面選單，預設本機）：
@@ -424,6 +449,9 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `GET /actions` | 待辦看板 |
 | `POST /api/actions`、`PATCH`／`DELETE /api/actions/{id}`、`POST /api/actions/{id}/status`、`GET /api/actions/{id}/updates` | 看板新增待辦、修改內容／負責人／到期日、刪除（限看板新增的）、改狀態、歷程；權限依待辦的團隊 |
 | `GET /api/search?q=&team=&series=&from=&to=&kind=` | 全文搜尋（`kind`：`all`、`segments`、`items`、`meetings`），依會議分組，最多 300 筆 |
+| `GET /ask` | 問答頁 |
+| `POST /api/ask` | 問答：`{"question", "team", "series", "from", "to"}`；回 `answer`（含 `[n]`）、`notFound`、`degraded`（只用關鍵字）與被引用的 `sources`；問題 1–300 字（否則 422），紀要模型未設定 503 |
+| `GET /api/ask/status?team=` | 問答索引進度（`indexed`／`total`）、模型、embedding 服務是否可用 |
 | `GET /api/metrics?team=&days=` | 成效指標（`days`：30、90、365；`team` 省略為所屬全部團隊） |
 | `GET /api/actions?team=&owner=&status=&due=&q=` | 所屬團隊已確認的待辦（`owner`：帳號、`me`、`none`；`status`：逗號分隔的 `todo,doing,done,cancelled`，預設前三種；`due`：`overdue`、`week`、`none`），附團隊與成員清單 |
 | `POST /api/meetings/{id}/minutes/items/{itemId}/status`、`GET …/updates` | 改待辦狀態（帶 `version`；取消需 `note`）、讀狀態歷程 |

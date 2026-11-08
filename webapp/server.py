@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -25,6 +26,7 @@ import minutes
 import review
 import series
 import metrics
+import qa
 import search
 import team_access
 from translation_quality import (TERMS_SCHEMA, apply_aliases, asr_context, consolidate_terms, glossary_entries, learned_replacements,
@@ -99,8 +101,14 @@ async def lifespan(_app: FastAPI):
     # An unreachable database or a failed migration stops the app instead of failing on first sign-in.
     await db.check()
     await minutes.recover_interrupted()
+    # 問答 index (meeting-qa) in the background; without EMBED_URL 問答 uses keyword retrieval only.
+    indexing = asyncio.create_task(qa.indexer()) if qa.EMBED_URL else None
     logger.info("system administrators (ADMIN_USERS): %s", ", ".join(sorted(auth.ADMIN_USERS)) or "none")
     yield
+    if indexing:
+        indexing.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await indexing
 
 
 app = FastAPI(title="語橋 Live — 即時會議翻譯", lifespan=lifespan, dependencies=[Depends(auth.require_signed_in)])
@@ -113,6 +121,7 @@ app.include_router(minutes.router)
 app.include_router(series.router)
 app.include_router(metrics.router)
 app.include_router(search.router)
+app.include_router(qa.router)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 

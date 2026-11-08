@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>搜尋 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261107d"><link rel="stylesheet" href="/assets/search.css?v=20261107b"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>搜尋 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261105a"><link rel="stylesheet" href="/assets/admin.css?v=20261107d"><link rel="stylesheet" href="/assets/search.css?v=20261107c"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=1" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>搜尋</small></span></a>
@@ -12,7 +12,8 @@
 
 <main class="page search-page">
   <p class="eyebrow">SEARCH</p>
-  <h1>搜尋</h1>
+  <div class="search-title"><h1>搜尋</h1>
+    <nav class="mode-switch" aria-label="查詢方式"><a href="/search" aria-current="page">全文搜尋</a><a id="toAsk" href="/ask">問答</a></nav></div>
   <form id="searchForm" class="search-form" role="search">
     <label class="search-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
       <input id="q" type="search" maxlength="100" placeholder="搜尋逐字稿、紀要與會議主題" aria-label="搜尋逐字稿、紀要與會議主題" autocomplete="off"></label>
@@ -37,7 +38,7 @@
   <section id="results" class="results" aria-label="搜尋結果"></section>
 </main>
 
-<script src="/assets/account.js?v=20261107g"></script>
+<script src="/assets/account.js?v=20261107h"></script>
 <script src="/assets/meeting-catalog.js?v=20261105a"></script>
-<script src="/assets/search.js?v=20261107e"></script>
+<script src="/assets/search.js?v=20261107f"></script>
 </body></html>

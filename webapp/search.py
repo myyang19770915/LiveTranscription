@@ -34,6 +34,36 @@ def all_terms(column: str, terms: list[str]) -> str:
     return "(" + " AND ".join(f"{column} ILIKE %(t{n})s ESCAPE '\\'" for n in range(len(terms))) + ")"
 
 
+async def scope(conn, user: auth.User, team: int | None, series: int | None, start: date | None, end: date | None) -> tuple[str, str, dict]:
+    """SQL conditions keeping meetings (m, joined to team_members tm) and minutes items (i, LEFT JOIN m, joined to tm) to the
+    user's teams and the filters, with their parameters; also used by 問答 (qa.py). A team or series the user cannot see: 404.
+    A board item (no meeting) is filtered by its own team, series and creation."""
+    params = {"user": user.username, "tz": team_access.MEETING_TIMEZONE}
+    meeting_where = ["tm.username = %(user)s"]
+    item_scope = ["tm.username = %(user)s"]
+    if team is not None:
+        if not await team_access.is_member(conn, user.username, team):
+            raise HTTPException(status_code=404, detail=team_access.TEAM_NOT_FOUND)
+        params["team"] = team
+        meeting_where.append("m.team_id = %(team)s")
+        item_scope.append("i.team_id = %(team)s")
+    if series is not None:
+        row = await (await conn.execute(
+            "SELECT s.team_id FROM meeting_series s JOIN team_members tm ON tm.team_id = s.team_id AND tm.username = %s WHERE s.id = %s",
+            (user.username, series))).fetchone()
+        if row is None or (team is not None and row["team_id"] != team):
+            raise HTTPException(status_code=404, detail=SERIES_NOT_FOUND)
+        params["series"] = series
+        meeting_where.append("m.series_id = %(series)s")
+        item_scope.append("coalesce(m.series_id, i.series_id) = %(series)s")
+    for bound, op, value in (("start", ">=", start), ("end", "<=", end)):
+        if value:
+            params[bound] = value
+            meeting_where.append(f"(m.started_at AT TIME ZONE %(tz)s)::date {op} %({bound})s")
+            item_scope.append(f"(coalesce(m.started_at, i.confirmed_at) AT TIME ZONE %(tz)s)::date {op} %({bound})s")
+    return " AND ".join(meeting_where), " AND ".join(item_scope), params
+
+
 @router.get("/search")
 async def search_page(user: auth.CurrentUser):
     return FileResponse(auth.STATIC_DIR / "search.html", headers={"Cache-Control": "no-cache"})
@@ -52,34 +82,10 @@ async def search(user: auth.CurrentUser, q: str = Query("", max_length=QUERY_MAX
         raise HTTPException(status_code=422, detail=too_many_terms(len(terms)))
     if kind not in KINDS:
         raise HTTPException(status_code=422, detail="不支援的類型")
-    # One more than the cap per kind, so a single kind over the cap is still reported as truncated.
-    params = {"user": user.username, "tz": team_access.MEETING_TIMEZONE, "limit": LIMIT + 1,
-              **{f"t{n}": team_access.like_pattern(term) for n, term in enumerate(terms)}}
-    # Shared meeting filters (m = meetings); a board item (no meeting) is filtered by its own team, series and creation.
-    meeting_where = ["tm.username = %(user)s"]
-    item_scope = ["tm.username = %(user)s"]
     async with db.connect() as conn:
-        if team is not None:
-            if not await team_access.is_member(conn, user.username, team):
-                raise HTTPException(status_code=404, detail=team_access.TEAM_NOT_FOUND)
-            params["team"] = team
-            meeting_where.append("m.team_id = %(team)s")
-            item_scope.append("i.team_id = %(team)s")
-        if series is not None:
-            row = await (await conn.execute(
-                "SELECT s.team_id FROM meeting_series s JOIN team_members tm ON tm.team_id = s.team_id AND tm.username = %s WHERE s.id = %s",
-                (user.username, series))).fetchone()
-            if row is None or (team is not None and row["team_id"] != team):
-                raise HTTPException(status_code=404, detail=SERIES_NOT_FOUND)
-            params["series"] = series
-            meeting_where.append("m.series_id = %(series)s")
-            item_scope.append("coalesce(m.series_id, i.series_id) = %(series)s")
-        for bound, op, value in (("start", ">=", start), ("end", "<=", end)):
-            if value:
-                params[bound] = value
-                meeting_where.append(f"(m.started_at AT TIME ZONE %(tz)s)::date {op} %({bound})s")
-                item_scope.append(f"(coalesce(m.started_at, i.confirmed_at) AT TIME ZONE %(tz)s)::date {op} %({bound})s")
-        meetings_sql = " AND ".join(meeting_where)
+        meetings_sql, items_sql, params = await scope(conn, user, team, series, start, end)
+        # One more than the cap per kind, so a single kind over the cap is still reported as truncated.
+        params |= {"limit": LIMIT + 1, **{f"t{n}": team_access.like_pattern(term) for n, term in enumerate(terms)}}
         hits: list[dict] = []
         if kind in ("all", "segments"):
             rows = await (await conn.execute(
@@ -93,7 +99,7 @@ async def search(user: auth.CurrentUser, q: str = Query("", max_length=QUERY_MAX
             rows = await (await conn.execute(
                 "SELECT i.id, i.meeting_id, i.team_id, i.kind, i.content, i.state, i.status, coalesce(m.started_at, i.confirmed_at) AS at "
                 "FROM minute_items i LEFT JOIN meetings m ON m.id = i.meeting_id JOIN team_members tm ON tm.team_id = i.team_id "
-                f"WHERE {' AND '.join(item_scope)} AND i.state IN ('proposed', 'confirmed') AND {all_terms('i.content', terms)} "
+                f"WHERE {items_sql} AND i.state IN ('proposed', 'confirmed') AND {all_terms('i.content', terms)} "
                 "ORDER BY at DESC, i.id LIMIT %(limit)s", params)).fetchall()
             hits += [{"meeting": r["meeting_id"], "board": None if r["meeting_id"] else r["team_id"], "at": r["at"], "order": (1, r["id"]),
                       "hit": {"type": "item", "id": r["id"], "kind": r["kind"], "content": r["content"], "state": r["state"],

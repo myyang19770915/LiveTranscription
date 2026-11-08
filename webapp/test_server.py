@@ -27,6 +27,8 @@ import db
 import mai_asr
 import meeting_audio
 import minutes
+import qa
+import search
 from server import (TO_TRADITIONAL, TranscriptDisplay, TranslationRequest, app, asr_engine, detect_pair_language,
                     resolve_translation_direction, translation_backend, translation_payload)
 from translation_quality import consolidate_terms, parse_discovered_terms, policy
@@ -2322,6 +2324,255 @@ class TeamIsolationTests(AccountTestCase):
         self.assertEqual(admin.get(f"/api/meetings/{meeting}").status_code, 404)
         self.assertEqual(admin.get("/api/meetings").json(), [])
         self.assertEqual(admin.post("/api/meetings", json={"team_id": team_id, "language": "zh"}).status_code, 404)
+
+
+def fake_vector(text: str) -> list[float]:
+    """A deterministic stand-in for an embedding: character counts hashed into 64 dimensions."""
+    vector = [0.001] * 64
+    for ch in text:
+        vector[ord(ch) % 64] += 1
+    return vector
+
+
+class QaTestCase(ReviewTestCase):
+    """meeting-qa: alice and bob in 研發部, carol in 業務部; a fake embedding service records what it was given."""
+
+    def setUp(self):
+        ReviewTestCase.setUp(self)
+        self.ldap.add("carol", "pw-carol")
+        self.rd, self.sales = self.team("研發部", "alice", "bob"), self.team("業務部", "carol")
+        self.alice, self.carol = self.signed_in("alice"), self.signed_in("carol")
+        self.embedded: list[str] = []
+        for target, value in (("qa.embed", self.fake_embed), ("qa.EMBED_MODEL", "fake-model.gguf"), ("qa.EMBED_URL", "")):
+            patcher = patch(target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    async def fake_embed(self, texts, timeout=None):
+        self.embedded += [t for t in texts if t != qa.PROBE]
+        return [fake_vector(t) for t in texts]
+
+    meeting = SearchTests.meeting
+    segments = SearchTests.segments
+    item = SearchTests.item
+
+    def index(self):
+        self.embedded = []
+        return asyncio.run(qa.index_pending(1000))
+
+    def vectors(self):
+        return {(str(m) if m else None, s, i) for m, s, i in self.query("SELECT meeting_id, seq, item_id FROM passage_vectors")}
+
+
+class QaIndexTests(QaTestCase):
+    def test_indexes_segments_and_items_then_only_what_changed(self):
+        m = self.meeting("報價會議")
+        self.segments(m, *[(f"第{n}段內容", f"segment {n}") for n in range(1, 8)])
+        kept, rejected = self.item(m, "寄出報價單"), self.item(m, "不要的條目", state="rejected")
+        self.assertEqual(self.index(), 8)
+        self.assertEqual(self.vectors(), {(m, n, None) for n in range(1, 8)} | {(None, None, kept)})
+        self.assertIn("第3段內容\nsegment 3", self.embedded)          # the segment and its translation, nothing else
+        self.assertIn("待辦：寄出報價單", self.embedded)
+        self.assertEqual(self.index(), 0)
+        # spec scenario "A corrected segment is re-indexed": only segment 5.
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE segments SET source = '第5段改過' WHERE meeting_id = %s AND seq = 5", (m,))
+        self.assertEqual(self.index(), 1)
+        self.assertEqual(self.embedded, ["第5段改過\nsegment 5"])
+        # A rejected item loses its embedding; a deleted meeting takes its embeddings along.
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE minute_items SET state = 'rejected' WHERE id = %s", (kept,))
+        self.index()
+        self.assertNotIn((None, None, kept), self.vectors())
+        self.assertNotIn(rejected, [i for _, _, i in self.vectors()])
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("DELETE FROM meetings WHERE id = %s", (m,))
+        self.assertEqual(self.vectors(), set())
+
+    def test_status_counts_the_users_teams_and_a_model_change_starts_over(self):
+        mine, theirs = self.meeting("研發"), self.meeting("業務", team=self.sales, client=self.carol)
+        self.segments(mine, ("一", ""), ("二", ""))
+        self.segments(theirs, ("三", ""))
+        self.item(mine, "待辦一")
+        status = self.alice.get("/api/ask/status").json()
+        self.assertEqual((status["indexed"], status["total"], status["model"], status["embedReachable"]), (0, 3, "fake-model.gguf", False))
+        self.index()
+        self.assertEqual(self.alice.get("/api/ask/status").json()["indexed"], 3)
+        self.assertEqual(self.alice.get(f"/api/ask/status?team={self.sales}").status_code, 404)
+        # spec scenario "Changing the model"
+        with patch("qa.EMBED_MODEL", "other-model.gguf"):
+            self.assertEqual(self.alice.get("/api/ask/status").json()["indexed"], 0)
+            self.assertEqual(self.index(), 4)
+            self.assertEqual(self.alice.get("/api/ask/status").json()["indexed"], 3)
+            self.assertEqual({r[0] for r in self.query("SELECT DISTINCT model FROM passage_vectors")}, {"other-model.gguf"})
+
+    def test_a_passage_the_service_refuses_does_not_hold_up_the_others(self):
+        m = self.meeting("研發")
+        self.segments(m, ("正常一", ""), ("壞段落", ""), ("正常二", ""))
+
+        async def picky(texts, timeout=None):
+            if "壞段落" in texts:
+                raise httpx.HTTPStatusError("500", request=httpx.Request("POST", "http://embed"), response=httpx.Response(500))
+            return [fake_vector(t) for t in texts]
+
+        with patch("qa.embed", picky), patch("qa.refused", set()), self.assertLogs("uvicorn.error", "WARNING"):
+            self.assertEqual(self.index(), 3)
+            self.assertEqual(self.vectors(), {(m, 1, None), (m, 3, None)})
+            self.assertEqual(self.index(), 0)                       # skipped, not retried every round
+            with psycopg.connect(TEST_DATABASE_URL) as conn:
+                conn.execute("UPDATE segments SET source = '修好了' WHERE meeting_id = %s AND seq = 2", (m,))
+            self.index()
+        self.assertIn((m, 2, None), self.vectors())
+
+    def test_another_model_under_the_same_name_is_rebuilt_and_not_compared(self):
+        m = self.meeting("研發")
+        self.segments(m, ("合約寄出", ""), ("報價", ""))
+        self.index()
+
+        async def smaller(texts, timeout=None):
+            return [fake_vector(t)[:32] for t in texts]
+
+        with patch("qa.embed", smaller), patch("minutes.configured", lambda: True), \
+                patch("minutes.call_model", lambda messages, timeout=None: asyncio.sleep(0, '{"answer": "已寄出 [1]。", "notFound": false}')):
+            response = self.alice.post("/api/ask", json={"question": "合約寄出了嗎"})   # 64-size vectors are not compared with a 32-size question
+            self.assertEqual((response.status_code, response.json()["degraded"]), (200, False))
+            self.index()
+        self.assertEqual({r[0] for r in self.query("SELECT vector_dims(embedding) FROM passage_vectors")}, {32})
+
+    def test_keywords_rank_rare_words_first(self):
+        m = self.meeting("研發")
+        self.segments(m, ("預算進度一", ""), ("預算進度二", ""), ("預算火箭", ""), ("人手不夠", ""), ("版本 v3.2 上線", ""))
+
+        async def ranked(question):
+            async with db.connect() as conn:
+                meetings_sql, items_sql, params = await search.scope(conn, auth.User("alice", "alice", False), None, None, None, None)
+                return await qa.keyword_candidates(conn, meetings_sql, items_sql, params, qa.query_terms(question))
+
+        # Among passages with two terms, the rare word decides; one shared everyday word is not enough, a latin term is.
+        self.assertEqual(asyncio.run(ranked("預算 進度 火箭"))[0], ("s", m, 3))
+        self.assertEqual(asyncio.run(ranked("包裝材料不夠用")), [])
+        self.assertEqual(asyncio.run(ranked("v3.2 什麼時候")), [("s", m, 5)])
+        self.assertEqual(asyncio.run(ranked("火箭")), [("s", m, 3)])                 # a one-term question needs that term
+
+    def test_a_failing_embedding_service_is_retried_later_and_harms_nothing_else(self):
+        self.segments(self.meeting("研發"), ("合約", ""))
+
+        async def down(texts, timeout=None):
+            raise httpx.ConnectError("connection refused")
+
+        async def stop(seconds):
+            self.assertEqual(seconds, qa.RETRY_AFTER)
+            raise asyncio.CancelledError
+
+        with patch("qa.embed", down), patch("qa.asyncio.sleep", stop), self.assertLogs("uvicorn.error", "WARNING"):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(qa.indexer())
+        self.assertEqual(self.alice.get("/api/search?q=合約").status_code, 200)
+
+
+class QaAskTests(QaTestCase):
+    def setUp(self):
+        QaTestCase.setUp(self)
+        self.m = self.meeting("客戶報價討論", "2026-11-03")
+        self.segments(self.m, ("今天先確認交期。", "Confirm the delivery date first."), ("報價先壓在八五折，下週三前回覆對方。", "Hold the quote at 85%."),
+                      ("包裝改用紙箱。", "Switch to cardboard."))
+        self.action = self.item(self.m, "下週三前回覆客戶報價")
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE minute_items SET evidence = '{2}' WHERE id = %s", (self.action,))
+        self.index()
+        self.calls = []
+        patcher = patch("minutes.configured", lambda: True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def ask(self, question, reply='{"answer": "", "notFound": true}', client=None, status=200, **filters):
+        async def model(messages, timeout=None):
+            self.calls.append(messages)
+            return reply
+        with patch("minutes.call_model", model):
+            response = (client or self.alice).post("/api/ask", json={"question": question, **filters})
+        self.assertEqual(response.status_code, status, response.text)
+        return response.json()
+
+    def test_citations_are_checked(self):
+        # spec example "Citations checked"
+        result = self.ask("上次跟客戶談價格的結論是什麼", '{"answer": "報價維持八五折 [2]。", "notFound": false}')
+        self.assertEqual((result["answer"], [s["n"] for s in result["sources"]], result["notFound"]), ("報價維持八五折 [2]。", [2], False))
+        evidence = self.calls[-1][1]["content"]
+        cited = result["sources"][0]
+        with patch("qa.fuse", lambda *r, k=60: [("s", self.m, 1), ("s", self.m, 2)]):   # spec scenario "A paraphrased question"
+            paraphrased = self.ask("上次跟客戶談價格的結論是什麼", '{"answer": "報價先壓在八五折，下週三前回覆 [2]。", "notFound": false}')
+        self.assertEqual((paraphrased["sources"][0]["text"], paraphrased["sources"][0]["href"]),
+                         ("報價先壓在八五折，下週三前回覆對方。", f"/meetings/{self.m}#seg-2"))
+        block = evidence.split("\n\n[2] ")[1].split("\n\n[")[0]
+        self.assertIn(("＞ " if cited["type"] == "segment" else "：") + cited["text"], block)   # source 2 is what the model saw as [2]
+        self.assertRegex(cited["href"], rf"^/meetings/{self.m}(#seg-\d+|/minutes#item-\d+)$")
+        self.assertIn("問題：上次跟客戶談價格的結論是什麼", evidence)
+        self.assertEqual(len(re.findall(r"^\[\d\] ", evidence, re.M)), 4)        # 3 segments and 1 item, all within the top 8
+        result = self.ask("報價", '{"answer": "報價維持八五折 [2][9]。", "notFound": false}')
+        self.assertEqual((result["answer"], [s["n"] for s in result["sources"]]), ("報價維持八五折 [2]。", [2]))
+        self.assertTrue(self.ask("報價", '{"answer": "報價維持八五折。", "notFound": false}')["notFound"])
+        self.assertTrue(self.ask("報價", '{"notFound": true}')["notFound"])
+        self.assertIsNone(self.ask("報價", "不是 JSON 也沒有出處")["answer"])
+        calls = len(self.calls)
+        nothing = self.ask("報價", team=self.rd, **{"from": "2026-12-01"})          # no candidates: the model is not called
+        self.assertEqual((nothing["notFound"], nothing["sources"], len(self.calls)), (True, [], calls))
+
+    def test_sources_link_to_the_segment_or_item(self):
+        reply = json.dumps({"answer": "報價維持八五折 [1]，下週三前回覆 [2]。", "notFound": False}, ensure_ascii=False)
+        with patch("qa.fuse", lambda *r, k=60: [("s", self.m, 2), ("i", self.action)]):
+            result = self.ask("價格結論", reply)
+        segment, item = result["sources"]
+        self.assertEqual((segment["type"], segment["href"], segment["startMs"], segment["prev"], segment["next"]),
+                         ("segment", f"/meetings/{self.m}#seg-2", 2000, "今天先確認交期。", "包裝改用紙箱。"))
+        self.assertEqual((item["type"], item["href"], item["kind"], item["evidence"]),
+                         ("item", f"/meetings/{self.m}/minutes#item-{self.action}", "action", [2]))
+        evidence = self.calls[-1][1]["content"]
+        self.assertIn("＞ 報價先壓在八五折，下週三前回覆對方。（譯文：Hold the quote at 85%.）", evidence)
+        self.assertIn("紀要・待辦：下週三前回覆客戶報價", evidence)
+
+    def test_other_teams_stay_invisible(self):
+        theirs = self.meeting("業務", team=self.sales, client=self.carol)
+        self.segments(theirs, ("火星基地的預算已核准。", ""))
+        self.index()
+        self.ask("火星基地的預算", '{"answer": "預算已核准 [1]。", "notFound": false}')
+        self.assertNotIn("火星基地", self.calls[-1][1]["content"].split("資料：")[1])
+        self.ask("火星", client=self.carol)
+        self.assertIn("火星基地", self.calls[-1][1]["content"].split("資料：")[1])
+        self.ask("報價", team=self.sales, status=404)
+
+    def test_embedding_service_down_uses_keywords(self):
+        async def down(texts, timeout=None):
+            raise httpx.ConnectError("connection refused")
+        self.segments(self.meeting("寄件", "2026-11-04"), ("合約今天已經寄出了。", ""))
+        with patch("qa.embed", down), self.assertLogs("uvicorn.error", "WARNING"):
+            result = self.ask("合約 寄出 了嗎", '{"answer": "合約已寄出 [1]。", "notFound": false}')   # spec scenario "Embedding service down"
+        self.assertTrue(result["degraded"])
+        self.assertEqual(result["sources"][0]["text"], "合約今天已經寄出了。")
+
+    def test_a_failing_model_is_502_and_an_unseen_series_404(self):
+        async def broken(messages, timeout=None):
+            raise httpx.ConnectError("connection refused")
+        with patch("minutes.call_model", broken), self.assertLogs("uvicorn.error", "WARNING"):
+            response = self.alice.post("/api/ask", json={"question": "報價"})
+        self.assertEqual((response.status_code, response.json()["detail"]), (502, "模型暫時無法回答，請稍後再試"))
+        theirs = self.carol.post(f"/api/teams/{self.sales}/series", json={"name": "業務週會"}).json()["id"]
+        self.ask("報價", series=theirs, status=404)
+
+    def test_question_limits_and_configuration(self):
+        self.assertEqual(self.ask("   ", status=422)["detail"], "請輸入問題")
+        self.ask("問" * 300)
+        self.assertEqual(self.ask("問" * 301, status=422)["detail"], "問題最多 300 個字")
+        with patch("minutes.configured", lambda: False):
+            self.assertEqual(self.ask("報價", status=503)["detail"], "問答需要紀要模型，目前未設定")
+        self.assertEqual(TestClient(app).post("/api/ask", json={"question": "報價"}).status_code, 401)
+
+    def test_query_terms_and_fusion(self):
+        self.assertEqual(qa.query_terms("上次跟客戶談 MiniMax 價格的結論是什麼？"),
+                         ["minimax", "上次", "次跟", "跟客", "客戶", "戶談", "價格", "結論"])
+        self.assertEqual(qa.query_terms("C++ 與 v2.1 的差異"), ["c++", "v2.1", "差異"])
+        self.assertEqual(qa.query_terms("When will version 3.2 be released?"), ["version", "3.2", "released"])
+        self.assertEqual(qa.fuse([("a",), ("b",)], [("b",), ("c",)]), [("b",), ("a",), ("c",)])
 
 
 if __name__ == "__main__":

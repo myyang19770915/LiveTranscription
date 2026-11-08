@@ -1,0 +1,747 @@
+{
+  "about": "Synthetic meetings for bench/qa_eval.py (meeting-qa). Refs: \"A5\" is segment 5 of meeting A; \"A:0\" is item 0 of meeting A. A question is answered when any of its refs is retrieved; an empty list means it cannot be answered from these meetings. Questions with \"set\": \"holdout\" were written after the retrieval settings were chosen on the others (2026-11-07) and were not used to choose them; report them separately.",
+  "meetings": {
+    "A": {
+      "title": "業務週會",
+      "date": "2026-10-06",
+      "segments": [
+        "好，我們開始今天的業務週會，先看上週的報價進度。",
+        "宏遠科技那邊上週回信，說我們的報價比競爭對手高了大概百分之十二。",
+        "他們採購主管陳經理有暗示，如果能降到八五折，這季就可以先下五百台。",
+        "我覺得八五折可以接受，但是運費要他們自己吸收。",
+        "那就這樣決定，報價先壓在八五折，運費由客戶負擔，下週三前回覆陳經理。",
+        "這件事由誰負責？小林你來處理好了。",
+        "好，我週三前會把新的報價單寄出去。",
+        "另外交期的部分，他們希望十一月底前交第一批。",
+        "工廠那邊說產線現在滿載，最快要十二月中才能出貨。",
+        "那我們要先跟客戶講清楚，不要答應做不到的日期。",
+        "可以考慮分批，先出兩百台，剩下的十二月再補。",
+        "這個我會跟工廠的廠長確認，看兩百台月底能不能擠出來。",
+        "接下來是東南亞市場，越南代理商 Minh Phat 想要拿獨家代理。",
+        "獨家代理的話要談最低採購量，一年至少要三千台。",
+        "法務那邊說合約草稿要用英文版，而且要加仲裁條款。",
+        "仲裁地點建議放在新加坡，雙方都比較能接受。",
+        "合約草稿請 Amy 在十月二十號前給法務看。",
+        "最後一個是展覽，台北國際電子展我們今年還要不要參加？",
+        "去年攤位費花了八十萬，帶回來的有效名單只有三十幾家，效益不太好。",
+        "那今年先不參加，預算改投在線上廣告跟客戶拜訪。",
+        "好，今天就先到這邊，下週同一時間。"
+      ],
+      "items": [
+        {
+          "kind": "decision",
+          "content": "宏遠科技報價維持八五折，運費由客戶負擔"
+        },
+        {
+          "kind": "action",
+          "content": "下週三前寄出新報價單給宏遠科技陳經理（小林）"
+        },
+        {
+          "kind": "action",
+          "content": "向廠長確認月底能否先出貨兩百台"
+        },
+        {
+          "kind": "action",
+          "content": "Amy 於十月二十日前提供越南代理合約英文草稿給法務"
+        },
+        {
+          "kind": "decision",
+          "content": "今年不參加台北國際電子展，預算改投線上廣告與客戶拜訪"
+        },
+        {
+          "kind": "risk",
+          "content": "產線滿載，最快十二月中才能出貨，可能趕不上客戶十一月底的交期"
+        }
+      ]
+    },
+    "B": {
+      "title": "研發週會",
+      "date": "2026-10-08",
+      "segments": [
+        "研發週會開始，先看 v3.2 版的發佈狀況。",
+        "v3.2 原本預計十月十五號上線，但是現在還有三個 P1 的 bug 沒修完。",
+        "最嚴重的是 iOS 上傳大檔案會閃退，超過兩百 MB 就會 crash。",
+        "這個我查過了，是記憶體一次全部讀進來，要改成分段上傳。",
+        "分段上傳大概要三天，加上測試的話，十五號一定來不及。",
+        "那發佈日延到十月二十二號，大家有沒有意見？",
+        "沒問題，那就延一週，對外公告由 PM 發。",
+        "第二件事是伺服器費用，上個月雲端帳單暴增到二十八萬。",
+        "主要是日誌服務沒有設保存期限，資料一直累積。",
+        "我建議日誌只保留三十天，舊的轉到冷儲存。",
+        "這樣一個月大概可以省十萬左右。",
+        "好，日誌保存期限改成三十天，阿傑這週處理。",
+        "第三個是自動化測試，現在覆蓋率只有百分之四十一。",
+        "QA 那邊人手不夠，每次回歸測試要花兩天。",
+        "我們下一季的目標是覆蓋率拉到百分之七十。",
+        "新進的工程師可以先從寫單元測試開始熟悉程式碼。",
+        "還有一個風險，資料庫要從 MySQL 5.7 升級，官方明年就停止支援了。",
+        "升級要停機大概四個小時，要挑週末半夜做。",
+        "這個先列入第四季的計畫，細節下次再討論。",
+        "OK，今天大概就這樣，散會。"
+      ],
+      "items": [
+        {
+          "kind": "decision",
+          "content": "v3.2 發佈日延到十月二十二日，由 PM 對外公告"
+        },
+        {
+          "kind": "action",
+          "content": "修正 iOS 上傳超過 200MB 閃退的問題，改為分段上傳"
+        },
+        {
+          "kind": "action",
+          "content": "阿傑本週將日誌保存期限改為三十天，舊資料轉冷儲存"
+        },
+        {
+          "kind": "question",
+          "content": "MySQL 5.7 升級的停機時段與細節待下次討論"
+        },
+        {
+          "kind": "risk",
+          "content": "MySQL 5.7 官方明年停止支援"
+        }
+      ]
+    },
+    "C": {
+      "title": "採購會議",
+      "date": "2026-10-13",
+      "segments": [
+        "今天的採購會議主要討論原物料漲價。",
+        "鋁材供應商通知，十一月起每公斤要漲百分之八。",
+        "我們一年用量大概一百二十噸，算下來成本會多將近三百萬。",
+        "有沒有其他供應商可以比價？",
+        "有一家台中的廠商報價比較低，但是他們沒有 ISO 認證。",
+        "沒有認證的話客戶稽核會過不了，先不要考慮。",
+        "那可以跟現有供應商談長約，簽一年鎖價。",
+        "鎖價的話他們願意只漲百分之五，但要預付三成貨款。",
+        "預付三成財務那邊要評估現金流，我下週問一下財務長。",
+        "第二個是包材，紙箱最近常常缺貨，上個月有兩次差點停線。",
+        "我覺得安全庫存要從兩週拉到四週。",
+        "倉庫空間夠嗎？",
+        "倉庫目前大概用了七成，放四週的紙箱應該還可以。",
+        "好，那紙箱的安全庫存先調到四週。",
+        "第三個是供應商評鑑，今年有兩家供應商準時交貨率低於九成。",
+        "這兩家要發改善通知，三個月內沒改善就換掉。",
+        "改善通知書由小美這週發出去。",
+        "好，那今天會議到這裡。"
+      ],
+      "items": [
+        {
+          "kind": "decision",
+          "content": "紙箱安全庫存由兩週調整為四週"
+        },
+        {
+          "kind": "action",
+          "content": "下週詢問財務長預付三成貨款對現金流的影響"
+        },
+        {
+          "kind": "action",
+          "content": "小美本週發出供應商改善通知書"
+        },
+        {
+          "kind": "risk",
+          "content": "鋁材十一月起每公斤漲百分之八，年成本增加近三百萬"
+        },
+        {
+          "kind": "decision",
+          "content": "準時交貨率低於九成的供應商，三個月內未改善即更換"
+        }
+      ]
+    },
+    "D": {
+      "title": "人資行政會議",
+      "date": "2026-10-15",
+      "segments": [
+        "人資行政會議開始，第一項是招募進度。",
+        "後端工程師的缺已經開了兩個月，目前只面試了五個人。",
+        "薪資範圍可能偏低，市場行情大概要再高一成。",
+        "我建議把薪資上限調高百分之十，然後加上遠端工作一天。",
+        "調薪要總經理核准，我這週把簽呈送上去。",
+        "第二項是新人教育訓練，現在都是各部門自己帶，品質不一致。",
+        "人資會整理一份共同的新人手冊，包含資安規定跟請假流程。",
+        "手冊預計十一月十日前完成初稿。",
+        "第三項是年終尾牙，今年預計一百二十人參加。",
+        "場地有兩個選擇，一個是飯店宴會廳，一個是園區的活動中心。",
+        "飯店每桌一萬二，活動中心便宜很多但是要自己找外燴。",
+        "大家投票的結果是飯店比較多人支持。",
+        "那就訂飯店，日期是一月十七號星期五晚上。",
+        "抽獎的獎品預算控制在十五萬以內。",
+        "另外提醒，辦公室冷氣十一月要做年度保養，那天下午會停機。",
+        "好，今天到這裡，謝謝大家。"
+      ],
+      "items": [
+        {
+          "kind": "action",
+          "content": "本週送出後端工程師薪資上限調高 10% 的簽呈給總經理"
+        },
+        {
+          "kind": "action",
+          "content": "人資於十一月十日前完成新人手冊初稿"
+        },
+        {
+          "kind": "decision",
+          "content": "尾牙訂飯店宴會廳，一月十七日星期五晚上"
+        },
+        {
+          "kind": "decision",
+          "content": "尾牙抽獎獎品預算上限十五萬"
+        }
+      ]
+    },
+    "E": {
+      "title": "業務週會",
+      "date": "2026-10-20",
+      "segments": [
+        "業務週會開始，先追蹤上次的事項。",
+        "宏遠科技已經收到新的報價單，陳經理說內部還在跑簽核。",
+        "他們另外問能不能把保固從一年延長到兩年。",
+        "保固延長的成本大概每台多三百塊，可以談，但要加價百分之二。",
+        "那就回覆他們，保固兩年的話單價加百分之二。",
+        "交期的部分，廠長確認月底可以先出一百五十台，不是兩百台。",
+        "剩下的三百五十台十二月二十號前出完。",
+        "越南的合約草稿 Amy 已經給法務，法務還在看仲裁條款。",
+        "新的客戶部分，日本的山田商事想要樣品，下週寄五台過去。",
+        "樣品費用我們先吸收，如果下單再從貨款扣。",
+        "線上廣告上個月花了十二萬，帶進來二十幾個詢價。",
+        "詢價轉成訂單的只有三筆，轉換率還要再觀察。",
+        "好，今天先這樣。"
+      ],
+      "items": [
+        {
+          "kind": "decision",
+          "content": "宏遠科技保固延長為兩年，單價加百分之二"
+        },
+        {
+          "kind": "action",
+          "content": "下週寄五台樣品給日本山田商事，樣品費先吸收"
+        },
+        {
+          "kind": "risk",
+          "content": "月底只能先出一百五十台，少於原先預估的兩百台"
+        }
+      ]
+    },
+    "F": {
+      "title": "研發週會",
+      "date": "2026-10-22",
+      "segments": [
+        "研發週會，v3.2 今天上線了，目前沒有重大問題。",
+        "iOS 分段上傳改完之後，五百 MB 的檔案也可以正常上傳。",
+        "雲端帳單這個月降到十九萬，日誌改成三十天保存之後效果很明顯。",
+        "下一個版本 v3.3 預計十二月初，重點是離線模式。",
+        "離線模式需要本機資料庫，評估用 SQLite。",
+        "測試覆蓋率目前到百分之四十八，比上次多了七個百分點。",
+        "MySQL 升級排在十一月十六號星期六凌晨兩點到六點。",
+        "升級前一週要做完整備份跟演練。",
+        "好，散會。"
+      ],
+      "items": [
+        {
+          "kind": "decision",
+          "content": "MySQL 升級排在十一月十六日星期六凌晨兩點到六點"
+        },
+        {
+          "kind": "action",
+          "content": "MySQL 升級前一週完成完整備份與演練"
+        },
+        {
+          "kind": "decision",
+          "content": "v3.3 預計十二月初發佈，重點為離線模式"
+        }
+      ]
+    }
+  },
+  "questions": [
+    {
+      "type": "keyword",
+      "q": "宏遠科技的報價最後怎麼決定？",
+      "refs": [
+        "A5",
+        "A4",
+        "A:0"
+      ]
+    },
+    {
+      "type": "keyword",
+      "q": "v3.2 什麼時候發佈？",
+      "refs": [
+        "B6",
+        "B7",
+        "B:0",
+        "F1"
+      ]
+    },
+    {
+      "type": "keyword",
+      "q": "鋁材漲價多少？",
+      "refs": [
+        "C2",
+        "C3",
+        "C:3"
+      ]
+    },
+    {
+      "type": "keyword",
+      "q": "尾牙在哪裡辦、哪一天？",
+      "refs": [
+        "D13",
+        "D:2"
+      ]
+    },
+    {
+      "type": "keyword",
+      "q": "MySQL 升級什麼時候做？",
+      "refs": [
+        "F7",
+        "F:0"
+      ]
+    },
+    {
+      "type": "keyword",
+      "q": "Minh Phat 想要什麼？",
+      "refs": [
+        "A13",
+        "A14"
+      ]
+    },
+    {
+      "type": "keyword",
+      "q": "山田商事要什麼？",
+      "refs": [
+        "E9",
+        "E:1"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "上次跟客戶談價格的結論是什麼？",
+      "refs": [
+        "A5",
+        "A4",
+        "A:0"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "為什麼這個月主機的錢花那麼多？",
+      "refs": [
+        "B8",
+        "B9"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "那個手機 App 傳東西會當掉的問題怎麼解決？",
+      "refs": [
+        "B3",
+        "B4",
+        "B:1"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "包裝材料不夠用的問題怎麼處理？",
+      "refs": [
+        "C10",
+        "C11",
+        "C14",
+        "C:0"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "徵人一直找不到人，打算怎麼辦？",
+      "refs": [
+        "D2",
+        "D3",
+        "D4",
+        "D:0"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "新進同仁到職的訓練有什麼改變？",
+      "refs": [
+        "D6",
+        "D7",
+        "D:1"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "表現不好的廠商會怎樣處理？",
+      "refs": [
+        "C15",
+        "C16",
+        "C:4",
+        "C:2"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "今年還去參展嗎？",
+      "refs": [
+        "A18",
+        "A19",
+        "A20",
+        "A:4"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "給客戶的第一批貨能不能在月底前出？",
+      "refs": [
+        "A8",
+        "A9",
+        "A11",
+        "A12",
+        "A:5",
+        "A:2",
+        "E6",
+        "E:2"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "測試的比例下一季要做到多少？",
+      "refs": [
+        "B13",
+        "B15"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "國外經銷合約有什麼法律上的要求？",
+      "refs": [
+        "A15",
+        "A16",
+        "A17",
+        "A:3"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "跟材料商簽長期約有什麼條件？",
+      "refs": [
+        "C7",
+        "C8"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "冷氣什麼時候會停？",
+      "refs": [
+        "D15"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "誰負責寄新的估價單？",
+      "refs": [
+        "A6",
+        "A7",
+        "A:1"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "保固延長的話價格怎麼算？",
+      "refs": [
+        "E4",
+        "E5",
+        "E:0"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "廣告投下去的效果怎麼樣？",
+      "refs": [
+        "E11",
+        "E12"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "下一版的主要功能是什麼？",
+      "refs": [
+        "F4",
+        "F:2"
+      ]
+    },
+    {
+      "type": "paraphrase",
+      "q": "上傳大檔案的問題後來有沒有解決？",
+      "refs": [
+        "F2"
+      ]
+    },
+    {
+      "type": "crosslingual",
+      "q": "When will version 3.2 be released?",
+      "refs": [
+        "B6",
+        "B7",
+        "B:0",
+        "F1"
+      ]
+    },
+    {
+      "type": "crosslingual",
+      "q": "How much did the cloud bill increase last month?",
+      "refs": [
+        "B8"
+      ]
+    },
+    {
+      "type": "crosslingual",
+      "q": "What is the budget for the year-end party prizes?",
+      "refs": [
+        "D14",
+        "D:3"
+      ]
+    },
+    {
+      "type": "crosslingual",
+      "q": "Why was the cheaper supplier in Taichung rejected?",
+      "refs": [
+        "C5",
+        "C6"
+      ]
+    },
+    {
+      "type": "crosslingual",
+      "q": "How much is the cloud bill now after the log change?",
+      "refs": [
+        "F3"
+      ]
+    },
+    {
+      "type": "unanswerable",
+      "q": "新產品的定價策略是什麼？",
+      "refs": []
+    },
+    {
+      "type": "unanswerable",
+      "q": "公司明年的營收目標是多少？",
+      "refs": []
+    },
+    {
+      "type": "unanswerable",
+      "q": "誰會接任新的財務長？",
+      "refs": []
+    },
+    {
+      "type": "unanswerable",
+      "q": "辦公室什麼時候搬家？",
+      "refs": []
+    },
+    {
+      "type": "unanswerable",
+      "q": "What did we decide about the Korean office?",
+      "refs": []
+    },
+    {
+      "type": "keyword",
+      "q": "陳經理那邊要多少台？",
+      "refs": [
+        "A3"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "keyword",
+      "q": "MySQL 升級前要做什麼準備？",
+      "refs": [
+        "F8",
+        "F:1"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "keyword",
+      "q": "離線模式要用什麼資料庫？",
+      "refs": [
+        "F5"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "越南代理商一年至少要買多少？",
+      "refs": [
+        "A14"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "仲裁要在哪裡進行？",
+      "refs": [
+        "A16"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "去年參展花了多少錢？",
+      "refs": [
+        "A19"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "日誌要保留多久？",
+      "refs": [
+        "B10",
+        "B12",
+        "B:2"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "回歸測試要花多久？",
+      "refs": [
+        "B14"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "資料庫升級要停機多久？",
+      "refs": [
+        "B18"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "改用長約的話漲幅是多少？",
+      "refs": [
+        "C8"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "倉庫還放得下嗎？",
+      "refs": [
+        "C12",
+        "C13"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "誰要發改善通知書？",
+      "refs": [
+        "C17",
+        "C:2"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "後端工程師面試了幾個人？",
+      "refs": [
+        "D2"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "新人手冊包含哪些內容？",
+      "refs": [
+        "D7",
+        "D:1"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "尾牙每桌多少錢？",
+      "refs": [
+        "D11"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "保固延長每台成本多多少？",
+      "refs": [
+        "E4"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "線上廣告花了多少？",
+      "refs": [
+        "E11"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "paraphrase",
+      "q": "樣品費用誰出？",
+      "refs": [
+        "E10",
+        "E:1"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "crosslingual",
+      "q": "What is the minimum annual purchase for exclusive distribution?",
+      "refs": [
+        "A14"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "crosslingual",
+      "q": "How long will the database upgrade take?",
+      "refs": [
+        "B18",
+        "F7"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "crosslingual",
+      "q": "How many people will attend the year-end party?",
+      "refs": [
+        "D9"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "crosslingual",
+      "q": "Who will send the supplier improvement notices?",
+      "refs": [
+        "C17",
+        "C:2"
+      ],
+      "set": "holdout"
+    },
+    {
+      "type": "unanswerable",
+      "q": "客戶滿意度調查結果如何？",
+      "refs": [],
+      "set": "holdout"
+    },
+    {
+      "type": "unanswerable",
+      "q": "我們自己的 ISO 認證什麼時候會拿到？",
+      "refs": [],
+      "set": "holdout"
+    },
+    {
+      "type": "unanswerable",
+      "q": "Which bank did we choose for the loan?",
+      "refs": [],
+      "set": "holdout"
+    }
+  ]
+}

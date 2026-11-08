@@ -12,6 +12,13 @@ function setParams(next){
   params=new URLSearchParams();
   for(const [k,v] of Object.entries(next))if(v&&!(k==='kind'&&v==='all'))params.set(k,v);
   history.replaceState(null,'',params.toString()?`/search?${params}`:'/search');
+  switchLink();
+}
+// The switch to 問答 (meeting-qa) carries what is in the box now and the filters it shares (not the kind).
+function switchLink(){
+  const carried=new URLSearchParams([...params].filter(([k])=>k!=='kind'&&k!=='q'));
+  if($('q').value.trim())carried.set('q',$('q').value.trim());
+  $('toAsk').href=carried.toString()?`/ask?${carried}`:'/ask';
 }
 function notice(message){$('notice').textContent=message||'';$('notice').hidden=!message}
 
@@ -148,7 +155,7 @@ function pressKind(kind){for(const b of document.querySelectorAll('.kind'))b.set
 
 $('searchForm').onsubmit=event=>{event.preventDefault();search()};
 // Fixing an invalid query clears the mark and its message at once (they are not live-checked while typing otherwise).
-$('q').oninput=()=>{if($('q').hasAttribute('aria-invalid')&&!invalidQuery($('q').value.trim())){invalidBox(false);notice('')}};
+$('q').oninput=()=>{switchLink();if($('q').hasAttribute('aria-invalid')&&!invalidQuery($('q').value.trim())){invalidBox(false);notice('')}};
 for(const b of document.querySelectorAll('.kind'))b.onclick=()=>{pressKind(b.dataset.kind);search()};
 $('team').onchange=async()=>{await loadSeries();search()};
 for(const id of ['series','from','to'])$(id).onchange=search;

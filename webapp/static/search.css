@@ -1,6 +1,13 @@
 /* Full-text search page (meeting-search). Builds on tokens.css and admin.css. */
 .search-page { width: min(960px, 100%); }
 .search-page h1 { margin: 0 0 16px; }
+/* Title with the 全文搜尋｜問答 switch (meeting-qa), shared by /search and /ask. */
+.search-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-bottom: 16px; }
+.search-page .search-title h1 { margin: 0; }
+.mode-switch { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: 10px; }
+.mode-switch a { padding: 6px 14px; border-radius: 7px; color: var(--muted); font-size: 13px; font-weight: 700; text-decoration: none; }
+.mode-switch a:hover { color: var(--text); }
+.mode-switch a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
 .search-form { display: flex; gap: 10px; margin-bottom: 12px; }
 .search-box { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; height: 46px; padding: 0 14px; border: 1.5px solid var(--field-border);
   border-radius: 12px; background: var(--field); }

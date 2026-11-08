@@ -4,7 +4,7 @@ const meetingId=location.pathname.split('/').filter(Boolean).at(-2);
 const KINDS=[['decision','決議'],['action','待辦'],['question','待確認問題'],['risk','風險']];
 const STATE={proposed:'待確認',confirmed:'已確認',rejected:'已駁回'};
 let data=null,editing=null,adding=null,summaryEditing=false,poll=null;
-let meeting=null,peeking=null,audioUrl=null,linkedShown=false;   // meeting: /api/meetings/<id> (header and evidence segments)
+let meeting=null,peeking=null,linkedShown=false;   // meeting: /api/meetings/<id> (header and evidence segments)
 const linkedId=Number(location.hash.match(/^#item-(\d+)$/)?.[1]);   // from the board (#item-N): that item stays marked
 
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
@@ -44,67 +44,17 @@ function evidence(item){
       title:source(e.seq)||`第 ${e.seq} 段`,onclick:event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();openPeek(item.id,e.seq)}}))):null;
 }
 
-// --- Evidence side panel: the cited segments with one segment of context each side, playable in place ---
+// --- Evidence side panel (evidence-panel.js): the cited segments with one segment of context each side, playable in place ---
 // subject: an item of these minutes, or {label, content, evidence} for a progress suggestion.
+const panel=EvidencePanel.create({notice,onClose:()=>{peeking=null;render()}});
 function openPeek(itemId,focusSeq,subject=null){peeking={itemId,focusSeq,subject};renderPeek();render()}
-function closePeek(){peeking=null;$('player').pause();renderPeek();render()}
+function closePeek(){peeking=null;panel.hide();render()}
 function renderPeek(){
   const item=peeking&&(peeking.subject||data.items.find(i=>i.id===peeking.itemId));
-  // Below the sticky top bar, so the account and theme buttons stay reachable.
-  document.documentElement.style.setProperty('--peek-top',`${document.querySelector('.topbar').offsetHeight}px`);
-  document.body.classList.toggle('peeking',!!item);$('peek').hidden=!item;
-  if(!item){peeking=null;return}
-  $('peekKind').textContent=item.label||`${Object.fromEntries(KINDS)[item.kind]}的證據`;
-  $('peekTitle').textContent=item.content;
-  if(!meeting){$('peekList').replaceChildren(el('p',{className:'muted small',textContent:'載入逐字稿中…'}));return}
-  const rows=MeetingTimeline.evidenceContext(meeting.segments,item.evidence.map(e=>e.seq)).flatMap(({segment,cited,gapBefore})=>
-    [gapBefore?el('div',{className:'peek-gap',textContent:'⋯'}):null,peekRow(segment,cited)].filter(Boolean));
-  $('peekList').replaceChildren(...rows);
-  $(`peek-${peeking.focusSeq}`)?.scrollIntoView({block:'nearest'});
+  if(!item){peeking=null;panel.hide();return}
+  panel.show({kind:item.label||`${Object.fromEntries(KINDS)[item.kind]}的證據`,title:item.content,meetingId,meeting,
+    cited:item.evidence.map(e=>e.seq),focusSeq:peeking.focusSeq});
 }
-function peekRow(segment,cited){
-  let playButton=null;
-  if(meeting.hasRecording){
-    playButton=el('button',{type:'button',className:'peek-play',title:'播放／暫停這段錄音',onclick:()=>togglePlay(segment)});
-    playButton.dataset.play=segment.seq;
-  }
-  const row=el('div',{className:`peek-seg${cited?' cited':''}${segment.seq===peeking.focusSeq?' focus':''}`,id:`peek-${segment.seq}`},
-    el('div',{className:'peek-seg-head'},
-      playButton||el('span',{className:'peek-time',textContent:clock(segment.startMs)}),
-      cited?el('a',{className:'text-button',href:`/meetings/${meetingId}#seg-${segment.seq}`,textContent:'到校對頁修正'}):null),
-    el('p',{className:'peek-source',textContent:segment.source}),
-    segment.target?el('p',{className:'peek-target',textContent:segment.target}):null);
-  if(playButton)syncButton(playButton);
-  return row;
-}
-// Playback: the button plays, pauses and resumes its segment; another segment, or a finished clip, loads afresh.
-let clip=null;   // {seq, span} loaded in the player
-function togglePlay(segment){
-  const player=$('player');
-  if(clip?.seq!==segment.seq||player.ended)return play(segment);
-  if(player.paused)player.play().catch(error=>notice(error.message));else player.pause();
-  syncPlayer();
-}
-function syncButton(button){
-  const player=$('player'),seq=Number(button.dataset.play),segment=meeting.segments.find(s=>s.seq===seq);
-  const loaded=clip?.seq===seq&&!player.ended,playing=loaded&&!player.paused;
-  button.textContent=playing?`❚❚ ${clock(clip.span.start+player.currentTime*1000)}`:loaded&&player.currentTime>0?`▶ 繼續 ${clock(clip.span.start+player.currentTime*1000)}`:`▶ ${clock(segment.startMs)}`;
-  button.classList.toggle('playing',playing);
-}
-function syncPlayer(){document.querySelectorAll('.peek-play').forEach(syncButton)}
-async function play(segment){
-  const span=MeetingTimeline.playWindow(segment.startMs,segment.endMs,meeting.durationMs||Infinity);
-  try{
-    const response=await fetch(`/api/meetings/${meetingId}/audio?start=${span.start}&end=${span.end}`);
-    if(!response.ok)throw new Error((await response.json().catch(()=>({}))).detail||'無法載入錄音');
-    if(audioUrl)URL.revokeObjectURL(audioUrl);
-    audioUrl=URL.createObjectURL(await response.blob());
-    clip={seq:segment.seq,span};$('player').src=audioUrl;await $('player').play();
-  }catch(error){notice(error.message)}
-}
-for(const event of ['play','pause','ended','timeupdate'])$('player').addEventListener(event,syncPlayer);
-$('peekClose').onclick=closePeek;
-document.addEventListener('keydown',event=>{if(event.key==='Escape'&&peeking)closePeek()});
 function editor(item){
   const kind=el('select',{className:'input compact',ariaLabel:'類型'},...KINDS.map(([k,l])=>el('option',{value:k,textContent:l})));kind.value=item.kind;
   const text=el('textarea',{className:'input editor',value:item.content,rows:2,maxLength:500,ariaLabel:'內容'});
@@ -176,7 +126,7 @@ function render(){
   const fields=draftFields();
   if(fields.length===drafts.length)fields.forEach((field,i)=>{field.value=drafts[i]});
   // The panel follows its item: closed when a regeneration replaced it, retitled after an edit.
-  if(peeking&&!peeking.subject){const item=data.items.find(i=>i.id===peeking.itemId);if(item)$('peekTitle').textContent=item.content;else closePeek()}
+  if(peeking&&!peeking.subject){if(data.items.some(i=>i.id===peeking.itemId))renderPeek();else closePeek()}
   renderProgress();
 }
 async function load(){

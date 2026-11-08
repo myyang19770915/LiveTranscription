@@ -243,6 +243,6 @@ document.addEventListener('keydown',event=>{
   if(event.key!=='/'||event.ctrlKey||event.metaKey||event.altKey||event.defaultPrevented)return;
   if(event.target.closest?.('input, textarea, select, [contenteditable="true"]')||document.querySelector('dialog[open]'))return;
   event.preventDefault();
-  const box=location.pathname==='/search'&&document.getElementById('q');
+  const box=['/search','/ask'].includes(location.pathname)&&document.getElementById('q');   // the question box on 問答 (meeting-qa)
   if(box){box.focus();box.select()}else location.href='/search';
 });
