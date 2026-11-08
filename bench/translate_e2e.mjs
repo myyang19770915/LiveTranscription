@@ -40,6 +40,13 @@ try {
   await page.screenshot({path: join(out, 'translate-mode.png'), clip: {x: 0, y: 0, width: 1440, height: 520}});
   await page.reload(); await page.evaluate(() => window.accountReady);
   check('the mode survives a reload', await page.getAttribute('#modeTranslate', 'aria-pressed') === 'true' && (await page.textContent('#start')).includes('開始翻譯'));
+  // setup-form-polish: readable sizes, 中 ⇆ 日 on the swap button, and the local engine is not named by its model.
+  await page.selectOption('#language', 'zh_ja');
+  const form = await page.evaluate(() => ({tags: [...document.querySelectorAll('#swap .lang-tag')].map(t => t.textContent),
+    label: getComputedStyle(document.querySelector('.language-field label')).fontSize, value: getComputedStyle(document.getElementById('language')).fontSize,
+    engines: [...document.querySelectorAll('#asrEngine option')].map(o => o.textContent)}));
+  check('the setup form is readable and the swap button shows 中 and 日', form.tags.join() === '中,日' && form.label === '12px' && form.value === '15px', form);
+  check('the local engine is shown as 本機 without a model name', form.engines[0] === '本機' && !form.engines.some(e => /confucius/i.test(e)), form.engines);
 
   // A translate-only session: no meeting is created; the transcript can be downloaded.
   await page.selectOption('#language', 'zh'); await page.selectOption('#audioSource', 'microphone');

@@ -99,7 +99,8 @@ function updateTranslationDirection(){
   direction={source:$('language').value,target:$('targetLanguage').value};
   if(!pair&&direction.source===direction.target){$('targetLanguage').value=direction.source==='en'?'zh':'en';direction.target=$('targetLanguage').value}
   translationEpoch++;activeTranslation?.abort();activeTranslation=null;clearTimeout(translationTimer);clearTimeout(pauseTimer);translated='';draftText='';translationOffset=0;translationHistory=[];flushRequested=false;lastDraftSource='';translationFailures=0;renderTranslation();
-  const tags=$('swap').querySelectorAll('.lang-tag');tags[0].textContent=languageTags[direction.source]||direction.source.toUpperCase();tags[1].textContent=languageTags[direction.target]||direction.target.toUpperCase();
+  const tags=$('swap').querySelectorAll('.lang-tag');const swapPair=direction.source==='zh_ja';   // 中 ⇆ 日, not 中⇄日 twice
+  tags[0].textContent=swapPair?'中':languageTags[direction.source]||direction.source.toUpperCase();tags[1].textContent=swapPair?'日':languageTags[direction.target]||direction.target.toUpperCase();
   $('targetLabel').textContent=pair?'中日雙向翻譯':`翻譯成 ${$('targetLanguage').selectedOptions[0].textContent}`;
   $('targetLabel').closest('.card-title').querySelector('.language-dot').textContent=languageTags[direction.target]||direction.target.toUpperCase();
   $('translateState').textContent='READY';$('translateState').className='state-chip';
@@ -342,7 +343,7 @@ function finalizedRecords(){
 }
 // 雲端精修: refinements go to the configured cloud model. Off by default; the choice stays in this browser.
 function cloudRefineOn(){return !$('cloudRefineRow').hidden&&$('cloudRefine').checked}
-// 辨識引擎: local Confucius, Azure MAI, or MAI for every language except Chinese. Shown only when MAI is configured.
+// 辨識引擎: local (shown as 本機, never the model name), Azure MAI, or MAI for every language except Chinese. Shown only when MAI is configured.
 function asrEngine(){return $('asrEngineRow').hidden?'local':$('asrEngine').value}
 // 團隊: every meeting belongs to one of the user's teams; the last choice stays in this browser.
 const NO_TEAM='尚未加入任何團隊，請聯絡管理員';

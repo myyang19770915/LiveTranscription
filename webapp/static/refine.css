@@ -255,3 +255,40 @@ button:focus-visible, select:focus-visible, input:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; }
 }
+
+/* Setup form polish (setup-form-polish): readable sizes (labels 12 px, values 15 px, notes 12 px), one quiet 1 px border
+   on every card in the same colour, a drawn chevron instead of a text glyph, and the swap button as tag / arrows / tag
+   on one column so 中⇄日 never wraps. Desktop only; the phone settings sheet keeps its own sizes (mobile.css). */
+@media (min-width: 761px) {
+  .controls { gap: 10px; padding: 16px; box-shadow: 0 12px 40px rgb(0 0 0 / .06); }
+  .controls > .field, .controls > .direction, .controls > .mic-test {
+    border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--page) 40%, var(--panel));
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .controls > .field { padding: 10px 14px; }
+  .controls > .field:hover, .controls > .direction:hover:not(:disabled), .controls > .mic-test:hover:not(:disabled) { border-color: var(--field-border); }
+  .controls > .field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .controls .field label { font-size: 12px; font-weight: 600; letter-spacing: .02em; text-transform: none; color: var(--muted); }
+  .controls .field label span { margin-left: 6px; font-weight: 500; color: var(--faint); }
+  .controls select, .controls input:not([type="checkbox"]) { font-size: 15px; font-weight: 500; }
+  .controls select { padding-top: 6px; padding-right: 22px; }
+  .controls .context-field input { padding-top: 6px; }
+  .controls .select-wrap::after {
+    content: ""; top: 50%; right: 3px; width: 7px; height: 7px; margin-top: -2px;
+    border-right: 1.6px solid var(--muted); border-bottom: 1.6px solid var(--muted); transform: translateY(-50%) rotate(45deg); pointer-events: none;
+  }
+  .controls .setup-heading { padding: 6px 2px 0; font-size: 13px; letter-spacing: .06em; }
+  .controls #setupMeeting { padding-top: 2px; }
+  .controls .mode-note { font-size: 13px; }
+  .controls .field-note, .controls .mic-health { font-size: 12px; }
+  .controls .source-hint { padding: 0 2px; font-size: 13px; }
+  .controls .toggle-text b { font-size: 15px; }
+  .controls .toggle-text small { margin-top: 3px; font-size: 12px; }
+  .controls .mic-test b { font-size: 14px; }
+  .controls .mic-test small { margin-top: 3px; font-size: 12px; }
+  .controls .button-copy b { font-size: 16px; }
+  .controls .button-copy small { font-size: 12px; }
+  .controls > .direction { flex-direction: column; gap: 2px; padding: 6px 0; }
+  .controls .direction .lang-tag { font-size: 13px; white-space: nowrap; }
+  .controls .direction svg { width: 18px; }
+}
