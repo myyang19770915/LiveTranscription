@@ -1,43 +1,65 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>登入 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261108b"><link rel="stylesheet" href="/assets/login.css?v=20261104b"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>登入 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261108d"><link rel="stylesheet" href="/assets/login.css?v=20261108a"></head>
 <body>
 <main class="auth">
+  <!-- Left (login-redesign): the brand, what 語橋 Live does, and its features around the hub, between Cloud and Local. -->
   <section class="auth-intro" aria-label="語橋 Live 介紹">
-    <a class="auth-brand" href="/"><span class="auth-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="30" height="30"></span><span><b>語橋 Live</b><small>跨語會議助理</small></span></a>
-    <div class="auth-pitch">
-      <p class="auth-eyebrow">REAL-TIME MULTILINGUAL MEETING</p>
-      <h2>專注對話，<br><em>語言交給我們。</em></h2>
-      <ul class="auth-points">
-        <li><i aria-hidden="true"></i>即時逐字稿與翻譯，中、日、英等多語</li>
-        <li><i aria-hidden="true"></i>會後可對照錄音校對，修正自動重譯</li>
-        <li><i aria-hidden="true"></i>紀錄依團隊隔離，只有成員看得到</li>
+    <a class="auth-brand" href="/"><img src="/assets/brand-icon.png?v=2" alt="" width="40" height="40"><b>語橋 Live</b></a>
+    <h2 class="auth-title">讓每場<em>會議</em>，化為團隊的行動。</h2>
+    <p class="auth-lead">即時轉錄與翻譯，從會議紀要到待辦追蹤，一路接續完成</p>
+
+    <div class="auth-map">
+      <svg class="auth-orbit" viewBox="0 0 900 600" aria-hidden="true">
+        <ellipse class="orbit-outer" cx="450" cy="300" rx="300" ry="190"/>
+        <ellipse class="orbit-inner" cx="450" cy="300" rx="165" ry="102"/>
+        <path class="orbit-spoke" d="M450 82V518M450 300 270 137M450 300 630 137M450 300 245 300M450 300 655 300M450 300 270 463M450 300 630 463"/>
+      </svg>
+      <div class="auth-node node-cloud"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18h10.5a4 4 0 0 0 .4-8A6 6 0 0 0 6.3 11.2 3.5 3.5 0 0 0 7 18Z"/></svg><span>Cloud</span></div>
+      <div class="auth-node node-local"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v7H5zM5 13h14v7H5zM8.5 7.5h.01M8.5 16.5h.01"/></svg><span>Local</span></div>
+      <div class="auth-hub"><img src="/assets/brand-icon.png?v=2" alt="" width="84" height="84"></div>
+      <ul class="auth-features">
+        <li class="feat feat-1"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3ZM5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg></span><span><b>即時轉錄</b><small>多語辨識・逐字稿</small></span></li>
+        <li class="feat feat-2"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 5.5h9M8 3.5v2M5.5 5.5c.8 3.5 3.3 6 6.5 7.2M10.5 5.5c-.8 3.7-3.3 6.4-6.8 7.6M12.5 20.5l4.2-9.5 4.3 9.5M14 17.3h5.4"/></svg></span><span><b>即時翻譯</b><small>中日英・暫譯修訂</small></span></li>
+        <li class="feat feat-3"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3h7.5l4.5 4.5V21h-12zM14 3v4.5h4.5M9.5 12.5h6M9.5 16.5h6"/></svg></span><span><b>會議紀要</b><small>決議整理・說話者</small></span></li>
+        <li class="feat feat-4"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6h10M10 12h10M10 18h10M3.5 6l1.5 1.5L7.5 5M3.5 12l1.5 1.5 2.5-2.5M3.5 18l1.5 1.5 2.5-2.5"/></svg></span><span><b>待辦追蹤</b><small>負責人・到期提醒</small></span></li>
+        <li class="feat feat-5"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM20.5 20.5l-5.3-5.3M8 9.5a2.5 2.5 0 0 1 4.6 1.3c0 1.2-1.5 1.5-2 2.4M10.5 14.6h.01"/></svg></span><span><b>搜尋問答</b><small>跨會議・引用出處</small></span></li>
+        <li class="feat feat-6"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 20.5h17M7 16.5v-5M12 16.5V6.5M17 16.5v-8"/></svg></span><span><b>成效指標</b><small>完成率・趨勢</small></span></li>
       </ul>
     </div>
-    <p class="auth-foot">在公司內部伺服器處理；登入資訊只用來向 LDAP 驗證，不會被儲存。</p>
   </section>
 
+  <!-- Right: the sign-in form. -->
   <section class="auth-panel">
     <button id="themeToggle" class="auth-theme" type="button" aria-label="切換深淺主題" title="切換深淺主題">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path class="sun" d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/><path class="moon" d="M20.4 15.2A8.4 8.4 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/></svg>
+      <span class="auth-theme-label"></span>
     </button>
     <form id="loginForm" class="auth-form" novalidate>
-      <h1>登入</h1>
-      <p class="auth-sub">使用公司帳號（LDAP）登入</p>
+      <h1>歡迎回到 語橋 Live</h1>
+      <p class="auth-sub">登入團隊工作空間，開始跨語會議</p>
 
       <label class="auth-label" for="username">帳號</label>
-      <input id="username" class="auth-input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="例如 myyang" required autofocus>
+      <div class="auth-field">
+        <svg class="auth-field-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.5 20.5a7.5 7.5 0 0 1 15 0"/></svg>
+        <input id="username" class="auth-input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="公司帳號，例如 myyang" required autofocus>
+      </div>
 
       <label class="auth-label" for="password">密碼</label>
-      <div class="auth-password">
-        <input id="password" class="auth-input" name="password" type="password" autocomplete="current-password" required>
-        <button id="reveal" class="auth-reveal" type="button" aria-label="顯示密碼" aria-pressed="false">顯示</button>
+      <div class="auth-field">
+        <svg class="auth-field-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 10.5h12v10H6zM8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3"/></svg>
+        <input id="password" class="auth-input has-reveal" name="password" type="password" autocomplete="current-password" required>
+        <button id="reveal" class="auth-reveal" type="button" aria-label="顯示密碼" aria-pressed="false" title="顯示密碼">
+          <svg class="eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 6.1A9.8 9.8 0 0 1 12 6c5 0 8.5 4.5 9.5 6a17 17 0 0 1-2.8 3.2M6.6 7.6A16 16 0 0 0 2.5 12c1 1.5 4.5 6 9.5 6a9 9 0 0 0 4.3-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+          <svg class="eye-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12c1-1.5 4.5-6 9.5-6s8.5 4.5 9.5 6c-1 1.5-4.5 6-9.5 6s-8.5-4.5-9.5-6ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg>
+        </button>
       </div>
       <p id="capsLock" class="auth-caps" hidden>大寫鎖定已開啟</p>
 
       <p id="loginError" class="auth-error" role="alert" hidden></p>
       <button id="loginButton" class="auth-submit" type="submit"><span class="auth-spinner" aria-hidden="true"></span><span class="auth-submit-label">登入</span></button>
-      <p class="auth-help">忘記密碼或無法登入，請洽 IT；需要加入團隊，請聯絡系統管理員。</p>
+      <p class="auth-help">平台不保存你的密碼；忘記密碼請洽 IT。</p>
     </form>
+    <p class="auth-copy">© 2026 語橋 Live</p>
   </section>
 </main>
 <script>
@@ -56,9 +78,11 @@ form.onsubmit=async event=>{
     fail((await response.json().catch(()=>({}))).detail||'登入失敗');
   }catch{fail('無法連線到語橋 Live，請確認網路')}
 };
-$('reveal').onclick=()=>{const show=form.password.type==='password';form.password.type=show?'text':'password';$('reveal').textContent=show?'隱藏':'顯示';$('reveal').setAttribute('aria-pressed',show);$('reveal').setAttribute('aria-label',show?'隱藏密碼':'顯示密碼');form.password.focus()};
+$('reveal').onclick=()=>{const show=form.password.type==='password',label=show?'隱藏密碼':'顯示密碼';form.password.type=show?'text':'password';$('reveal').setAttribute('aria-pressed',show);$('reveal').setAttribute('aria-label',label);$('reveal').title=label;form.password.focus()};
 form.password.addEventListener('keyup',event=>{$('capsLock').hidden=!event.getModifierState?.('CapsLock')});
 form.password.addEventListener('blur',()=>{$('capsLock').hidden=true});
-$('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
+const themeLabel=()=>{document.querySelector('.auth-theme-label').textContent=document.documentElement.dataset.theme==='light'?'深色':'明亮'};
+$('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;themeLabel();try{localStorage.setItem('interpreter-theme',next)}catch{}};
+themeLabel();
 </script>
 </body></html>
