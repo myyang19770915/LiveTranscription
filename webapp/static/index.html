@@ -21,7 +21,7 @@
     <div class="hint-stack"><p id="sourceHint" class="source-hint">使用耳機開會可避免喇叭聲被麥克風重複收進來。</p>
     <p id="learnedTerms" class="source-hint" title="會議中從逐字稿自動學到的名稱與常見誤聽，只作為翻譯參考，不會改寫原文" hidden></p></div>
     <p id="setupAdvanced" class="setup-heading" hidden>進階</p>
-    <div id="asrEngineRow" class="field engine-field" title="雲端 MAI 的日文、英文辨識較準；使用時音訊會傳送到 Azure。混合模式下，中文（含中英、中日雙向）仍用本機。" hidden><label for="asrEngine">辨識引擎</label><div class="select-wrap"><select id="asrEngine"><option value="local">本機 Confucius</option><option value="hybrid">混合：中文本機、其他雲端 MAI</option><option value="mai">雲端 MAI</option></select></div><span class="field-note">雲端時音訊會傳送到 Azure</span></div>
+    <div id="asrEngineRow" class="field engine-field" title="雲端 MAI 的日文、英文辨識較準；使用時音訊會傳送到 Azure，文字約慢 1 秒（實測比本機晚 1.3 秒出現）；最快是本機。混合模式下，中文（含中英、中日雙向）仍用本機。" hidden><label for="asrEngine">辨識引擎</label><div class="select-wrap"><select id="asrEngine"><option value="local">本機 Confucius</option><option value="hybrid">混合：中文本機、其他雲端 MAI</option><option value="mai">雲端 MAI</option></select></div><span class="field-note">雲端時音訊會傳送到 Azure，文字約慢 1 秒；最快是本機</span></div>
     <label id="cloudRefineRow" class="field toggle-field" title="每句定稿後，背景改用雲端大模型帶前後文重新翻譯；即時翻譯仍在本機。機密會議請勿開啟。" hidden><input id="cloudRefine" type="checkbox"><span class="toggle-text"><b>雲端精修</b><small>會議內容會傳送到外部服務</small></span></label>
     <button id="start" class="primary"><span class="record-icon"><i></i></span><span class="button-copy"><b>開始會議</b><small>即時轉錄與翻譯</small></span></button>
   </section>
@@ -52,4 +52,4 @@
   <div id="mobileSettingsFields" class="mobile-settings-fields"></div>
   <button id="mobileSettingsDone" class="mobile-settings-done" type="button">完成設定</button>
 </dialog>
-<script src="/assets/account.js?v=20261108c"></script><script src="/assets/segmentation.js?v=20261103b"></script><script src="/assets/translation-context.js?v=20261104b"></script><script src="/assets/timeline.js?v=20261106a"></script><script src="/assets/subtitles.js?v=20261108b"></script><script src="/assets/app.js?v=20261108d"></script><script src="/assets/series.js?v=20261107b"></script></body></html>
+<script src="/assets/account.js?v=20261108c"></script><script src="/assets/segmentation.js?v=20261103b"></script><script src="/assets/translation-context.js?v=20261104b"></script><script src="/assets/timeline.js?v=20261106a"></script><script src="/assets/subtitles.js?v=20261108b"></script><script src="/assets/app.js?v=20261108e"></script><script src="/assets/series.js?v=20261107b"></script></body></html>

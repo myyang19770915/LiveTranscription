@@ -178,7 +178,7 @@ async function startMeeting() {
     socket.onclose = event => { if(event.code===4401)return location.replace('/login'); if (stream && !stopping) stopMeeting(false).then(()=>setStatus(event.code===4404?'找不到這場會議，請重新整理後再試':'辨識連線已中斷','error')); };
 
     audioContext = new AudioContext();
-    await audioContext.audioWorklet.addModule('/assets/pcm-worklet.js');
+    await audioContext.audioWorklet.addModule('/assets/pcm-worklet.js?v=20261108a');
     workletNode = new AudioWorkletNode(audioContext, 'pcm16-processor');
     workletNode.port.onmessage = ({data}) => { let sum=0;for(let i=0;i<data.length;i++)sum+=data[i]*data[i];$('level').style.transform=`scaleX(${Math.min(1,Math.sqrt(sum/data.length)*5+.03)})`;if(socket?.readyState===WebSocket.OPEN)socket.send(floatToPCM16(resampleTo16k(data,audioContext.sampleRate)).buffer); };
     for(const media of captureStreams){const node=audioContext.createMediaStreamSource(media),gain=audioContext.createGain();gain.gain.value=captureStreams.length>1?0.5:1;node.connect(gain).connect(workletNode);sourceNodes.push(node,gain)}

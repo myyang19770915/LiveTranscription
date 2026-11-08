@@ -72,6 +72,7 @@ try {
     check('closing the window resets the button', (await page.getAttribute('#subtitles', 'aria-pressed')) === 'false');
   }
   check('the footer note says nothing is stored', (await page.textContent('#storeNote')).includes('不存到伺服器'));
+  check('the engine note says the cloud engine is about a second slower', (await page.textContent('#asrEngineRow .field-note')).includes('約慢 1 秒'));
 
   // Sentence splitting (the spec's example table).
   const cases = await page.evaluate(() => [

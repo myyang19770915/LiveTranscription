@@ -429,6 +429,8 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - 混合：中文、中英、中日雙向用本機，其他語言用雲端 MAI。目前 benchmark 最佳（約 87 分，見 [bench/README.md](bench/README.md)）。
 - 雲端 MAI：所有語言用 MAI；中文與日文由停頓偵測補標點。
 
+雲端 MAI 的文字比本機約慢 1 秒出現（2026-11-08 實測英文中位數晚 1.3 秒，見 bench/README.md 的延遲量測）；要最快的即時感請選本機。
+
 複製 [`.env.example`](.env.example) 成 `.env` 後修改。不要將含真實密鑰的 `.env` 提交到 Git。
 
 ## 服務端點
