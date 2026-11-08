@@ -1,0 +1,10 @@
+# Evaluation image for bench/diarize (sherpa-onnx and MOSS-Transcribe-Diarize via PyTorch, CPU or CUDA).
+#   docker build -t diar-eval -f bench/diarize/Dockerfile.eval bench/diarize
+FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+ARG MOSS_COMMIT=79c675f0670cc2f824bcbcdd98263704f40f1f7e
+RUN mkdir /moss-src && curl -fsSL https://codeload.github.com/OpenMOSS/MOSS-Transcribe-Diarize/tar.gz/$MOSS_COMMIT \
+    | tar xz -C /moss-src --strip-components=1 && pip install --no-cache-dir -e /moss-src \
+    && pip install --no-cache-dir sherpa-onnx pyarrow soundfile soxr scipy numpy
+WORKDIR /work

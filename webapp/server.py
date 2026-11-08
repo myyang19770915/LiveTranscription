@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketState
 import auth
 import db
+import diarize
 import mai_asr
 import meeting_audio
 import actions
@@ -103,12 +104,15 @@ async def lifespan(_app: FastAPI):
     await minutes.recover_interrupted()
     # 問答 index (meeting-qa) in the background; without EMBED_URL 問答 uses keyword retrieval only.
     indexing = asyncio.create_task(qa.indexer()) if qa.EMBED_URL else None
+    # Speaker diarization (speaker-diarization) after meetings; without DIARIZE_URL segments get no speakers.
+    diarizing = asyncio.create_task(diarize.worker()) if diarize.configured() else None
     logger.info("system administrators (ADMIN_USERS): %s", ", ".join(sorted(auth.ADMIN_USERS)) or "none")
     yield
-    if indexing:
-        indexing.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await indexing
+    for task in (indexing, diarizing):
+        if task:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 app = FastAPI(title="語橋 Live — 即時會議翻譯", lifespan=lifespan, dependencies=[Depends(auth.require_signed_in)])
@@ -122,6 +126,7 @@ app.include_router(series.router)
 app.include_router(metrics.router)
 app.include_router(search.router)
 app.include_router(qa.router)
+app.include_router(diarize.router)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 
@@ -502,6 +507,7 @@ async def finish_recording(audio: "meeting_audio.MeetingAudio", meeting_id) -> N
     recorded = audio.close()
     async with db.connect() as conn:
         await conn.execute("UPDATE meetings SET audio_bytes = %s, ended_at = now() WHERE id = %s", (recorded, meeting_id))
+    await diarize.recording_closed(meeting_id, recorded)
 
 
 @app.websocket("/ws/transcribe")

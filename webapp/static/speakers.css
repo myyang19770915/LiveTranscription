@@ -1,0 +1,36 @@
+/* Speakers on the review page (speaker-diarization): the speaker panel and each segment's speaker menu.
+   The dot colour only helps to scan; the name is always written out. Speakers past 8 use the neutral colour. */
+:root {
+  --spk-1: #4cb8ff; --spk-2: #ff9a4d; --spk-3: #6fd39b; --spk-4: #c79bff;
+  --spk-5: #f2c66d; --spk-6: #ff7fae; --spk-7: #5fd4d4; --spk-8: #b8c46a;
+}
+:root[data-theme="light"] {
+  --spk-1: #1479c7; --spk-2: #d0661a; --spk-3: #2e9a5e; --spk-4: #8a55d6;
+  --spk-5: #a87a00; --spk-6: #cf3f7a; --spk-7: #1d9196; --spk-8: #6f7d1f;
+}
+.speakers { display: grid; gap: 10px; padding: 14px 20px; margin-bottom: 16px; }
+.speakers-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.speakers-head b { font-size: 15px; }
+.speakers-head .spacer { flex: 1; }
+.speakers-status { color: var(--muted); font-size: 14px; }
+.speakers-status.warn { color: var(--danger); font-weight: 600; }
+.speakers-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.spk-name { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text); font-size: 14px; cursor: pointer; }
+.spk-name:hover { border-color: var(--field-border); }
+.spk-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spk-name small { color: var(--muted); font-size: 12px; }
+.spk-name i, .spk i { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--spk); }
+.spk-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--accent); border-radius: 12px; }
+.spk-edit .input { width: auto; min-width: 0; flex: 1 1 140px; appearance: auto; }
+
+.spk { display: flex; align-items: center; gap: 6px; width: max-content; max-width: 100%; margin-bottom: 2px; }
+.spk-select { appearance: none; max-width: 220px; padding: 2px 18px 2px 0; border: 0; background: transparent no-repeat right center / 10px 10px; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-size: 5px 5px, 5px 5px; background-position: right 6px center, right 1px center; text-overflow: ellipsis; }
+.spk-select:hover, .spk-select:focus-visible { color: var(--text); }
+.spk-select option { color: var(--text); background: var(--panel); }
+
+@media (max-width: 760px) {
+  .speakers { padding: 12px 14px; }
+  .spk-edit .secondary-button, .spk-edit .primary-button { width: auto; }
+}

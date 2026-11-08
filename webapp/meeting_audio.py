@@ -11,6 +11,7 @@ from pathlib import Path
 SAMPLE_RATE = 16000
 BYTES_PER_MS = SAMPLE_RATE * 2 // 1000   # 16-bit mono: 32 bytes per millisecond
 HEADER_BYTES = 44
+_open: set[Path] = set()   # recordings being written by this process
 
 
 def wav_header(data_bytes: int) -> bytes:
@@ -28,6 +29,7 @@ class MeetingAudio:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.file = path.open("xb")   # never overwrite an existing recording
         self.file.write(wav_header(0))
+        _open.add(path)
 
     @property
     def position_ms(self) -> int:
@@ -46,7 +48,13 @@ class MeetingAudio:
             self.file.write(wav_header(self.bytes))
             self.file.close()
             self.file = None
+            _open.discard(self.path)
         return self.bytes
+
+
+def is_recording(path: Path) -> bool:
+    """Whether a meeting is still writing this recording (after a restart nothing is)."""
+    return path in _open
 
 
 def repair_header(path: Path) -> int:

@@ -24,11 +24,13 @@ from ldap3.core.exceptions import LDAPSocketOpenError
 
 import auth
 import db
+import diarize
 import mai_asr
 import meeting_audio
 import minutes
 import qa
 import search
+import server
 from server import (TO_TRADITIONAL, TranscriptDisplay, TranslationRequest, app, asr_engine, detect_pair_language,
                     resolve_translation_direction, translation_backend, translation_payload)
 from translation_quality import consolidate_terms, parse_discovered_terms, policy
@@ -2605,6 +2607,220 @@ class QaAskTests(QaTestCase):
         self.assertEqual(qa.query_terms("C++ 與 v2.1 的差異"), ["c++", "v2.1", "差異"])
         self.assertEqual(qa.query_terms("When will version 3.2 be released?"), ["version", "3.2", "released"])
         self.assertEqual(qa.fuse([("a",), ("b",)], [("b",), ("c",)]), [("b",), ("a",), ("c",)])
+
+
+SERVICE_OUTPUT = """audio: data/x.wav
+model: /models/MOSS-Transcribe-Diarize-Q8_0.gguf -> ok
+segments: 4
+  [   0.48 ->    1.66] S2: 好那就這樣
+  [   1.80 ->    5.20] S1: 我们下周五前把报价单寄出去吧
+  [   5.40 ->    6.00] S2: 嗯对
+  [   6.10 ->   12.00] S3: 下一个议题
+"""
+
+
+class DiarizeRulesTests(unittest.TestCase):
+    def test_parse_output_renumbers_speakers_by_first_appearance(self):
+        turns = diarize.parse_output(SERVICE_OUTPUT)
+        self.assertEqual(turns[0], diarize.Turn(480, 1660, 1, "好那就這樣"))
+        self.assertEqual([t.label for t in turns], [1, 2, 1, 3])
+        self.assertEqual(turns[1].text, "我们下周五前把报价单寄出去吧")
+        self.assertEqual(diarize.parse_output("run: ok\ntext: 你好\n"), [])
+
+    def test_segment_speaker_examples(self):
+        """The spec's example table: text first, then the span moved 1 s earlier, else none."""
+        T = diarize.Turn
+        quote = [T(0, 6000, 1, "好那就這樣"), T(6000, 9000, 2, "我们下周五前把报价单寄出去吧")]
+        self.assertEqual(diarize.speaker_of(4000, 7000, "我們下週五前把報價單寄出去", quote), 2)    # shifted 3-6 s: S1 3.0 s, S2 0 s
+        self.assertEqual(diarize.speaker_of(1000, 1800, "嗯", [T(0, 2000, 1, "嗯对")]), 1)       # one character: time decides
+        other = [T(0, 1400, 1, "前面的话"), T(1400, 10000, 3, "后面"), T(10000, 12000, 2, "下一个议题")]
+        self.assertEqual(diarize.speaker_of(2000, 4500, "這個先這樣", other), 3)                   # shifted 1-3.5 s: S1 0.4 s, S3 2.1 s
+        self.assertIsNone(diarize.speaker_of(60000, 61000, "好", other))
+        # Text beats time: the segment was stamped late, inside the next speaker's turn.
+        late = [T(0, 4000, 1, "这个报价我来处理"), T(4000, 9000, 2, "好的谢谢大家")]
+        self.assertEqual(diarize.speaker_of(4500, 6000, "這個報價我來處理", late), 1)
+        self.assertEqual(diarize.assign([{"seq": 7, "start_ms": 4500, "end_ms": 6000, "source": "好的，謝謝大家"}], late), {7: 2})
+
+    def test_service_language(self):
+        self.assertEqual(diarize.service_language({"source_language": "zh", "language": "zh"}), "zh")
+        self.assertEqual(diarize.service_language({"source_language": "", "language": "en"}), "en")
+        self.assertEqual(diarize.service_language({"source_language": "", "language": "zh_ja"}), "")
+
+
+class DiarizeApiTests(ReviewTestCase):
+    def setUp(self):
+        super().setUp()
+        self.ldap.add("carol", "pw-carol", "林怡安")
+        self.alice, self.meeting = self.signed_in("alice"), self.meeting_id()
+        self.team_id = self.query("SELECT team_id FROM meetings")[0][0]
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("INSERT INTO team_members (team_id, username, added_by) VALUES (%s, 'carol', 'admin')", (self.team_id,))
+        self.signed_in("carol")   # carol's display name is known after her first sign-in
+        folder = self.output / "teams" / str(self.team_id) / self.meeting
+        audio = meeting_audio.MeetingAudio(folder / "audio.wav")
+        audio.write(b"\x00\x00" * 16000 * 12)
+        audio.close()
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE meetings SET audio_bytes = %s", (12 * 32000,))
+        # segments 1..4 at 0-1 s, 1-2 s, ... ; speech of the fake service follows SERVICE_OUTPUT
+        self.save(self.alice, self.meeting, [("好，那就這樣。", "OK."), ("我們下週五前把報價單寄出去。", "Quote by Friday."),
+                                             ("嗯對。", "Yes."), ("下一個議題。", "Next topic.")])
+        configured = patch("diarize.DIARIZE_URL", "http://diarize:5002")
+        configured.start()
+        self.addCleanup(configured.stop)
+        self.calls = []
+
+    def service(self, output=SERVICE_OUTPUT):
+        async def fake(file, language):
+            self.calls.append((file, language))
+            if isinstance(output, Exception):
+                raise output
+            return output
+        return patch("diarize.call_service", fake)
+
+    def run_queue(self, output=SERVICE_OUTPUT):
+        with self.service(output):
+            while asyncio.run(diarize.run_next()):
+                pass
+
+    def speakers(self, client=None):
+        return (client or self.alice).get(f"/api/meetings/{self.meeting}/speakers").json()
+
+    def segment_speakers(self):
+        return [s["speaker"] for s in self.alice.get(f"/api/meetings/{self.meeting}").json()["segments"]]
+
+    def test_manual_run_labels_segments_and_lists_speakers(self):
+        self.assertEqual(self.speakers()["status"], "none")
+        response = self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.assertEqual((response.status_code, response.json()), (202, {"status": "queued"}))
+        again = self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.assertEqual((again.status_code, again.json()["detail"]), (409, "說話者辨識已在排隊或進行中"))
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE diarizations SET status = 'running'")
+        self.assertEqual(self.alice.post(f"/api/meetings/{self.meeting}/speakers/run").status_code, 409)
+        self.assertEqual(self.speakers()["status"], "running")
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE diarizations SET status = 'queued'")
+        self.run_queue()
+        team = self.team_id
+        self.assertEqual(self.calls, [(f"teams/{team}/{self.meeting}/audio.wav", "zh")])
+        state = self.speakers()
+        self.assertEqual(state["status"], "done")
+        self.assertEqual([(s["label"], s["shown"], s["segments"]) for s in state["speakers"]],
+                         [(1, "說話者 1", 2), (2, "說話者 2", 1), (3, "說話者 3", 1)])
+        self.assertEqual(self.segment_speakers(), [1, 2, 1, 3])
+        self.assertEqual({m["username"] for m in state["members"]}, {"alice", "carol"})
+
+    def test_recording_close_queues_only_long_recordings(self):
+        class Audio:
+            def __init__(self, recorded):
+                self.recorded = recorded
+
+            def close(self):
+                return self.recorded
+        asyncio.run(server.finish_recording(Audio(6 * 32000), self.meeting))
+        self.assertEqual(self.speakers()["status"], "none")
+        asyncio.run(server.finish_recording(Audio(25 * 60 * 32000), self.meeting))
+        self.assertEqual(self.speakers()["status"], "queued")
+        self.assertEqual(self.query("SELECT requested_by FROM diarizations"), [(None,)])
+        with patch("diarize.DIARIZE_URL", ""):
+            self.assertEqual(self.alice.post(f"/api/meetings/{self.meeting}/speakers/run").json()["detail"], "說話者辨識未設定")
+
+    def test_service_failure_keeps_speakers_and_restart_requeues(self):
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue()
+        self.alice.put(f"/api/meetings/{self.meeting}/speakers/1", json={"name": "主持人"})
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue(RuntimeError("辨識服務回應 500：boom"))
+        state = self.speakers()
+        self.assertEqual((state["status"], state["message"]), ("failed", "辨識失敗（辨識服務回應 500：boom）"))
+        self.assertEqual(state["speakers"][0]["shown"], "主持人")
+        self.assertEqual(self.segment_speakers(), [1, 2, 1, 3])
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue("run: ok\n")
+        self.assertEqual(self.speakers()["message"], "辨識失敗（沒有辨識到任何說話）")
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE diarizations SET status = 'running'")
+        asyncio.run(diarize.recover())
+        self.assertEqual(self.speakers()["status"], "queued")
+
+    def test_naming_correcting_and_new_segments(self):
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue()
+        named = self.alice.put(f"/api/meetings/{self.meeting}/speakers/2", json={"username": "Carol"})
+        self.assertEqual((named.status_code, named.json()["shown"], named.json()["username"]), (200, "林怡安", "carol"))
+        bob = self.alice.put(f"/api/meetings/{self.meeting}/speakers/2", json={"username": "bob"})
+        self.assertEqual((bob.status_code, bob.json()["detail"]), (422, "只能指定為這個團隊的成員"))
+        self.assertEqual(self.speakers()["speakers"][1]["shown"], "林怡安")
+        self.assertEqual(self.alice.put(f"/api/meetings/{self.meeting}/speakers/1", json={"name": "名" * 41}).status_code, 422)
+        self.assertEqual(self.alice.put(f"/api/meetings/{self.meeting}/speakers/9", json={"name": "x"}).status_code, 404)
+        added = self.alice.post(f"/api/meetings/{self.meeting}/speakers")
+        self.assertEqual((added.status_code, added.json()["label"], added.json()["shown"]), (201, 4, "說話者 4"))
+        moved = self.alice.put(f"/api/meetings/{self.meeting}/segments/1/speaker", json={"label": 4})
+        self.assertEqual((moved.status_code, moved.json()["speaker"]), (200, 4))
+        cleared = self.alice.put(f"/api/meetings/{self.meeting}/segments/3/speaker", json={"label": None})
+        self.assertIsNone(cleared.json()["speaker"])
+        self.assertEqual(self.alice.put(f"/api/meetings/{self.meeting}/segments/2/speaker", json={"label": 8}).status_code, 422)
+        # Segments stored later are labelled from the stored turns; hand-picked ones (1 and the cleared 3) stay.
+        self.save(self.alice, self.meeting, [("好，那就這樣。", "OK."), ("我們下週五前把報價單寄出去。", "Quote by Friday."),
+                                             ("嗯對。", "Yes."), ("下一個議題。", "Next topic."), ("下一個議題", "Next."),
+                                             ("沒有對應的話", "-")])
+        self.assertEqual(self.segment_speakers(), [4, 2, None, 3, 3, 2])   # 6: no text match; 4-5 s overlaps S2
+        # A new diarization replaces names and manual choices.
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue()
+        self.assertEqual([s["shown"] for s in self.speakers()["speakers"]], ["說話者 1", "說話者 2", "說話者 3"])
+        self.assertEqual(self.segment_speakers()[:4], [1, 2, 1, 3])
+
+    def test_minutes_lines_carry_speaker_names(self):
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue()
+        self.alice.put(f"/api/meetings/{self.meeting}/speakers/2", json={"username": "carol"})
+        self.alice.put(f"/api/meetings/{self.meeting}/segments/3/speaker", json={"label": 2})
+        self.alice.put(f"/api/meetings/{self.meeting}/segments/4/speaker", json={"label": None})
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE segments SET source = '我來處理報價' WHERE seq = 3")
+
+        async def rows():
+            async with db.connect() as conn:
+                return await (await conn.execute(diarize.SEGMENTS_WITH_SPEAKERS, (self.meeting,))).fetchall()
+        meeting = {"started_at": datetime(2026, 11, 9, 2, tzinfo=timezone.utc), "title": ""}
+        user = minutes.build_messages(meeting, asyncio.run(rows()), [])[-1]["content"]
+        self.assertIn("[1] 說話者 1：好，那就這樣。", user)
+        self.assertIn("[3] 林怡安：我來處理報價", user)
+        self.assertIn("\n[4] 下一個議題。", user)
+        self.assertIn("由聲音辨識出的說話者", minutes.SYSTEM_PROMPT)
+
+    def test_only_team_members(self):
+        bob = self.signed_in("bob")
+        for method, path, body in (("get", "speakers", None), ("post", "speakers/run", None), ("post", "speakers", None),
+                                   ("put", "speakers/1", {"name": "x"}), ("put", "segments/1/speaker", {"label": None})):
+            response = getattr(bob, method)(f"/api/meetings/{self.meeting}/{path}", **({"json": body} if body is not None else {}))
+            self.assertEqual(response.status_code, 404, path)
+
+    def test_meeting_still_recording_is_409(self):
+        folder = self.output / "teams" / str(self.team_id) / self.meeting
+        (folder / "audio.wav").unlink()
+        audio = meeting_audio.MeetingAudio(folder / "audio.wav")
+        audio.write(b"\x00\x00" * 16000 * 12)
+        response = self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.assertEqual((response.status_code, response.json()["detail"]), (409, "會議還在錄音，結束後會自動辨識說話者"))
+        audio.close()
+        self.assertEqual(self.alice.post(f"/api/meetings/{self.meeting}/speakers/run").status_code, 202)
+
+    def test_stuck_run_expires(self):
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE diarizations SET status = 'running', started_at = now() - interval '5 hours'")
+        asyncio.run(diarize.expire_stuck())
+        state = self.speakers()
+        self.assertEqual((state["status"], state["message"]), ("failed", "辨識超過時限沒有結果"))
+
+    def test_meeting_without_recording_is_422(self):
+        other = self.signed_in("alice").post("/api/meetings", json={"team_id": self.team_id, "language": "zh"}).json()["id"]
+        response = self.alice.post(f"/api/meetings/{other}/speakers/run")
+        self.assertEqual((response.status_code, response.json()["detail"]), (422, "這場會議沒有錄音"))
+
 
 
 if __name__ == "__main__":

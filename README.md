@@ -45,6 +45,8 @@ flowchart LR
     db[(db<br/>PostgreSQL 17 + pgvector)]
     embed[embed<br/>llama.cpp CPU<br/>bge-m3 embedding]
     embedCache[(embed-model-cache<br/>embedding 權重)]
+    diarize[diarize<br/>transcribe.cpp CPU<br/>MOSS 說話者辨識]
+    diarizeCache[(diarize-model-cache<br/>MOSS GGUF)]
   end
   browser <-->|HTTP、WebSocket、SSE<br/>localhost:18082| app
   app <-->|內部 WebSocket<br/>asr:8272| asr
@@ -54,9 +56,11 @@ flowchart LR
   app <-->|內部 SQL<br/>db:5432| db
   app -->|內部 HTTP<br/>embed:5001| embed
   embedCache --- embed
+  app -->|內部 HTTP<br/>diarize:5002| diarize
+  diarizeCache --- diarize
 ```
 
-Compose 定義 `app`、`asr`、`translate`、`db`、`embed` 五個服務（另有開發用的 `dev-ldap`）。除了 `app` 的主機連接埠 `18082`，其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`translate`、`db` 的健康檢查通過；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料。
+Compose 定義 `app`、`asr`、`translate`、`db`、`embed`、`diarize` 六個服務（另有開發用的 `dev-ldap`）。除了 `app` 的主機連接埠 `18082`，其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`translate`、`db` 的健康檢查通過；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料；`diarize` 也不是必要服務，沒啟動時段落不標說話者。
 
 ### Docker image 與模型權重分別下載在哪裡
 
@@ -68,6 +72,7 @@ Docker image 是「執行環境」，模型權重是服務啟動時載入的「�
 | `translate` | [`ghcr.io/ggml-org/llama.cpp:server-cuda`](https://github.com/ggml-org/llama.cpp/pkgs/container/llama.cpp)，由 GitHub Container Registry 下載含 CUDA 的 llama.cpp server | llama.cpp 啟動時依 `--hf-repo`、`--hf-file` 從 Hugging Face 下載 Gemma GGUF | [`compose.yaml`](compose.yaml) 的 `translate.image` 與 `command` |
 | `db` | [`pgvector/pgvector:0.8.7-pg17-trixie`](https://hub.docker.com/r/pgvector/pgvector)：PostgreSQL 17 加上 pgvector，與原本的 `postgres:17` 同為 Debian trixie，既有資料目錄可直接沿用 | 不需要模型；資料在 `meeting-db` volume | [`compose.yaml`](compose.yaml) 的 `db` |
 | `embed` | [`ghcr.io/ggml-org/llama.cpp:server`](https://github.com/ggml-org/llama.cpp/pkgs/container/llama.cpp)（CPU 版） | 依 `EMBED_MODEL_REPO`、`EMBED_MODEL_FILE` 從 Hugging Face 下載 embedding GGUF（預設 `ggml-org/bge-m3-Q8_0-GGUF`，約 600 MB） | [`compose.yaml`](compose.yaml) 的 `embed` |
+| `diarize` | 本機建置：[`docker/diarize/Dockerfile`](docker/diarize/Dockerfile) 以固定版本編譯 [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp)（只複製靜態連結的 `transcribe-cli`），加上 Python 標準函式庫寫的小型 HTTP 服務 | 首次啟動從 Hugging Face 下載 `handy-computer/MOSS-Transcribe-Diarize-gguf` 的 Q8_0（約 1 GB，Apache-2.0）到 `diarize-model-cache` | [`compose.yaml`](compose.yaml) 的 `diarize` |
 | `app` | 不使用預先發佈的專案 image；Compose 由 `build: ./webapp` 本機建置。[`webapp/Dockerfile`](webapp/Dockerfile) 以 `python:3.12-slim` 為基底，安裝 `webapp/requirements.txt` | 不下載或保存 ASR／翻譯模型；執行 FastAPI 與靜態 Web UI | [`compose.yaml`](compose.yaml) 的 `app.build`、[`webapp/Dockerfile`](webapp/Dockerfile) |
 
 模型快取位置也分開：ASR 與 VAD 共用 `model-cache`，掛載到 ASR 容器的 `/models`，Hugging Face 快取目錄是 `/models/huggingface`；Gemma 權重使用 `translation-model-cache`，掛載至翻譯容器的 `/root/.cache`；embedding 權重使用 `embed-model-cache`。因此一般執行 `docker compose down` 後仍會保留模型；只有 `docker compose down -v` 才會刪除這些 named volumes。
@@ -319,7 +324,23 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - **同時修改**：兩人改同一段時，後送出的人會看到「這段已被其他人修改，已重新載入」。
 - **匯出 ASR 微調資料**：會議紀錄頁選團隊與日期區間，下載 zip：每個已確認或已修改的段落一個 WAV（16 kHz 單聲道，段落本身的區間），加上 `manifest.jsonl`，每行欄位為 `audio`、`text`（修正後）、`asr_text`（原始辨識）、`language`、`engine`、`meeting_id`、`seq`、`start_ms`、`end_ms`、`edited`、`reviewed_by`。
 
+- **說話者**：見下一節；段落原文上方顯示說話者，可個別修改。
+
 **資料保存**：錄音在 `output/teams/<團隊 id>/<會議 id>/audio.wav`，每小時約 115 MB（16 kHz × 16 bit × 單聲道 = 32 KB/s）；段落、修改紀錄與會議詞彙在 Postgres（`segments`、`segment_history`）。本功能上線前的會議沒有段落資料，列表中顯示「沒有校對資料」。
+
+## 說話者辨識
+
+會議結束後，錄音（10 秒以上）自動排入說話者辨識；完成後每段標上說話者，校對頁上方的「說話者」區塊顯示狀態與說話者清單。全部在本機 CPU 執行，錄音不離開主機，也不使用 GPU。
+
+- **模型**：[MOSS-Transcribe-Diarize](https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize)（OpenMOSS，0.9B，Apache-2.0）的 Q8_0 量化版，由 transcribe.cpp 在 CPU 執行（`diarize` 服務）。以真實中文會議評估（AliMeeting、AISHELL-4），說話者錯誤率平均 5.6%、人數 5 段猜對 4 段；比較過的 sherpa-onnx（pyannote＋CAM++）為 11.7%，34 分鐘長會議退化到 29.4%。GPU 版準確度相同，但長會議需要 8 GB 顯示記憶體，所以不用。細節見 [bench/README.md](bench/README.md) 的「說話者辨識評估」。
+- **時間**：一次處理一場，排隊依序進行。處理時間約為會議長度的 0.4 到 1.1 倍（對話越密越慢），期間使用 `DIARIZE_THREADS` 個 CPU 執行緒（預設 16）；記憶體約 1 GB 加上每分鐘音訊 85 MB。超過約 2.9 小時的錄音無法處理，狀態會顯示失敗原因。
+- **標到段落**：MOSS 會輸出每位說話者講的文字。段落的說話者以文字比對決定（兩邊轉成繁體、去掉標點後比對，至少對到段落三成的字），不受轉錄延遲影響；對不上時改用時間重疊（段落時間往前移 1 秒）。一段跨兩位說話者時標給講比較多的人。辨識完成後才存進來的段落，存檔時自動補標。
+- **命名**：點說話者清單上的名字，可指定為團隊成員（顯示成員名稱）或自填名字（最多 40 字），一次套用到他所有段落；沒命名時顯示「說話者 1」。
+- **修正**：段落原文上方的說話者選單可改成另一位、新增說話者，或「未指定說話者」；手動指定的段落之後補標不會蓋掉。
+- **重新辨識**：會清除名字與手動指定（每次辨識的說話者編號不一定對應同一人），按鈕會先確認。
+- **紀要**：送給紀要模型的段落會帶說話者名字（`[3] 林怡安：我來處理報價`），提示詞說明名字來自聲音辨識、可能有誤；模型判斷負責人時會參考。
+- **語言**：中文、英文直接指定；日文與其他語言自動判斷（日文對談實測可分出說話者，未以標準答案評估）。
+- **不做的**：開會中即時顯示說話者（MOSS 不是串流模型）、跨會議自動認出同事；搜尋、問答與匯出檔目前不顯示說話者。
 
 ## 會議紀要
 
@@ -428,6 +449,8 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `EMBED_POOLING` | `cls` | 模型訓練時用的 pooling：bge-m3 `cls`、Qwen3-Embedding `last`、embeddinggemma `mean` |
 | `EMBED_THREADS` | `8` | `embed` 使用的 CPU 執行緒數 |
 | `EMBED_URL` | `http://embed:5001` | app 連到 embedding 服務的位址；設為空字串則問答只用關鍵字 |
+| `DIARIZE_URL` | `http://diarize:5002` | app 連到說話者辨識服務的位址；設為空字串則不辨識說話者 |
+| `DIARIZE_THREADS` | `16` | `diarize` 使用的 CPU 執行緒數；調低會變慢，但留更多 CPU 給其他服務 |
 | `SESSION_COOKIE_SECURE` | 空 | 以 HTTPS 對外提供時設 `1`，登入 cookie 一律加上 Secure，不會經由明文 HTTP 送出 |
 
 **辨識引擎**（頁面選單，預設本機）：
@@ -459,6 +482,9 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `GET /api/meetings/{id}/segments/{seq}/history` | 段落的修改紀錄 |
 | `GET /api/teams/{team}/asr-export?from=&to=` | 匯出 ASR 微調資料 zip |
 | `GET /meetings/{id}/minutes` | 會議紀要頁 |
+| `GET /api/meetings/{id}/speakers`、`POST …/speakers/run` | 說話者辨識狀態、說話者清單與團隊成員；排入辨識（排隊或進行中 409、未設定 400、沒有錄音 422） |
+| `PUT /api/meetings/{id}/speakers/{label}`、`POST …/speakers` | 命名說話者 `{username}`（團隊成員）或 `{name}`（最多 40 字）；新增說話者 |
+| `PUT /api/meetings/{id}/segments/{seq}/speaker` | 改段落的說話者 `{label}`（`null`＝未指定），之後補標不覆蓋 |
 | `GET /api/meetings/{id}/minutes`、`POST …/minutes/generate` | 紀要內容與狀態；在背景產生（執行中 409、模型未設定 400、沒有段落 422） |
 | `PATCH …/minutes/summary`、`POST …/minutes/items`、`PATCH …/minutes/items/{itemId}`、`POST …/items/{itemId}/confirm`、`…/reject` | 編輯摘要、新增、修改、確認、駁回條目（皆帶 `version`，過期回 409） |
 | `GET /api/meetings/{id}/minutes.md` | 下載 Markdown 會議紀錄（只含已確認條目） |

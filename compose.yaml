@@ -98,6 +98,25 @@ services:
       retries: 40
       start_period: 10m
 
+  # Speaker diarization (speaker-diarization): MOSS-Transcribe-Diarize Q8_0 on CPU via transcribe.cpp, after a meeting
+  # ends. No GPU (bench/README.md 2026-11-08 說話者辨識評估). The first start downloads the model (~1 GB). The app
+  # works without it (no speakers). Recordings are read-only.
+  diarize:
+    build: ./docker/diarize
+    environment:
+      DIARIZE_THREADS: ${DIARIZE_THREADS:-16}
+      DIARIZE_MODEL_URL: ${DIARIZE_MODEL_URL:-https://huggingface.co/handy-computer/MOSS-Transcribe-Diarize-gguf/resolve/main/MOSS-Transcribe-Diarize-Q8_0.gguf}
+    volumes:
+      - ./output:/output:ro
+      - diarize-model-cache:/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5002/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 10m
+
   app:
     build: ./webapp
     volumes:
@@ -139,6 +158,8 @@ services:
       # 問答 (meeting-qa): the embed service above; the file name picks the model's query/document prefixes.
       EMBED_URL: ${EMBED_URL:-http://embed:5001}
       EMBED_MODEL_FILE: ${EMBED_MODEL_FILE:-bge-m3-q8_0.gguf}
+      # Speaker diarization service above; empty = off.
+      DIARIZE_URL: ${DIARIZE_URL-http://diarize:5002}
     ports:
       - "${APP_PORT:-18082}:8080"
     depends_on:
@@ -186,4 +207,5 @@ volumes:
   model-cache:
   translation-model-cache:
   embed-model-cache:
+  diarize-model-cache:
   meeting-db:

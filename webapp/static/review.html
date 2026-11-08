@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>會後校對 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261108b"><link rel="stylesheet" href="/assets/admin.css?v=20261108d"><link rel="stylesheet" href="/assets/review.css?v=20261108b"><link rel="stylesheet" href="/assets/minutes.css?v=20261108d"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>會後校對 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261108b"><link rel="stylesheet" href="/assets/admin.css?v=20261108d"><link rel="stylesheet" href="/assets/review.css?v=20261108b"><link rel="stylesheet" href="/assets/minutes.css?v=20261108d"><link rel="stylesheet" href="/assets/speakers.css?v=20261108a"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>會議紀錄</small></span></a>
@@ -30,6 +30,7 @@
     <label id="refineRow" class="toggle" hidden><input id="refine" type="checkbox"> 雲端精修 <span class="muted small">會議內容會傳送到外部服務</span></label>
   </div>
 
+  <section id="speakers" class="card speakers" aria-label="說話者" hidden></section>
   <p id="notice" class="alert" role="alert" hidden></p>
   <div class="segment-head" aria-hidden="true"><span>時間</span><span>原文（轉錄）</span><span>譯文</span><span></span></div>
   <section id="segments" class="segments" aria-label="段落"></section>
@@ -40,5 +41,6 @@
 <script src="/assets/translation-context.js?v=20261104b"></script>
 <script src="/assets/timeline.js?v=20261106a"></script><script src="/assets/meeting-catalog.js?v=20261105a"></script>
 <script src="/assets/meeting-nav.js?v=20261107a"></script>
-<script src="/assets/review.js?v=20261108b"></script>
+<script src="/assets/speakers.js?v=20261108a"></script>
+<script src="/assets/review.js?v=20261108c"></script>
 </body></html>

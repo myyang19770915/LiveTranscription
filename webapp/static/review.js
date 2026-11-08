@@ -153,7 +153,7 @@ function row(segment){
   const label=segment.target.match(/^\[([^\]]*)\]\n/u)?.[1];
   const article=el('article',{className:`seg ${segment.state}${open?' open':''}`,id:`seg-${segment.seq}`},
     el('button',{type:'button',className:'seg-time',textContent:`${clock(segment.startMs)}–${clock(segment.endMs)}`,title:'播放這段',onclick:()=>select(segment.seq)}),
-    editing===segment.seq?editor(segment):el('div',{className:'seg-source',textContent:segment.source,onclick:()=>select(segment.seq)}),
+    editing===segment.seq?editor(segment):el('div',{className:'seg-source',onclick:()=>select(segment.seq)},Speakers.chip(segment),el('span',{textContent:segment.source})),
     el('div',{className:'seg-target',onclick:()=>select(segment.seq)},label?el('small',{className:'muted',textContent:label}):null,el('span',{textContent:target})),
     el('span',{className:`chip state-${segment.state}`,textContent:STATE[segment.state]}));
   if(open)article.append(el('div',{className:'seg-panel'},...actions(segment)));
@@ -173,6 +173,7 @@ async function load(){
   MeetingNav.show(meeting);
   if(!segments.length)$('segments').replaceChildren(el('div',{className:'card empty'},el('b',{textContent:'這場會議沒有段落'}),el('p',{textContent:'會議中定稿的段落才會出現在這裡。'})));
   else render();
+  Speakers.load();   // speaker-diarization: status, names, and each segment's speaker
   // A minutes evidence link (#seg-N) opens that segment, scrolled into view; playback waits for a click.
   const linked=Number(location.hash.match(/^#seg-(\d+)$/)?.[1]);
   if(segments.some(s=>s.seq===linked)){selected=linked;render();$(`seg-${linked}`).scrollIntoView({block:'center'})}

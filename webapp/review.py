@@ -18,6 +18,7 @@ from starlette.background import BackgroundTask
 
 import auth
 import db
+import diarize
 import meeting_audio
 import team_access
 
@@ -71,6 +72,7 @@ async def save_segments(meeting_id: str, body: SegmentsIn, user: auth.CurrentUse
                 "(SELECT 1 FROM segment_history h WHERE h.meeting_id = segments.meeting_id AND h.seq = segments.seq)",
                 [(meeting["id"], s.seq, s.startMs, max(s.startMs, s.endMs), s.source, s.source, s.target, s.target, s.detected)
                  for s in body.segments])
+        await diarize.label_new_segments(conn, meeting["id"])
     return {"saved": len(body.segments)}
 
 

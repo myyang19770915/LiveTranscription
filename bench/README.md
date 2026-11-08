@@ -65,6 +65,48 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - `lag_gateway.py`：以指定封包大小把 bench 片段經 `/ws/transcribe`（翻譯模式，不建會議、不寫檔）送給指定引擎，記錄每個事件的到達時間；`--compare` 對另一條軌印出同一段文字晚多少到達（中位數／p10／p90），中日文片段另印文字落後人工字幕多久（`YUQIAO_SESSION=… python bench/lag_gateway.py <片段> <local|mai|hybrid> <封包毫秒> <秒數> <out.jsonl> [--compare 另一條.jsonl]`）
 - `replay_browser.py --save-meeting`：重播存成一場會議（只有段落、沒有錄音），可在校對頁查看
 
+## 2026-11-08 說話者辨識評估（speaker-diarization）
+
+資料：Hugging Face `argmaxinc/ali-meetings`（AliMeeting 測試集，遠場會議，4 人）與 `argmaxinc/aishell-4`（AISHELL-4 測試集，6 人）的 parquet 分片，含逐人發言時間。取 AliMeeting 3 場、AISHELL-4 2 場的前 10 分鐘，另取一場完整 34 分鐘的 AliMeeting。分數：DER（10 毫秒格、最佳說話者對應、標準答案邊界前後 0.25 秒不計、含重疊）與段落歸屬正確率（每段 1 秒以上的標準答案發言，歸給正確說話者的時間比例）。速度＝處理時間÷音訊長度。
+
+| 方案 | 10 分鐘平均 DER | 段落歸屬正確率 | 34 分鐘 DER | 速度 |
+|---|---|---|---|---|
+| sherpa-onnx：pyannote segmentation 3.0＋CAM++ zh_en（閾值 1.0） | 11.7% | 85.4% | 29.4% | 0.09 |
+| 同上，閾值 0.9／1.1 | 14.1%／23.6% | 82.6%／72.8% | — | — |
+| 同上，給正確人數 | 24.3%（3 段） | 75.9% | — | — |
+| sherpa-onnx：TitaNet small／WeSpeaker ResNet34（閾值 1.0） | 26.7%／46.2% | 70.7%／51.4% | — | — |
+| MOSS-Transcribe-Diarize 0.9B，GPU bf16（PyTorch） | 5.4% | 92.7% | 7.2% | 0.20（34 分鐘 0.57，峰值 8.1 GB） |
+| MOSS-Transcribe-Diarize Q8_0，CPU 16 執行緒（transcribe.cpp） | **5.6%** | **92.7%** | — | 0.42–1.13（AISHELL-4 0.42／0.47，AliMeeting 1.13） |
+| MOSS，PyTorch CPU float32 | — | — | — | 超過 1.2（10 分鐘音訊 12 分鐘未完成，停止） |
+
+人數：MOSS 5 段猜對 4 段（AISHELL-4 一段 7/6）；sherpa（閾值 1.0）每段多切 1–11 人。日文對談（ja_pivot）與英文法說會（en_tesla）MOSS 分別切出 2 人、5 人，內容合理（無標準答案）。AliMeeting 後兩段的 CPU 時間與 GPU 測試同時執行，偏慢。
+
+結論：採用 MOSS Q8_0 CPU 版（會後背景執行，不占 GPU）。重現：
+
+```bash
+docker build -t diar-eval -f bench/diarize/Dockerfile.eval bench/diarize
+mkdir -p bench/diarize/work/data && cd bench/diarize/work   # 下載分片到 data/、sherpa 模型到 models/、MOSS 權重到 moss-model/
+docker run --rm -v "$PWD/..:/bench" -w /bench/work diar-eval python ../prep.py 10 2 data/clips ali=data/ali0.parquet aishell=data/aishell0.parquet
+docker run --rm -v "$PWD/..:/bench" -w /bench/work diar-eval python ../run_sherpa.py cam-1.0 3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx 1.0 8
+docker run --rm --gpus all -v "$PWD/..:/bench" -w /bench/work diar-eval python ../run_moss.py moss-gpu cuda 4
+docker run --rm --entrypoint sh -v "$PWD/..:/bench" -w /bench/work asr_confucius4-r2t2-diarize ../run_tcpp.sh moss-q8cpu data/clips 16
+docker run --rm -v "$PWD/..:/bench" -w /bench/work diar-eval python ../score.py
+```
+
+### 段落層級（真實頁面錄音）
+
+以假麥克風播放 AliMeeting 一場的前 10 分鐘（4 人），用開會頁（本機引擎、開會模式）錄成一場真實會議，再以 app 的辨識流程（`diarize.run_next`，對 diarize 服務）處理：40 段全部標上說話者，切出 4 人（與標準答案相同），處理 602 秒。每段的「正確說話者」＝段落時間往前移 1 秒後，標準答案中講最久的人；「清楚」＝移 0.5–2 秒結果都一樣且占七成以上。
+
+| 段落時間比實際晚 | 文字對齊（採用） | 只用時間重疊 |
+|---|---|---|
+| 照實（本機引擎） | 85.0% | 92.5% |
+| ＋1 秒 | 85.0% | 90.0% |
+| ＋1.7 秒（約雲端 MAI） | 85.0% | 85.0% |
+| ＋3 秒 | 85.0% | 80.0% |
+| 清楚屬於一人的 18 段 | 100% | 100% |
+
+兩者不一致的 3 段都是多人交替的段落：文字對齊選講了這段最多字的人，標準答案依講話秒數，而且本身就是用時間算的，所以照實時對時間法有利。文字對齊不受轉錄延遲影響，時間法隨延遲下滑，因此採用文字對齊，門檻（前 12 秒、後 3 秒、三成字、時間法前移 1 秒）維持設計值。工具：`bench/diarize/segment_eval.mjs`（錄會議）、`bench/diarize/segment_eval.py`（在 app 容器計分），測試會議事後以 `segment_eval.mjs --delete` 刪除。
+
 ## 2026-11-08 即時翻譯分段比較（live-subtitle-segments，`meetzh` vs `livezh`，盲評 `blindzh`）
 
 即時翻譯模式把中文連續說話的定稿門檻從 100 字降到 40 字（在穩定的逗號切、每段 ≤60 字）。同一批 ASR 軌、同一套上下文機制，重播後依 rubric 盲評：

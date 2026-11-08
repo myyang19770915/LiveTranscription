@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, StringConstraints
 
 import auth
 import db
+import diarize
 import team_access
 
 MINUTES_URL = (os.getenv("MINUTES_URL", "") or os.getenv("TRANSLATE_REFINE_URL", "")).rstrip("/")
@@ -64,9 +65,10 @@ SYSTEM_PROMPT = """你是會議紀錄助理。根據使用者提供的會議逐�
 1. 只根據段落內容，不要推測或補充段落沒有的事；沒有把握就不要列。
 2. 每個條目都要在 evidence 列出支持它的段落編號（方括號裡的數字），至少一個。
 3. owner 只能填「團隊成員」清單中的帳號或顯示名稱；逐字稿提到但不在清單中的人，照原文寫出名字。沒有負責人就留空字串。
-4. 到期日：due_text 寫逐字稿的原話（例如「下週五」「月底前」），due_date 依會議日期換算為 YYYY-MM-DD；無法換算就留空字串。
-5. content 用繁體中文、一句話寫清楚，不加編號。summary 用繁體中文 3 到 6 句。
-6. 只輸出 JSON，格式：
+4. 段落開頭的「名字：」是由聲音辨識出的說話者，可能有誤；判斷「我來處理」這類句子的負責人時可以參考，但以內容為準。
+5. 到期日：due_text 寫逐字稿的原話（例如「下週五」「月底前」），due_date 依會議日期換算為 YYYY-MM-DD；無法換算就留空字串。
+6. content 用繁體中文、一句話寫清楚，不加編號。summary 用繁體中文 3 到 6 句。
+7. 只輸出 JSON，格式：
 {"summary": "…", "items": [{"kind": "decision|action|question|risk", "content": "…", "owner": "", "due_text": "", "due_date": "", "evidence": [1, 2]}]}"""
 
 
@@ -83,7 +85,8 @@ def build_messages(meeting: dict, segments: list[dict], members: list[dict]) -> 
     start = local_start(meeting)
     roster = "\n".join(f"- {m['username']}（{m['display_name']}）" if m["display_name"] and m["display_name"] != m["username"]
                        else f"- {m['username']}" for m in members) or "（無）"
-    lines = "\n".join(f"[{s['seq']}] {s['source']}" for s in segments)
+    lines = "\n".join(f"[{s['seq']}] {s['speaker']}：{s['source']}" if s.get("speaker") else f"[{s['seq']}] {s['source']}"
+                      for s in segments)
     user = (f"會議日期：{start:%Y-%m-%d}（星期{WEEKDAYS[start.weekday()]}）\n"
             f"會議主題：{meeting['title'] or '（未填）'}\n"
             f"團隊成員：\n{roster}\n\n逐字稿段落：\n{lines}")
@@ -177,7 +180,7 @@ async def run_generation(meeting_id) -> None:
     try:
         async with db.connect() as conn:
             meeting = await (await conn.execute("SELECT * FROM meetings WHERE id = %s", (meeting_id,))).fetchone()
-            segments = await (await conn.execute("SELECT seq, source FROM segments WHERE meeting_id = %s ORDER BY seq", (meeting_id,))).fetchall()
+            segments = await (await conn.execute(diarize.SEGMENTS_WITH_SPEAKERS, (meeting_id,))).fetchall()
             members = await team_members(conn, meeting["team_id"])
         data = parse_answer(await call_model(build_messages(meeting, segments, members)))
         items, dropped = clean_items(data.get("items"), {s["seq"] for s in segments}, members)

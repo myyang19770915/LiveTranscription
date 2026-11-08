@@ -28,21 +28,58 @@ code:
 ---
 ### Requirement: Review page shows aligned segments
 
-The review page of a meeting SHALL show every stored segment in order with its time span, current source text and current translation side by side, and SHALL mark each segment as unreviewed, confirmed, or edited.
+The review page of a meeting SHALL show every stored segment in order with its time span, current source text and current translation side by side, and SHALL mark each segment as unreviewed, confirmed, or edited. When the meeting has speakers, each segment SHALL also show its speaker's name (or 說話者 N), and the page SHALL show the meeting's diarization status (queued, running, done or failed with its message) and the list of its speakers.
 
 #### Scenario: Opening a meeting
 
 - **WHEN** a team member opens the review page of a meeting with 42 segments
 - **THEN** 42 rows appear in order, each with its time span formatted as mm:ss, its source and its translation
 
+#### Scenario: Opening a diarized meeting
+
+- **WHEN** a team member opens the review page of a meeting whose diarization is done with speakers 林怡安 and 說話者 2
+- **THEN** each row shows 林怡安, 說話者 2 or no speaker before its text, and the speaker list shows both speakers with their segment counts
+
 
 <!-- @trace
-source: meeting-review
-updated: 2026-11-05
+source: speaker-diarization
+updated: 2026-11-08
 code:
+  - bench/diarize/run_moss.py
+  - bench/diarize/score.py
   - 20261029_185428.mp4
+  - README.md
+  - webapp/diarize.py
+  - bench/diarize/tcpp_parse.py
   - meeting-2026-11-01T00-16-53.txt
+  - webapp/static/speakers.js
+  - bench/diarize/segment_eval.mjs
+  - webapp/static/review.html
+  - bench/diarize/Dockerfile.eval
+  - webapp/server.py
+  - compose.yaml
+  - bench/diarize/prep.py
+  - bench/diarize/segment_eval.py
+  - bench/speakers_e2e.mjs
+  - docker/diarize/Dockerfile
+  - bench/README.md
+  - bench/diarize/run_tcpp.sh
+  - webapp/meeting_audio.py
+  - bench/diarize/metrics.py
+  - bench/diarize/run_sherpa.py
+  - docker/diarize/server.py
   - docs/roadmap.md
+  - webapp/minutes.py
+  - webapp/review.py
+  - webapp/static/review.js
+  - 20261108_143903.mp4
+  - webapp/team_access.py
+  - .env.example
+  - webapp/migrations/012_speakers.sql
+  - webapp/static/speakers.css
+tests:
+  - docker/diarize/test_server.py
+  - webapp/test_server.py
 -->
 
 ---
