@@ -60,7 +60,7 @@ flowchart LR
   diarizeCache --- diarize
 ```
 
-Compose 定義 `app`、`asr`、`translate`、`db`、`embed`、`diarize` 六個服務（另有開發用的 `dev-ldap`）。除了 `app` 的主機連接埠 `18082`，其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`translate`、`db` 的健康檢查通過；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料；`diarize` 也不是必要服務，沒啟動時段落不標說話者。
+Compose 定義 `app`、`asr`、`translate`、`db`、`embed`、`diarize` 六個服務（另有開發用的 `dev-ldap`，以及對外用的 Cloudflare Tunnel `tunnel`，皆以 profile 啟用）。除了 `app` 的主機連接埠 `18082`，其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`translate`、`db` 的健康檢查通過；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料；`diarize` 也不是必要服務，沒啟動時段落不標說話者。
 
 ### Docker image 與模型權重分別下載在哪裡
 
@@ -456,6 +456,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `EMBED_URL` | `http://embed:5001` | app 連到 embedding 服務的位址；設為空字串則問答只用關鍵字 |
 | `DIARIZE_URL` | `http://diarize:5002` | app 連到說話者辨識服務的位址；設為空字串則不辨識說話者 |
 | `DIARIZE_THREADS` | `16` | `diarize` 使用的 CPU 執行緒數；調低會變慢，但留更多 CPU 給其他服務 |
+| `CLOUDFLARE_TUNNEL_TOKEN` | 空 | Cloudflare Tunnel 的 token，只給 compose profile `tunnel` 的 cloudflared 使用（見[對外開放](#對外開放cloudflare-tunnel)） |
 | `SESSION_COOKIE_SECURE` | 空 | 以 HTTPS 對外提供時設 `1`，登入 cookie 一律加上 Secure，不會經由明文 HTTP 送出 |
 
 **辨識引擎**（頁面選單，預設本機）：
@@ -561,6 +562,44 @@ Invoke-RestMethod -Method Post -Uri http://localhost:18082/api/translate -Conten
 - 剩下的扣分大多來自 ASR 錯字，例如 unsupervised 聽成 supervised、WeWork 聽成 Uiwak、陳屍浴室聽成沉屍於世；以及翻譯模型對成語和雙關的理解。
 - 台語（閩南語）不在 MAI 的支援清單上。實測 MAI 和 Confucius 都只能辨識一部分；MAI 開自動偵測時甚至會輸出緬甸文。台語請選「中文」，並使用本機或混合模式。
 - 印尼語 MAI 錯字率 4.4%（Confucius 6.8%），可以使用。
+
+## 對外開放（Cloudflare Tunnel）
+
+用 Cloudflare Tunnel 對外提供，例如 `https://asr.my-yang.online`。本機不用開任何 port，HTTPS 憑證也由 Cloudflare 處理；手機瀏覽器要錄音必須走 HTTPS，所以手機使用時也是走這個網址。
+
+**先確認登入安全**：對外後任何人都能看到登入頁。`dev-ldap` 測試帳號的密碼規則寫在本 README 裡，**不能用在對外的系統**。請改接公司 LDAP，或至少把測試帳號換成只有你知道的密碼（見[登入與團隊](#登入與團隊)）。登入失敗 5 次會鎖住該帳號 5 分鐘。
+
+兩種做法擇一：
+
+**A. 共用這台機器上已在跑的 cloudflared**（後台管理、以 `tunnel run --token` 啟動的通道）。不用新增容器，也不用處理 token：
+
+1. `.env` 設定 `FORWARDED_ALLOW_IPS=127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`，再執行 `docker compose up -d app`。cloudflared 經由 Docker Desktop 的主機閘道連進來，app 要相信它轉來的 `https`，登入 cookie 才會加上 Secure。
+2. Cloudflare 後台：Zero Trust → Networks → Tunnels，找到那個 cloudflared 對應的通道（狀態 HEALTHY），按 Configure / Edit。
+3. **Public hostnames**（新版介面叫 Published application routes）→ Add：Subdomain `asr`、Domain `my-yang.online`、Path 留空、Service Type `HTTP`、URL `host.docker.internal:18082` → Save。Cloudflare 會自動建立 DNS 記錄。
+
+缺點是這套系統的對外連線會跟著那個 cloudflared：停掉它所屬的專案，這個網址也會一起斷線。
+
+**B. 本專案專用的通道**：compose 的 `tunnel` 服務（profile `tunnel`）跟 app 在同一個 Compose 網路，轉送目標是 `http://app:8080`，不經過主機的 18082 port：
+
+1. Cloudflare 後台：Zero Trust → Networks → Tunnels → Create a tunnel → 選 Cloudflared → 取名（例如 `yuqiao-live`）→ 在安裝畫面選 Docker，複製指令中 `--token` 後面那一長串。
+2. 貼到 `.env` 的 `CLOUDFLARE_TUNNEL_TOKEN=`，並照 A 的第 1 步設定 `FORWARDED_ALLOW_IPS`。
+3. 啟動：
+
+   ```powershell
+   docker compose up -d app
+   docker compose --profile tunnel up -d tunnel
+   docker compose logs --tail 20 tunnel   # 出現 Registered tunnel connection 表示已連上
+   ```
+
+4. 在後台這個通道的 Public hostnames → Add：Subdomain `asr`、Domain `my-yang.online`、Service Type `HTTP`、URL `app:8080` → Save。
+
+完成後用瀏覽器開 `https://asr.my-yang.online`，應該會出現登入頁；登入後右上角應顯示「服務就緒」。
+
+補充：
+
+- 要在登入頁之前再多一道關卡，可以在 Zero Trust → Access → Applications 為 `asr.my-yang.online` 建立 Self-hosted 應用，政策設為只允許指定的 Email（一次性驗證碼）。
+- 停止對外：在後台刪除這個 Public hostname（B 也可以執行 `docker compose --profile tunnel stop tunnel`）。
+- 不要再用 `cloudflared tunnel --url …` 的臨時網址（trycloudflare.com）：網址隨機，而且任何拿到網址的人都能連進來。
 
 ## 驗證與日常維護
 

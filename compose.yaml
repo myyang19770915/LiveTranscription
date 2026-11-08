@@ -147,6 +147,7 @@ services:
       LDAP_DISPLAY_ATTR: ${LDAP_DISPLAY_ATTR:-displayName}
       LDAP_CA_FILE: ${LDAP_CA_FILE:-}
       # Behind an HTTPS reverse proxy: trust its X-Forwarded-Proto (uvicorn reads this) and/or force Secure cookies.
+      # With the tunnel service it connects from the Compose network: e.g. 127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
       # Local dates for the ASR training export's date range.
@@ -201,6 +202,19 @@ services:
       LDAP_ADMIN_PASSWORD: ${DEV_LDAP_ADMIN_PASSWORD:-dev-only-not-reachable-outside-compose}
     volumes:
       - ./docker/dev-ldap/users.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-users.ldif:ro
+    restart: unless-stopped
+
+  # Public access through a Cloudflare Tunnel (profile "tunnel"; see README「對外開放」). The tunnel is created in the
+  # Cloudflare dashboard, which also holds its routes: point the public hostname at http://app:8080. Outbound only:
+  # no port is opened on this machine. The token stays in .env (CLOUDFLARE_TUNNEL_TOKEN), never in this file.
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.7
+    profiles: ["tunnel"]
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}   # empty: cloudflared stops with an error; set it in .env
+    depends_on:
+      - app
     restart: unless-stopped
 
 volumes:
