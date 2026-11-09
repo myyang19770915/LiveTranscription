@@ -87,8 +87,8 @@ try {
   check('浮動字幕 opens a window', popup !== null && (await page.getAttribute('#subtitles', 'aria-pressed')) === 'true');
   if (popup) {
     await popup.waitForFunction(() => document.querySelector('.sub-text')?.textContent.trim().length > 0, null, {timeout: 20000}).catch(() => {});
-    const shown = await popup.evaluate(() => ({text: document.querySelector('.sub-text').textContent, source: !!document.querySelector('.sub-source')?.offsetParent,
-      size: getComputedStyle(document.querySelector('.sub-text')).fontSize}));
+    const shown = await popup.evaluate(() => { const last = [...document.querySelectorAll('.sub-text')].at(-1);
+      return {text: last.textContent, source: !!document.querySelector('.sub-source')?.offsetParent, size: getComputedStyle(last).fontSize}; });
     const pageTranslation = await page.textContent('#translation');
     check('the subtitles show translated text from the page', shown.text.trim().length > 0 && pageTranslation.includes(shown.text.trim().slice(-6)), shown);
     check('the source is hidden by default', !shown.source);
@@ -100,6 +100,12 @@ try {
     const example = await popup.evaluate(() => { const t = document.querySelector('.sub-text'), d = document.querySelector('.sub-draft');
       return {text: t.textContent, draft: d.textContent, draftShown: !!d.offsetParent, distinct: getComputedStyle(d).color !== getComputedStyle(t).color || getComputedStyle(d).fontSize !== getComputedStyle(t).fontSize}; });
     check('the draft shows in its own style', example.text === '大家好。' && example.draft === '今天先' && example.draftShown && example.distinct, example);
+    // Earlier segments stay above (as many as fit), each source above its translation in the same text size; older ones dimmed.
+    await page.evaluate(() => Subtitles.update({pending: '', draft: '', history: Array.from({length: 5}, (_, i) => ({source: `原文第${i + 1}段。`, target: `Segment ${i + 1}.`}))}));
+    const kept = await popup.evaluate(() => { const segs = [...document.querySelectorAll('.sub-seg')], size = e => getComputedStyle(e).fontSize;
+      return {count: segs.length, old: segs.map(s => s.classList.contains('old')), first: segs[0]?.textContent, sizes: [size(document.querySelector('.sub-source')), size(document.querySelector('.sub-text'))]}; });
+    check('the floating window keeps earlier segments above, source and translation the same size', kept.count === 5 && kept.old.join() === 'true,true,true,false,false'
+      && kept.first === '原文第1段。Segment 1.' && kept.sizes[0] === kept.sizes[1], kept);
     await page.evaluate(() => Subtitles.update({done: '第一句。', pending: '第二句還在講', translation: 'First.', draft: 'Second being'}));
     const pipColours = await popup.evaluate(() => { const c = s => getComputedStyle(document.querySelector(s)).color; return {now: c('.sub-now'), draft: c('.sub-draft'), text: c('.sub-text'), nowText: document.querySelector('.sub-now').textContent}; });
     check('the floating window colours the current speech like its draft', pipColours.now === pipColours.draft && pipColours.now !== pipColours.text && pipColours.nowText === '第二句還在講', pipColours);

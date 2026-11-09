@@ -57,11 +57,15 @@ $('themeToggle').onclick=()=>applyTheme(document.documentElement.dataset.theme==
 function setStatus(text, kind='idle') { $('status').className = `status ${kind}`; $('status').querySelector('span').textContent = text; $('status').title=text; }
 // What the subtitle surfaces show: the previous finalized segment's source, the speech being translated now, the last
 // two finalized translations and the draft (live-subtitle-segments).
+// history: the recent finalized segments for the floating window, which shows as many as it has room for.
+const SUBTITLE_HISTORY=30;
 function subtitleParts(){
   const pending=transcript.slice(translationOffset),last=s=>window.Subtitles?.lastSentences(s,1)||'',two=s=>window.Subtitles?.lastSentences(s,2)||'';
-  if(!translateOnly())return {done:last(transcript.slice(0,translationOffset)),pending:pending+tentative,translation:two(translated),draft:draftText};   // 開會: sentences, as before
+  if(!translateOnly())return {done:last(transcript.slice(0,translationOffset)),pending:pending+tentative,translation:two(translated),draft:draftText,   // 開會: sentences, as before
+    history:(window.Subtitles?.sentences(translated)||[]).slice(-SUBTITLE_HISTORY).map(target=>({source:'',target}))};
   const finals=finalizedRecords();
-  return {done:finals.at(-1)?.source||'',pending:pending+tentative,translation:finals.slice(-2).map(s=>s.target).join(' '),draft:draftText};
+  return {done:finals.at(-1)?.source||'',pending:pending+tentative,translation:finals.slice(-2).map(s=>s.target).join(' '),draft:draftText,
+    history:finals.slice(-SUBTITLE_HISTORY).map(s=>({source:s.source,target:s.target}))};
 }
 function render(id, value) { if(id==='transcript'){const parts=subtitleParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72; el.textContent=value;
   if(id==='transcript'&&tentative){const span=document.createElement('span');span.className='tentative';span.textContent=tentative;el.append(span)}
