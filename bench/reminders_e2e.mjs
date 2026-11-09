@@ -72,10 +72,10 @@ try {
     await page.goto(`${app}/actions?item=${overdue}`);
     await page.waitForSelector('.remind-state');
     if (theme === 'light') {
-      check('the owner sees reminders on with a switch', /^開啟/.test(await page.textContent('.remind-state')) && await page.isVisible('text=關閉提醒'));
-      await page.click('text=關閉提醒');
+      check('the owner sees reminders on with a switch', await page.textContent('.remind-state') === '開啟' && await page.getAttribute('.remind-switch', 'aria-checked') === 'true');
+      await page.click('.remind-switch');
       await page.waitForFunction(() => document.querySelector('.remind-state')?.textContent === '已關閉');
-      check('switched off: the card shows the muted mark', await page.isVisible(`#action-${overdue} .issue-muted`) && await page.isVisible('text=開啟提醒'));
+      check('switched off: the card shows the muted mark', await page.isVisible(`#action-${overdue} .issue-muted`) && await page.getAttribute('.remind-switch', 'aria-checked') === 'false');
     }
     await page.screenshot({path: join(out, `reminders-${theme}.png`)});
     await context.close();
@@ -86,7 +86,8 @@ try {
     const page = await context.newPage();
     await page.goto(`${app}/actions?item=${overdue}`);
     await page.waitForSelector('.remind-state');
-    check('another member sees the state without a switch', await page.textContent('.remind-state') === '已關閉' && !(await page.isVisible('text=開啟提醒')));
+    check('another member sees the state without a switch', await page.textContent('.remind-state') === '已關閉' && !(await page.isVisible('.remind-switch'))
+      && /只有負責人或系統管理員可切換/.test(await page.textContent('.remind-hint')));
     await context.close();
   }
 

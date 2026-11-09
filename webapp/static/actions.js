@@ -224,11 +224,14 @@ function deleteButton(item){
 // Due-date e-mail reminders (action-reminders): the owner or an administrator switches them; others see the state.
 function reminderField(item){
   const open=['todo','doing'].includes(item.status);
-  const state=!item.remind?'已關閉':!item.owner||!item.dueDate?'需要負責人與到期日才會提醒':!open?'已完成或取消，不再提醒'
-    :'開啟（到期前 3 天、到期當天、逾期每天寄給負責人）';
-  const text=el('span',{className:`remind-state${item.remind?'':' off'}`,textContent:state});
-  if(!(me?.admin||me?.username===item.owner))return [text];
-  const button=el('button',{type:'button',className:'text-button',textContent:item.remind?'關閉提醒':'開啟提醒'});
+  const allowed=me?.admin||me?.username===item.owner;
+  const hint=!item.remind?'不會寄出這件事的提醒':!item.owner||!item.dueDate?'需要負責人與到期日才會提醒':!open?'已完成或取消，不再提醒'
+    :'到期前 3 天、到期當天、逾期每天寄給負責人';
+  const state=el('span',{className:`remind-state${item.remind?'':' off'}`,textContent:item.remind?'開啟':'已關閉'});
+  const note=el('p',{className:'remind-hint',textContent:allowed?hint:`${hint}（只有負責人或系統管理員可切換）`});
+  if(!allowed)return [state,note];
+  const button=el('button',{type:'button',className:'remind-switch',title:item.remind?'關閉提醒':'開啟提醒',ariaLabel:'Email 提醒'});
+  button.setAttribute('role','switch');button.setAttribute('aria-checked',String(item.remind));
   button.onclick=async()=>{
     button.disabled=true;
     const response=await fetch(`${actionUrl(item.id)}/remind`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({on:!item.remind})});
@@ -239,7 +242,7 @@ function reminderField(item){
     if(!$('detail').hidden&&Number(params.get('item'))===item.id)openDetail(item.id,{keep:true});
     panelError(response.ok?'':typeof result.detail==='string'?result.detail:'切換失敗');
   };
-  return [text,button];
+  return [button,state,note];
 }
 function openDetail(id,{cancel=false,keep=false}={}){
   const item=data.items.find(i=>i.id===id);
@@ -267,7 +270,7 @@ function openDetail(id,{cancel=false,keep=false}={}){
     field('來源',item.meetingId?el('a',{href:`/meetings/${item.meetingId}/minutes#item-${item.id}`,textContent:meetingName(item)})
       :el('span',{textContent:`${ActionBoard.BOARD_SOURCE}${item.series?`，系列「${item.series}」的會議會帶出`:''}`})),
     el('p',{className:'detail-hint muted small',textContent:'按「歷程」看每次狀態變更；會議中套用的進度提示會附上那場會議的連結。'}),
-    item.meetingId?null:el('div',{className:'detail-danger'},deleteButton(item)));
+    item.meetingId?'':el('div',{className:'detail-danger'},deleteButton(item)));   // replaceChildren would print null
   // Opened by dropping on 已取消: ask for the reason right away.
   if(cancel){const select=status.querySelector('select');select.value='cancelled';select.dispatchEvent(new Event('change'))}
 }
