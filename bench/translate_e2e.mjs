@@ -182,6 +182,12 @@ try {
     const inside = (r, o) => r.bottom <= o.bottom + 1 && r.bottom > o.top;
     return {bodyLines: br.height / line, textLines: t.height / line, boxRatio: b.getBoundingClientRect().height / innerHeight, draftVisible: inside(dr, br), nowVisible: inside(nr, src) && inside(src, br)}; });
   check('long content: translation at most two lines, body under five, the current speech and the draft visible, the box under half the window', sized.textLines <= 2.05 && sized.bodyLines <= 5.2 && sized.boxRatio <= 0.5 && sized.draftVisible && sized.nowVisible, sized);
+  // Fixed height, one text size: the box keeps its height with little content, and source, translation and draft match.
+  const fixedBefore = await page.evaluate(() => document.querySelector('#screenView .overlay-subs').getBoundingClientRect().height);
+  await page.evaluate(() => Overlay.update({done: '短', pending: '', translation: 'Hi.', draft: ''}));
+  const fixed = await page.evaluate(() => { const b = document.querySelector('#screenView .overlay-subs'), size = s => getComputedStyle(b.querySelector(s)).fontSize;
+    return {height: b.getBoundingClientRect().height, sizes: [size('.ov-done'), size('.ov-text'), size('.ov-draft')]}; });
+  check('the subtitle box keeps its height and source and translation are the same size', Math.abs(fixed.height - fixedBefore) < 1 && new Set(fixed.sizes).size === 1, {fixedBefore, ...fixed});
   await page.evaluate(() => Overlay.update({done: '上一段原文', pending: '', translation: 'Seg A. Seg B.', draft: ''}));
   const segs = await page.evaluate(() => ({done: document.querySelector('#screenView .ov-done').textContent, text: document.querySelector('#screenView .ov-text').textContent}));
   check('the overlay shows the previous segment source and the last two segments as given', segs.done === '上一段原文' && segs.text === 'Seg A. Seg B.', segs);

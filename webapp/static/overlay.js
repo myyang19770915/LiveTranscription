@@ -31,9 +31,9 @@ window.Overlay=(()=>{
     b.dataset.size=String(shared.size);b.style.setProperty('--ov-alpha',String(settings.opacity/100));
     const source=b.querySelector('.ov-source'),text=b.querySelector('.ov-text'),draft=b.querySelector('.ov-draft');
     source.querySelector('.ov-done').textContent=(latest.done||'').trim();source.querySelector('.ov-now').textContent=window.Subtitles?.lastSentences(latest.pending,2)||'';
-    source.hidden=!settings.source||!source.textContent.trim();
+    source.hidden=!settings.source;   // an empty source keeps its lines: the box height does not change
     text.textContent=(latest.translation||'').trim();   // app.js already sends the last two finalized segments
-    draft.textContent=latest.draft||'';draft.hidden=!latest.draft;
+    draft.textContent=latest.draft||'';
     b.querySelector('.ov-toggle-source').setAttribute('aria-pressed',String(settings.source));
     b.querySelector('.ov-opacity input').value=String(settings.opacity);
     b.querySelector('.ov-empty').hidden=Boolean(text.textContent||draft.textContent);

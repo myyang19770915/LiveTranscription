@@ -8,10 +8,10 @@
   text-shadow: 0 1px 3px rgba(0, 0, 0, .6); cursor: grab; user-select: none; touch-action: none;
   font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif; }
 .overlay-subs.dragging { cursor: grabbing; }
-.overlay-subs[data-size="1"] { font-size: 28px; }
-.overlay-subs[data-size="2"] { font-size: 34px; }
-.overlay-subs[data-size="3"] { font-size: 40px; }
-.overlay-subs[data-size="4"] { font-size: 48px; }
+.overlay-subs[data-size="1"] { font-size: 22px; }
+.overlay-subs[data-size="2"] { font-size: 28px; }
+.overlay-subs[data-size="3"] { font-size: 34px; }
+.overlay-subs[data-size="4"] { font-size: 40px; }
 .ov-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 12px; }
 .ov-bar button { height: 26px; padding: 0 10px; border: 1px solid rgba(255, 255, 255, .35); border-radius: 999px; background: rgba(255, 255, 255, .12);
   color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
@@ -19,16 +19,16 @@
 .ov-bar button[aria-pressed="true"] { background: var(--accent); border-color: transparent; color: var(--accent-ink, #fff); }
 .ov-opacity { display: flex; align-items: center; gap: 6px; margin-left: auto; color: rgba(255, 255, 255, .85); cursor: default; }
 .ov-opacity input { width: 100px; accent-color: var(--accent); }
-/* Subtitle-sized: at most four lines of the translation size, hugging the bottom so the newest words stay in view. */
-/* Subtitle-sized: each part keeps at most two of its own lines, hugging its bottom so the newest words stay in view;
-   the source line and the draft are never pushed out by a long finalized translation. */
+/* A fixed-height box: source and translation lines are the same size, and every part has a fixed number of lines
+   (原文 2, 譯文 2, 暫譯 1) whether it is empty or full, so the box never grows or shrinks while people talk. Short text
+   starts at the top of its part; longer text is scrolled to its end (overlay.js) so the newest words stay in view. */
 .overlay-subs { --sub-now: #ffd86b; }   /* the box is black in both themes */
-.ov-body { overflow: hidden; }
-.ov-source, .ov-text, .ov-draft { margin: 0; line-height: 1.35; overflow-wrap: anywhere; max-height: calc(1.35em * 2); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
-.ov-source { margin-top: 4px; font-size: .5em; display: block; }
+.ov-body { position: relative; display: grid; gap: 2px; overflow: hidden; }
+.ov-source, .ov-text, .ov-draft { margin: 0; font-size: 1em; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; overflow: hidden; }
+.ov-source { height: calc(1.35em * 2); }
+.ov-text { height: calc(1.35em * 2); }
+.ov-draft { height: 1.35em; color: var(--sub-now); }   /* the draft: not final yet */
 .ov-done { opacity: .75; }
-.ov-text { margin-top: 4px; font-weight: 600; }
-.ov-draft { margin-top: 2px; font-size: .85em; color: var(--sub-now); }   /* the draft: not final yet */
 .ov-now { color: var(--sub-now); }   /* the speech being translated now: same colour as its draft */
-.ov-empty { margin: 6px 0 0; font-size: 16px; opacity: .7; }
+.ov-empty { position: absolute; left: 0; bottom: 0; margin: 0; font-size: 16px; opacity: .7; }   /* takes no room */
 #screenView [hidden] { display: none !important; }
