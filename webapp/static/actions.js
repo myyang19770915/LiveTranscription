@@ -228,8 +228,8 @@ function reminderField(item){
   const hint=!item.remind?'不會寄出這件事的提醒':!item.owner||!item.dueDate?'需要負責人與到期日才會提醒':!open?'已完成或取消，不再提醒'
     :'到期前 3 天、到期當天、逾期每天寄給負責人';
   const state=el('span',{className:`remind-state${item.remind?'':' off'}`,textContent:item.remind?'開啟':'已關閉'});
-  const note=el('p',{className:'remind-hint',textContent:allowed?hint:`${hint}（只有負責人或系統管理員可切換）`});
-  if(!allowed)return [state,note];
+  const note=el('p',{className:'field-hint',textContent:allowed?hint:`${hint}（只有負責人或系統管理員可切換）`});
+  if(!allowed)return [el('div',{className:'remind-row'},state),note];
   const button=el('button',{type:'button',className:'remind-switch',title:item.remind?'關閉提醒':'開啟提醒',ariaLabel:'Email 提醒'});
   button.setAttribute('role','switch');button.setAttribute('aria-checked',String(item.remind));
   button.onclick=async()=>{
@@ -242,7 +242,7 @@ function reminderField(item){
     if(!$('detail').hidden&&Number(params.get('item'))===item.id)openDetail(item.id,{keep:true});
     panelError(response.ok?'':typeof result.detail==='string'?result.detail:'切換失敗');
   };
-  return [button,state,note];
+  return [el('div',{className:'remind-row'},button,state),note];
 }
 function openDetail(id,{cancel=false,keep=false}={}){
   const item=data.items.find(i=>i.id===id);
@@ -263,8 +263,8 @@ function openDetail(id,{cancel=false,keep=false}={}){
     titleOf(item),
     el('p',{id:'detailError',className:'alert',role:'alert',hidden:true}),
     field('狀態',status),
-    field('負責人',avatarFor(item.owner,item.ownerName),owner),
-    field('到期日',due,dueChip(item),item.dueText?el('span',{className:'muted small',textContent:`原話：「${item.dueText}」`}):null),
+    field('負責人',owner,avatarFor(item.owner,item.ownerName)),
+    field('到期日',due,dueChip(item),item.dueText?el('p',{className:'field-hint',textContent:`原話：「${item.dueText}」`}):null),
     field('Email 提醒',...reminderField(item)),
     field('團隊',el('span',{textContent:item.team})),
     field('來源',item.meetingId?el('a',{href:`/meetings/${item.meetingId}/minutes#item-${item.id}`,textContent:meetingName(item)})

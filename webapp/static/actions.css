@@ -96,12 +96,15 @@
 .detail-edit-form, .detail-create { display: grid; gap: 12px; }
 .detail-edit-actions { display: flex; align-items: center; gap: 8px; }
 .detail-danger { padding-top: 12px; border-top: 1px solid var(--border); }
-.detail-field { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; align-items: start; }
-.detail-label { padding-top: 9px; color: var(--muted); font-size: 13px; font-weight: 700; }
+.detail-field { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; align-items: start; }
+/* Every label is centred on its value's first row, which is 40px high like the controls. */
+.detail-label { display: flex; align-items: center; min-height: 40px; color: var(--muted); font-size: 13px; font-weight: 700; white-space: nowrap; }
 /* min-height: a value that is plain text sits on the same line as its label, like the 40px controls. */
-.detail-value { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; min-height: 40px; }
+.detail-value { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; min-height: 40px; }
 .detail-value > .status-control { width: 100%; }
-.detail-value .input { flex: none; width: auto; min-width: 160px; }
+/* One width for every control in the panel, so their edges line up; chips and avatars follow on the right. */
+.detail-value .input, .detail-value .status-select { flex: none; width: 220px; min-width: 0; }
+.field-hint { flex-basis: 100%; margin: -2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .detail-value select.input { appearance: auto; }
 .detail-value a { color: var(--accent); overflow-wrap: anywhere; }
 .detail-hint { margin: 0; }
@@ -140,7 +143,7 @@
 .issue-muted svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .remind-state { font-size: 14px; font-weight: 600; }
 .remind-state.off { color: var(--muted); }
-.remind-hint { flex-basis: 100%; margin: -4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.remind-row { display: flex; align-items: center; gap: 10px; min-height: 40px; }
 .remind-switch { position: relative; flex: none; width: 40px; height: 22px; padding: 0; border: 0; border-radius: 999px;
   background: var(--field-border); cursor: pointer; transition: background .15s; }
 .remind-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;

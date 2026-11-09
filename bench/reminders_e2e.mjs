@@ -87,7 +87,7 @@ try {
     await page.goto(`${app}/actions?item=${overdue}`);
     await page.waitForSelector('.remind-state');
     check('another member sees the state without a switch', await page.textContent('.remind-state') === '已關閉' && !(await page.isVisible('.remind-switch'))
-      && /只有負責人或系統管理員可切換/.test(await page.textContent('.remind-hint')));
+      && /只有負責人或系統管理員可切換/.test(await page.textContent('.remind-row + .field-hint')));
     await context.close();
   }
 
