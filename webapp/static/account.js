@@ -226,6 +226,7 @@ function ownAvatar(me,make,signOut){
         close();
       })),
       me.avatarUrl?item('移除照片',()=>run(async()=>{await AvatarPhoto.remove('/api/me/avatar');changed(null);close()})):null,
+      item('我的 Email',()=>{close();emailDialog(me,make)}),
       location.pathname!=='/actions'?item('待辦看板',()=>{location.href='/actions'},'menu-phone'):null,
       item('登出',signOut,'menu-phone'),
       message].filter(Boolean));
@@ -239,6 +240,57 @@ function ownAvatar(me,make,signOut){
   };
   wrap.append(button,menu);
   return wrap;
+}
+
+// 我的 Email (minutes-mail): the address minutes and reminders go to. One from the company directory is read-only;
+// otherwise the member enters or clears their own. Styles are injected like the crop dialog's (two stylesheets).
+function emailDialog(me,make){
+  if(!document.getElementById('email-style'))document.head.append(make('style',{id:'email-style',textContent:`
+.email-dialog{width:min(420px,calc(100vw - 32px));padding:20px;border:1px solid var(--border,var(--line));border-radius:16px;
+  background:var(--panel,var(--surface));color:var(--text);box-shadow:0 24px 64px rgb(0 0 0/.35)}
+.email-dialog::backdrop{background:rgb(0 0 0/.55)}
+.email-dialog h2{margin:0;font-size:18px}
+.email-dialog p{margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.6}
+.email-dialog .email-value{margin-top:14px;color:var(--text);font-size:15px;font-weight:600;overflow-wrap:anywhere}
+.email-dialog input{box-sizing:border-box;width:100%;height:42px;margin-top:14px;padding:0 12px;border:1px solid var(--border,var(--line));
+  border-radius:10px;background:var(--field,var(--soft));color:var(--text);font:inherit;font-size:15px}
+.email-dialog input:focus{outline:none;border-color:var(--accent,var(--mint));box-shadow:0 0 0 3px var(--accent-soft,rgb(0 0 0/.1))}
+.email-dialog .email-error{color:var(--danger,#e5484d);font-weight:600}
+.email-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.email-actions button{height:38px;padding:0 18px;border:1px solid var(--border,var(--line));border-radius:999px;background:transparent;
+  color:var(--text);font:inherit;font-weight:600;cursor:pointer}
+.email-actions .email-save{border-color:transparent;background:var(--accent,var(--mint));color:var(--accent-ink)}
+.email-actions .email-clear{margin-right:auto;color:var(--muted)}`}));
+  const fixed=me.emailSource==='ldap';
+  const error=make('p',{className:'email-error',hidden:true,role:'alert'});
+  const input=fixed?null:make('input',{type:'email',value:me.email||'',maxLength:254,placeholder:'name@company.com',ariaLabel:'Email'});
+  const close=make('button',{type:'button',textContent:fixed?'關閉':'取消'});
+  const save=fixed?null:make('button',{type:'submit',className:'email-save',textContent:'儲存'});
+  const clear=!fixed&&me.email?make('button',{type:'button',className:'email-clear',textContent:'清除'}):null;
+  const actions=make('div',{className:'email-actions'});   // make() here takes no children
+  actions.append(...[clear,close,save].filter(Boolean));
+  const form=make('form',{method:'dialog'});
+  form.append(make('h2',{textContent:'我的 Email'}),
+    make('p',{textContent:fixed?'由公司目錄提供，如需更改請洽 IT。':'用來收會議紀要。公司目錄沒有提供你的 Email，請自行填寫。'}),
+    ...(fixed?[make('p',{className:'email-value',textContent:me.email})]:[input]),error,
+    actions);
+  const dialog=make('dialog',{className:'email-dialog',ariaLabel:'我的 Email'});
+  dialog.append(form);
+  const store=async email=>{
+    error.hidden=true;
+    const response=await fetch('/api/me/email',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({email})});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok){error.textContent=typeof result.detail==='string'?result.detail:'儲存失敗';error.hidden=false;return}
+    Object.assign(me,{email:result.email,emailSource:result.emailSource});dialog.close();
+  };
+  form.onsubmit=event=>{event.preventDefault();if(save)store(input.value)};
+  if(clear)clear.onclick=()=>store('');
+  close.onclick=()=>dialog.close();
+  dialog.onclose=()=>dialog.remove();
+  dialog.addEventListener('keydown',event=>event.stopPropagation());
+  document.body.append(dialog);
+  dialog.showModal();
+  (input||close).focus();
 }
 
 // "/" opens search from any page (meeting-search), unless typing or a dialog is open; on the search page it focuses the box.

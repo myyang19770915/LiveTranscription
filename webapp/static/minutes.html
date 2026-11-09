@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>會議紀要 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261108b"><link rel="stylesheet" href="/assets/admin.css?v=20261108d"><link rel="stylesheet" href="/assets/review.css?v=20261108b"><link rel="stylesheet" href="/assets/evidence-panel.css?v=20261107a"><link rel="stylesheet" href="/assets/minutes.css?v=20261108d"><link rel="stylesheet" href="/assets/actions.css?v=20261108a"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>會議紀要 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261108b"><link rel="stylesheet" href="/assets/admin.css?v=20261108d"><link rel="stylesheet" href="/assets/review.css?v=20261108b"><link rel="stylesheet" href="/assets/evidence-panel.css?v=20261107a"><link rel="stylesheet" href="/assets/minutes.css?v=20261109a"><link rel="stylesheet" href="/assets/actions.css?v=20261108a"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>會議紀錄</small></span></a>
@@ -27,6 +27,31 @@
   <section class="card toolbar">
     <p class="hint">AI 會從整場逐字稿整理摘要、決議、待辦、待確認問題與風險，每條附上證據段落；<b>確認後才算正式紀錄</b>，下載的 Markdown 只包含已確認的條目。<span id="modelNote"></span></p>
     <p id="status" class="status-line" role="status"></p>
+  </section>
+
+  <section id="mailCard" class="card mail-card" aria-labelledby="mailHeading">
+    <div class="mail-row">
+      <div class="mail-state">
+        <h2 id="mailHeading">定稿與寄送</h2>
+        <p id="finalState" class="mail-final"></p>
+      </div>
+      <div class="mail-actions">
+        <button id="finalize" class="secondary-button compact" type="button">定稿</button>
+        <button id="sendMail" class="primary-button compact" type="button">寄送紀要</button>
+        <button id="mailSettingsToggle" class="text-button" type="button" aria-expanded="false" aria-controls="mailSettings">寄送設定</button>
+      </div>
+    </div>
+    <p id="mailInfo" class="mail-info" role="status"></p>
+    <form id="mailSettings" class="mail-settings" hidden>
+      <fieldset>
+        <legend>收件對象（整個團隊共用）</legend>
+        <label class="mail-choice"><input type="radio" name="target" value="members"> 成員個人信箱</label>
+        <label class="mail-choice"><input type="radio" name="target" value="team"> 團隊群組信箱</label>
+        <input id="mailAddress" class="input compact" type="email" maxlength="254" placeholder="team@company.com" aria-label="團隊群組信箱">
+      </fieldset>
+      <label class="mail-choice"><input id="mailAuto" type="checkbox"> 定稿後自動寄送</label>
+      <div class="edit-buttons"><button class="primary-button compact" type="submit">儲存設定</button><button id="mailSettingsCancel" class="text-button" type="button">取消</button></div>
+    </form>
   </section>
 
   <p id="notice" class="alert" role="alert" hidden></p>
@@ -57,11 +82,11 @@
 </aside>
 <audio id="player" preload="none"></audio>
 
-<script src="/assets/account.js?v=20261108c"></script>
+<script src="/assets/account.js?v=20261109a"></script>
 <script src="/assets/meeting-catalog.js?v=20261105a"></script>
 <script src="/assets/timeline.js?v=20261106a"></script>
 <script src="/assets/meeting-nav.js?v=20261107a"></script>
 <script src="/assets/action-status.js?v=20261107c"></script>
 <script src="/assets/evidence-panel.js?v=20261107b"></script>
-<script src="/assets/minutes.js?v=20261108b"></script>
+<script src="/assets/minutes.js?v=20261109a"></script>
 </body></html>

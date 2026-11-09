@@ -10,6 +10,7 @@ import asyncio
 import getpass
 import hashlib
 import os
+import re
 import secrets
 import ssl
 import sys
@@ -37,6 +38,8 @@ LDAP_BIND_PASSWORD = os.getenv("LDAP_BIND_PASSWORD", "")
 LDAP_USER_FILTER = os.getenv("LDAP_USER_FILTER", "") or "(sAMAccountName={username})"
 LDAP_USER_DN_TEMPLATE = os.getenv("LDAP_USER_DN_TEMPLATE", "")
 LDAP_DISPLAY_ATTR = os.getenv("LDAP_DISPLAY_ATTR", "") or "displayName"
+# The member's e-mail address (minutes-mail); an empty attribute leaves the member to enter their own.
+LDAP_MAIL_ATTR = os.getenv("LDAP_MAIL_ATTR", "") or "mail"
 LDAP_CA_FILE = os.getenv("LDAP_CA_FILE", "")
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "") == "1"
 ADMIN_USERS = frozenset(name.strip().lower() for name in os.getenv("ADMIN_USERS", "").split(",") if name.strip())
@@ -68,15 +71,27 @@ def ldap_connection(user: str, password: str) -> Connection:
     return Connection(ldap_server(), user=user, password=password, receive_timeout=10, raise_exceptions=False)
 
 
-def display_name_of(entry_attributes: dict) -> str:
-    value = entry_attributes.get(LDAP_DISPLAY_ATTR)
+def first_value(entry_attributes: dict, attribute: str) -> str:
+    value = entry_attributes.get(attribute)
     if isinstance(value, list):
         value = value[0] if value else ""
-    return str(value or "")
+    return str(value or "").strip()
 
 
-def ldap_authenticate(username: str, password: str) -> str | None:
-    """Display name ("" when LDAP has none) when the password is right, None when it is not.
+@dataclass(frozen=True)
+class Profile:
+    """What LDAP says about a user who signed in: "" for an attribute it does not have."""
+    display_name: str
+    email: str
+
+
+def profile_of(entry_attributes: dict) -> Profile:
+    email = first_value(entry_attributes, LDAP_MAIL_ATTR)
+    return Profile(first_value(entry_attributes, LDAP_DISPLAY_ATTR), email if valid_email(email) else "")
+
+
+def ldap_authenticate(username: str, password: str) -> Profile | None:
+    """The user's Profile when the password is right, None when it is not.
 
     Raises LdapUnavailable when LDAP cannot answer. Callers must have rejected empty passwords:
     an empty simple bind is an anonymous bind on many servers and would succeed.
@@ -91,14 +106,14 @@ def ldap_authenticate(username: str, password: str) -> str | None:
             user = ldap_connection(user_dn, password)
             if not user.bind():
                 return None
-            user.search(user_dn, "(objectClass=*)", search_scope="BASE", attributes=[LDAP_DISPLAY_ATTR])
-            name = display_name_of(user.entries[0].entry_attributes_as_dict) if user.entries else ""
+            user.search(user_dn, "(objectClass=*)", search_scope="BASE", attributes=[LDAP_DISPLAY_ATTR, LDAP_MAIL_ATTR])
+            profile = profile_of(user.entries[0].entry_attributes_as_dict) if user.entries else Profile("", "")
             user.unbind()
-            return name
+            return profile
         service = ldap_connection(LDAP_BIND_DN, LDAP_BIND_PASSWORD)
         if not service.bind():
             raise LdapUnavailable("the LDAP service account was rejected")
-        service.search(LDAP_BASE_DN, LDAP_USER_FILTER.format(username=escape_filter_chars(username)), attributes=[LDAP_DISPLAY_ATTR])
+        service.search(LDAP_BASE_DN, LDAP_USER_FILTER.format(username=escape_filter_chars(username)), attributes=[LDAP_DISPLAY_ATTR, LDAP_MAIL_ATTR])
         entries = list(service.entries)
         service.unbind()
         if len(entries) != 1:
@@ -107,7 +122,7 @@ def ldap_authenticate(username: str, password: str) -> str | None:
         if not user.bind():
             return None
         user.unbind()
-        return display_name_of(entries[0].entry_attributes_as_dict)
+        return profile_of(entries[0].entry_attributes_as_dict)
     except LDAPException as exc:
         raise LdapUnavailable(str(exc)) from exc
 
@@ -204,19 +219,24 @@ async def login(body: LoginRequest, request: Request, response: Response):
     if not allowed:
         raise HTTPException(status_code=429, detail=TOO_MANY_ATTEMPTS)
     try:
-        display_name = await asyncio.to_thread(ldap_authenticate, username, body.password)
+        profile = await asyncio.to_thread(ldap_authenticate, username, body.password)
     except LdapUnavailable as exc:
         async with db.connect() as conn:
             await release_attempt(conn, username)
         raise HTTPException(status_code=503, detail=LDAP_UNREACHABLE) from exc
-    if display_name is None:
+    if profile is None:
         raise HTTPException(status_code=401, detail=WRONG_CREDENTIALS)
+    display_name = profile.display_name
     async with db.connect() as conn:
         await conn.execute("DELETE FROM login_failures WHERE username = %s", (username,))
+        # An address from LDAP replaces whatever was stored; without one, only an address that came from LDAP is
+        # cleared (minutes-mail), so an address the member entered stays.
         await conn.execute(
-            "INSERT INTO users (username, display_name) VALUES (%s, %s) "
-            "ON CONFLICT (username) DO UPDATE SET display_name = excluded.display_name, last_seen = now()",
-            (username, display_name or username))
+            "INSERT INTO users (username, display_name, email, email_source) VALUES (%(user)s, %(name)s, %(email)s, %(source)s) "
+            "ON CONFLICT (username) DO UPDATE SET display_name = excluded.display_name, last_seen = now(), "
+            "email = CASE WHEN excluded.email IS NOT NULL THEN excluded.email WHEN users.email_source = 'ldap' THEN NULL ELSE users.email END, "
+            "email_source = CASE WHEN excluded.email IS NOT NULL THEN 'ldap' WHEN users.email_source = 'ldap' THEN NULL ELSE users.email_source END",
+            {"user": username, "name": display_name or username, "email": profile.email or None, "source": "ldap" if profile.email else None})
         token = await create_session(conn, username)
         user = User(username, display_name or username, username in ADMIN_USERS, await user_teams(conn, username))
     set_session_cookie(response, request, token)
@@ -296,7 +316,40 @@ def avatar_url(username: str, updated_at) -> str | None:
 async def me(user: CurrentUser):
     async with db.connect() as conn:
         row = await (await conn.execute("SELECT updated_at FROM user_avatars WHERE username = %s", (user.username,))).fetchone()
-    return {**user_payload(user), "avatarUrl": avatar_url(user.username, row and row["updated_at"])}
+        mail = await (await conn.execute("SELECT email, email_source FROM users WHERE username = %s", (user.username,))).fetchone()
+    return {**user_payload(user), "avatarUrl": avatar_url(user.username, row and row["updated_at"]),
+            "email": mail and mail["email"], "emailSource": mail and mail["email_source"]}
+
+
+# --- E-mail address (minutes-mail) -----------------------------------------------------------------
+
+EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+BAD_EMAIL = "Email 格式不正確"
+EMAIL_FROM_DIRECTORY = "Email 由公司目錄提供，無法修改"
+
+
+def valid_email(value: str) -> bool:
+    return len(value) <= 254 and EMAIL_PATTERN.fullmatch(value) is not None
+
+
+class EmailIn(BaseModel):
+    email: str = Field(default="", max_length=320)
+
+
+@router.put("/api/me/email")
+async def set_own_email(body: EmailIn, user: CurrentUser):
+    """Set or clear ("") one's own address; an address from LDAP cannot be changed here."""
+    email = body.email.strip()
+    if email and not valid_email(email):
+        raise HTTPException(status_code=422, detail=BAD_EMAIL)
+    async with db.connect() as conn:
+        await conn.execute("INSERT INTO users (username) VALUES (%s) ON CONFLICT DO NOTHING", (user.username,))
+        row = await (await conn.execute("SELECT email_source FROM users WHERE username = %s FOR UPDATE", (user.username,))).fetchone()
+        if row["email_source"] == "ldap":
+            raise HTTPException(status_code=409, detail=EMAIL_FROM_DIRECTORY)
+        await conn.execute("UPDATE users SET email = %s, email_source = %s WHERE username = %s",
+                           (email or None, "self" if email else None, user.username))
+    return {"email": email or None, "emailSource": "self" if email else None}
 
 
 async def issue_session(username: str, hours: float) -> str:
@@ -308,14 +361,14 @@ async def issue_session(username: str, hours: float) -> str:
 async def check_ldap(username: str) -> None:
     password = getpass.getpass(f"{username} 的密碼（不會顯示）：")
     try:
-        name = await asyncio.to_thread(ldap_authenticate, username.strip().lower(), password)
+        profile = await asyncio.to_thread(ldap_authenticate, username.strip().lower(), password)
     except LdapUnavailable as exc:
         print(f"無法連線登入伺服器：{exc}")
         raise SystemExit(2) from exc
-    if name is None:
+    if profile is None:
         print("帳號或密碼錯誤（或篩選條件找不到這個帳號）")
         raise SystemExit(1)
-    print(f"登入成功：{username}（{name or '沒有顯示名稱'}）")
+    print(f"登入成功：{username}（{profile.display_name or '沒有顯示名稱'}；Email：{profile.email or '沒有'}）")
 
 
 def main(argv: list[str]) -> None:

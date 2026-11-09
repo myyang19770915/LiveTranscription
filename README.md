@@ -19,6 +19,7 @@
 - 右上角可切換明亮／暗色主題，選擇會保存在目前瀏覽器。
 - 本機 Docker 部署，不依賴雲端 ASR 或翻譯 API。
 - 會後：逐字稿校對、AI 會議紀要與待辦追蹤、全文搜尋，以及用一句話問會議內容的「問答」（每句附出處）。
+- 紀要定稿後以 Email 寄給團隊（公司 SMTP），可設定寄到成員個人信箱或團隊群組信箱、定稿自動寄送或手動再寄。
 
 ## 技術與服務架構
 
@@ -60,7 +61,7 @@ flowchart LR
   diarizeCache --- diarize
 ```
 
-Compose 定義 `app`、`asr`、`translate`、`db`、`embed`、`diarize` 六個服務（另有開發用的 `dev-ldap`，以及對外用的 Cloudflare Tunnel `tunnel`，皆以 profile 啟用）。除了 `app` 的主機連接埠 `18082`，其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`translate`、`db` 的健康檢查通過；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料；`diarize` 也不是必要服務，沒啟動時段落不標說話者。
+Compose 定義 `app`、`asr`、`translate`、`db`、`embed`、`diarize` 六個服務（另有開發用的 `dev-ldap`、本機測試信箱 `dev-mail`，以及對外用的 Cloudflare Tunnel `tunnel`，皆以 profile 啟用）。除了 `app` 的主機連接埠 `18082`，其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`translate`、`db` 的健康檢查通過；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料；`diarize` 也不是必要服務，沒啟動時段落不標說話者。
 
 ### Docker image 與模型權重分別下載在哪裡
 
@@ -359,6 +360,23 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 
 **紀要模型**：`MINUTES_URL`、`MINUTES_MODEL`、`MINUTES_KEY`（OpenAI 相容），沒設定時沿用雲端精修的 `TRANSLATE_REFINE_*`。之後改用 context 更大的模型，或指向本機部署的大模型，只需修改這三個設定並 `docker compose up -d app`。
 
+### 定稿與寄送紀要
+
+紀要頁上方的「定稿與寄送」區塊：
+
+- **定稿**：條目都處理好之後按「定稿」，記錄定稿人與時間；同一場會議只會定稿一次。
+- **自動寄送**：團隊在「寄送設定」勾選「定稿後自動寄送」時，第一次定稿就會寄出；同一場會議只會自動寄一次。
+- **寄送紀要／再寄一次**：隨時可以手動寄送，不必先定稿；至少要有摘要或一條已確認條目。
+- **收件對象**（整個團隊共用，團隊任何成員都能改）：「成員個人信箱」寄給每位有 Email 的成員，沒有 Email 的人會列在區塊裡；「團隊群組信箱」只寄到填入的一個地址。
+- **信件內容**：主旨「[語橋 Live] 會議紀要：<會議主題>」，內含摘要與已確認的決議、待辦（負責人、到期日）、待確認問題、風險，以及「開啟紀要」連結（需設定 `PUBLIC_BASE_URL`）。HTML 與純文字兩種格式。
+- **寄送紀錄**：區塊顯示最近一次寄送的時間、寄件人、收件數；寄送失敗會顯示原因（例如 SMTP 拒絕），可直接再寄一次。
+
+**成員 Email**：登入時從公司 LDAP 帶入（屬性 `LDAP_MAIL_ATTR`，預設 `mail`），此時不能自行修改；LDAP 沒有 Email 的人，到右上角頭像選單「我的 Email」自行填寫。
+
+**寄信伺服器**：在 `.env` 設定 `SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASSWORD`、`SMTP_FROM`、`SMTP_TLS` 後執行 `docker compose up -d app`。沒有設定 `SMTP_HOST` 時寄送按鈕停用，只能定稿。
+
+**開發測試信箱**：不想真的寄出時，啟動本機信箱 `docker compose --profile dev-mail up -d dev-mail`，在 `.env` 設 `SMTP_HOST=dev-mail`、`SMTP_PORT=1025`、`SMTP_TLS=none`，信件會出現在 <http://localhost:18025>，不會寄到外部。
+
 ## 待辦追蹤
 
 紀要中**已確認的待辦**會進入追蹤；會議以外交辦的事也可以直接在看板新增。每頁頂部都有「待辦看板」（`/actions`）。
@@ -447,6 +465,12 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `LDAP_USER_DN_TEMPLATE` | 空 | 沒有服務帳號時改用直接綁定，例如 `uid={username},ou=people,dc=example,dc=com` |
 | `LDAP_DISPLAY_ATTR` | `displayName` | 頁首顯示的名稱欄位 |
 | `LDAP_CA_FILE` | 空 | ldaps 使用自簽 CA 時，容器內可讀到的 CA 憑證路徑 |
+| `LDAP_MAIL_ATTR` | `mail` | 成員 Email 的 LDAP 屬性；沒有值的成員可自行填寫 |
+| `SMTP_HOST` / `SMTP_PORT` | 空（不寄信）/ `587` | 寄送紀要用的公司 SMTP 伺服器 |
+| `SMTP_USER` / `SMTP_PASSWORD` | 空 | SMTP 登入帳密；`SMTP_USER` 空白則不登入 |
+| `SMTP_FROM` | 空（沿用 `SMTP_USER`） | 寄件人地址 |
+| `SMTP_TLS` | `starttls` | `starttls`（通常 587）、`ssl`（通常 465）或 `none`（只用於本機測試信箱） |
+| `PUBLIC_BASE_URL` | 空 | 信中「開啟紀要」連結的網址開頭，例如 `https://asr.my-yang.online`；空白則信中不放連結 |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 前面有 HTTPS 反向代理時，填代理的 IP，app 才會相信它轉來的 `https` |
 | `MEETING_TIMEZONE` | `Asia/Taipei` | 會議列表的日期篩選、紀要的會議日期與 ASR 微調資料匯出，都以這個時區計算 |
 | `MINUTES_URL` / `_MODEL` / `_KEY` | 空（沿用 `TRANSLATE_REFINE_*`） | 產生會議紀要的模型（OpenAI 相容，整場一次送出，需足夠的 context）；問答也用它回答 |
@@ -475,7 +499,8 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `GET /` | 會議 Web App（未登入導向 `/login`） |
 | `GET /api/health` | FastAPI 簡易健康檢查（不需登入） |
 | `GET /api/services` | 開會頁用的服務狀態：本機語音辨識、翻譯、資料庫是否就緒（需登入；每項最多等 2 秒） |
-| `POST /api/login`、`POST /api/logout`、`GET /api/me` | LDAP 登入、登出、目前使用者與所屬團隊 |
+| `POST /api/login`、`POST /api/logout`、`GET /api/me` | LDAP 登入、登出、目前使用者與所屬團隊（含 `email`、`emailSource`：`ldap`／`self`） |
+| `PUT /api/me/email` | 自行填寫或清除（`""`）自己的 Email；來自 LDAP 時 409，格式不符 422 |
 | `GET /admin`、`/api/admin/teams…` | 團隊管理（限系統管理員） |
 | `PUT`／`DELETE /api/admin/users/{帳號}/avatar`、`PUT`／`DELETE /api/me/avatar`、`GET /api/users/{帳號}/avatar` | 成員頭像照片（改別人的限系統管理員，`/api/me/avatar` 改自己的，讀取需登入） |
 | `POST /api/meetings`、`GET /api/meetings`、`GET /api/meetings/{id}` | 建立會議（需指定自己的團隊）、列出與讀取自己團隊的會議 |
@@ -495,6 +520,9 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `GET /api/meetings/{id}/minutes`、`POST …/minutes/generate` | 紀要內容與狀態；在背景產生（執行中 409、模型未設定 400、沒有段落 422） |
 | `PATCH …/minutes/summary`、`POST …/minutes/items`、`PATCH …/minutes/items/{itemId}`、`POST …/items/{itemId}/confirm`、`…/reject` | 編輯摘要、新增、修改、確認、駁回條目（皆帶 `version`，過期回 409） |
 | `GET /api/meetings/{id}/minutes.md` | 下載 Markdown 會議紀錄（只含已確認條目） |
+| `POST /api/meetings/{id}/minutes/finalize` | 定稿（只記錄第一次）；團隊開啟自動寄送時同時寄出，回傳紀要內容與 `notice` |
+| `POST /api/meetings/{id}/minutes/send` | 手動寄送紀要；SMTP 未設定 503、沒有內容或沒有收件人 422、伺服器拒絕 502 |
+| `PUT /api/teams/{team}/mail` | 團隊寄送設定 `{target: members\|team, address, auto}`（團隊成員或系統管理員） |
 | `GET /actions` | 待辦看板 |
 | `POST /api/actions`、`PATCH`／`DELETE /api/actions/{id}`、`POST /api/actions/{id}/status`、`GET /api/actions/{id}/updates` | 看板新增待辦、修改內容／負責人／到期日、刪除（限看板新增的）、改狀態、歷程；權限依待辦的團隊 |
 | `GET /api/search?q=&team=&series=&from=&to=&kind=` | 全文搜尋（`kind`：`all`、`segments`、`items`、`meetings`），依會議分組，最多 300 筆 |

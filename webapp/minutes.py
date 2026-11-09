@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, StringConstraints
 import auth
 import db
 import diarize
+import mailer
 import team_access
 
 MINUTES_URL = (os.getenv("MINUTES_URL", "") or os.getenv("TRANSLATE_REFINE_URL", "")).rstrip("/")
@@ -287,13 +288,18 @@ async def get_minutes(meeting_id: str, user: auth.CurrentUser):
             "SELECT * FROM minute_items WHERE meeting_id = %s ORDER BY array_position(%s, kind), id", (meeting["id"], list(KINDS)))).fetchall()
         members, times = await item_context(conn, meeting)
         team = await (await conn.execute("SELECT name FROM teams WHERE id = %s", (meeting["team_id"],))).fetchone()
-    row = row or {"status": "idle", "model": "", "message": "", "dropped": 0, "summary": "", "summary_version": 1, "finished_at": None}
+        mail = await mailer.mail_state(conn, meeting, members)
+    row = row or {"status": "idle", "model": "", "message": "", "dropped": 0, "summary": "", "summary_version": 1, "finished_at": None,
+                  "finalized_at": None, "finalized_by": None}
     return {"meeting": {"id": str(meeting["id"]), "title": meeting["title"], "startedAt": meeting["started_at"].isoformat(), "team": team["name"]},
             "status": row["status"], "model": row["model"], "message": row["message"], "dropped": row["dropped"],
             "summary": row["summary"], "summaryVersion": row["summary_version"],
             "finishedAt": row["finished_at"].isoformat() if row["finished_at"] else None,
             "items": [item_payload(r, members, times) for r in rows],
-            "members": [{"username": u, "displayName": n} for u, n in members.items()], "modelAvailable": configured()}
+            "members": [{"username": u, "displayName": n} for u, n in members.items()], "modelAvailable": configured(),
+            # Finalizing and sending (minutes-mail).
+            "finalizedAt": row["finalized_at"].isoformat() if row["finalized_at"] else None,
+            "finalizedBy": members.get(row["finalized_by"], row["finalized_by"]) if row["finalized_by"] else None, "mail": mail}
 
 
 Content = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=CONTENT_MAX)]

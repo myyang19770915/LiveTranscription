@@ -59,3 +59,30 @@
   .head-actions { width: 100%; }
   .head-actions > * { flex: 1; justify-content: center; }
 }
+
+/* Finalize and send (minutes-mail). */
+.mail-card { display: grid; gap: 10px; padding: 16px 20px; margin-bottom: 20px; }
+.mail-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.mail-state { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+.mail-state h2 { margin: 0; font-size: 18px; }
+.mail-final { margin: 0; color: var(--muted); font-size: 14px; font-weight: 600; }
+.mail-final.done { color: var(--accent); }
+.mail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mail-actions [hidden] { display: none; }
+.mail-info { display: grid; gap: 4px; margin: 0; font-size: 14px; color: var(--muted); }
+.mail-line.ok { color: var(--text); }
+.mail-line.warn { color: var(--warn); font-weight: 600; }
+.mail-line.error { color: var(--danger); font-weight: 600; }
+.mail-settings { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px; }
+.mail-settings[hidden] { display: none; }
+.mail-settings fieldset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 0; padding: 0; border: 0; }
+.mail-settings legend { width: 100%; margin-bottom: 6px; padding: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+.mail-choice { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
+.mail-choice input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.mail-settings .input { flex: 1 1 240px; max-width: 360px; }
+.mail-settings .input:disabled { opacity: .5; }
+@media (max-width: 640px) {
+  .mail-actions { width: 100%; }
+  .mail-actions > button:not(.text-button) { flex: 1; }
+  .mail-settings .input { max-width: none; }
+}

@@ -146,6 +146,15 @@ services:
       LDAP_USER_DN_TEMPLATE: ${LDAP_USER_DN_TEMPLATE:-}
       LDAP_DISPLAY_ATTR: ${LDAP_DISPLAY_ATTR:-displayName}
       LDAP_CA_FILE: ${LDAP_CA_FILE:-}
+      LDAP_MAIL_ATTR: ${LDAP_MAIL_ATTR:-mail}
+      # Sending the minutes by e-mail (company SMTP; empty SMTP_HOST = off). PUBLIC_BASE_URL is the link in the mail.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_TLS: ${SMTP_TLS:-starttls}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       # Behind an HTTPS reverse proxy: trust its X-Forwarded-Proto (uvicorn reads this) and/or force Secure cookies.
       # With the tunnel service it connects from the Compose network: e.g. 127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
@@ -202,6 +211,15 @@ services:
       LDAP_ADMIN_PASSWORD: ${DEV_LDAP_ADMIN_PASSWORD:-dev-only-not-reachable-outside-compose}
     volumes:
       - ./docker/dev-ldap/users.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-users.ldif:ro
+    restart: unless-stopped
+
+  # Dev-only mailbox (Mailpit): with SMTP_HOST=dev-mail, SMTP_PORT=1025, SMTP_TLS=none every mail stays here and nothing
+  # leaves this machine. Read them at http://localhost:18025. Starts only with: docker compose --profile dev-mail up -d dev-mail
+  dev-mail:
+    image: axllent/mailpit:v1.27.0
+    profiles: ["dev-mail"]
+    ports:
+      - "127.0.0.1:${DEV_MAIL_PORT:-18025}:8025"
     restart: unless-stopped
 
   # Public access through a Cloudflare Tunnel (profile "tunnel"; see README「對外開放」). The tunnel is created in the

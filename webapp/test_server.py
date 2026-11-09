@@ -26,6 +26,7 @@ import auth
 import db
 import diarize
 import mai_asr
+import mailer
 import meeting_audio
 import minutes
 import qa
@@ -143,10 +144,12 @@ class FakeLdap:
         seed.strategy.add_entry("cn=svc,dc=corp", {"userPassword": "svcpw", "sAMAccountName": "svc"})
         self.seed = seed
 
-    def add(self, username, password, display_name=""):
+    def add(self, username, password, display_name="", mail=""):
         attributes = {"userPassword": password, "sAMAccountName": username, "objectClass": "person"}
         if display_name:
             attributes["displayName"] = display_name
+        if mail:
+            attributes["mail"] = mail
         self.seed.strategy.add_entry(f"cn={username},ou=people,dc=corp", attributes)
 
     def connection(self, user, password):
@@ -164,7 +167,7 @@ class FakeLdap:
         return [patch("auth.ldap_connection", self.connection), patch("auth.LDAP_URL", "ldap://fake"),
                 patch("auth.LDAP_BIND_DN", "cn=svc,dc=corp"), patch("auth.LDAP_BIND_PASSWORD", "svcpw"),
                 patch("auth.LDAP_BASE_DN", "dc=corp"), patch("auth.LDAP_USER_DN_TEMPLATE", ""),
-                patch("auth.LDAP_USER_FILTER", "(sAMAccountName={username})"), patch("auth.LDAP_DISPLAY_ATTR", "displayName"),
+                patch("auth.LDAP_USER_FILTER", "(sAMAccountName={username})"), patch("auth.LDAP_DISPLAY_ATTR", "displayName"), patch("auth.LDAP_MAIL_ATTR", "mail"),
                 patch("auth.ADMIN_USERS", frozenset({"admin"}))]
 
 
@@ -2911,6 +2914,271 @@ class ServiceStatusTests(AccountTestCase):
         client = TestClient(app)
         self.assertEqual(client.get("/api/services").status_code, 401)
         self.assertEqual(client.get("/api/health").json(), {"status": "ok"})
+
+
+REAL_SEND = mailer.send_message
+
+
+def run_sql(sql, params=()):
+    with psycopg.connect(TEST_DATABASE_URL) as conn:
+        conn.execute(sql, params)
+
+
+class MemberEmailTests(AccountTestCase):
+    """user-auth: Member e-mail address (minutes-mail)."""
+
+    def me(self, client):
+        body = client.get("/api/me").json()
+        return body["email"], body["emailSource"]
+
+    def test_address_from_the_directory_is_stored_and_cannot_be_changed(self):
+        self.ldap.add("dora", "pw-dora", "Dora", mail="dora@corp.example")
+        dora = self.signed_in("dora")
+        self.assertEqual(self.me(dora), ("dora@corp.example", "ldap"))
+        response = dora.put("/api/me/email", json={"email": "other@corp.example"})
+        self.assertEqual((response.status_code, response.json()["detail"]), (409, "Email 由公司目錄提供，無法修改"))
+        self.assertEqual(self.me(dora), ("dora@corp.example", "ldap"))
+
+    def test_entering_ones_own_address_survives_the_next_sign_in(self):
+        bob = self.signed_in("bob")
+        self.assertEqual(self.me(bob), (None, None))
+        response = bob.put("/api/me/email", json={"email": " bob@corp.example "})
+        self.assertEqual(response.json(), {"email": "bob@corp.example", "emailSource": "self"})
+        self.assertEqual(self.me(self.signed_in("bob")), ("bob@corp.example", "self"))
+        self.assertEqual(bob.put("/api/me/email", json={"email": ""}).json(), {"email": None, "emailSource": None})
+        self.assertEqual(self.me(bob), (None, None))
+
+    def test_address_checks(self):
+        bob = self.signed_in("bob")
+        for bad in ("bob@corp", "a b@corp.example", "@corp.example", "x" * 250 + "@c.example"):
+            response = bob.put("/api/me/email", json={"email": bad})
+            self.assertEqual((response.status_code, response.json()["detail"]), (422, "Email 格式不正確"), bad)
+
+    def test_directory_address_removed_clears_it_but_not_a_self_entered_one(self):
+        self.ldap.add("dora", "pw-dora", mail="dora@corp.example")
+        self.signed_in("dora")
+        self.ldap.seed.strategy.remove_entry("cn=dora,ou=people,dc=corp")
+        self.ldap.add("dora", "pw-dora")
+        self.assertEqual(self.me(self.signed_in("dora")), (None, None))
+        bob = self.signed_in("bob")
+        bob.put("/api/me/email", json={"email": "bob@corp.example"})
+        self.assertEqual(self.me(self.signed_in("bob")), ("bob@corp.example", "self"))
+
+    def test_a_directory_value_that_is_no_address_is_ignored(self):
+        self.ldap.add("dora", "pw-dora", mail="not an address")
+        self.assertEqual(self.me(self.signed_in("dora")), (None, None))
+
+
+class MinutesMailTests(ReviewTestCase):
+    """minutes-mail: team settings, finalize, send, the send record."""
+
+    def setUp(self):
+        super().setUp()
+        self.ldap.add("carol", "pw-carol")
+        self.alice, self.meeting = self.signed_in("alice"), self.meeting_id()
+        self.team_id = self.query("SELECT team_id FROM meetings")[0][0]
+        run_sql("INSERT INTO team_members (team_id, username, added_by) VALUES (%s, 'bob', 'admin')", (self.team_id,))
+        run_sql("UPDATE users SET email = 'alice@corp.example', email_source = 'self' WHERE username = 'alice'")
+        run_sql("UPDATE meetings SET title = '報價會議'")
+        self.save(self.alice, self.meeting, [("第一句", "S1"), ("第二句", "S2")])
+        self.sent = []
+        self.refuse = None
+        for name, value in (("mailer.SMTP_HOST", "smtp.test"), ("mailer.PUBLIC_BASE_URL", "https://asr.example"),
+                            ("mailer.send_message", self.fake_send)):
+            p = patch(name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def fake_send(self, message):
+        if self.refuse:
+            raise self.refuse
+        self.sent.append(message)
+
+    def item(self, kind, content, state="confirmed", owner=None, due=None):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            return conn.execute(
+                "INSERT INTO minute_items (meeting_id, kind, content, owner, due_date, origin, state) VALUES (%s, %s, %s, %s, %s, 'ai', %s) RETURNING id",
+                (self.meeting, kind, content, owner, due, state)).fetchone()[0]
+
+    def settings(self, client=None, **body):
+        return (client or self.alice).put(f"/api/teams/{self.team_id}/mail", json={"target": "members", "address": "", "auto": False, **body})
+
+    def post(self, action, client=None):
+        return (client or self.alice).post(f"/api/meetings/{self.meeting}/minutes/{action}")
+
+    def parts(self, message):
+        return message.get_body(("plain",)).get_content(), message.get_body(("html",)).get_content()
+
+    # Team mail settings
+    def test_a_member_switches_to_the_team_address(self):
+        self.assertEqual(self.settings(target="team", address="rd@corp.example", auto=True).status_code, 200)
+        self.item("decision", "採用新報價")
+        self.assertEqual(self.post("send").status_code, 200)
+        self.assertEqual(self.sent[0]["To"], "rd@corp.example")
+
+    def test_a_non_member_cannot_change_the_settings_but_an_administrator_can(self):
+        self.assertEqual(self.settings(self.signed_in("carol"), auto=True).status_code, 403)
+        self.assertEqual(self.query("SELECT mail_auto FROM teams"), [(False,)])
+        self.assertEqual(self.settings(self.signed_in("admin"), auto=True).status_code, 200)
+        self.assertEqual(self.query("SELECT mail_auto FROM teams"), [(True,)])
+
+    def test_team_target_without_an_address(self):
+        for address in ("", "rd@corp"):
+            response = self.settings(target="team", address=address)
+            self.assertEqual((response.status_code, response.json()["detail"]), (422, "Email 格式不正確"))
+
+    # Finalize minutes
+    def test_finalize_with_auto_send_on_sends_once(self):
+        self.settings(auto=True)
+        self.item("decision", "採用新報價")
+        body = self.post("finalize").json()
+        self.assertEqual((body["notice"], body["finalizedBy"], body["mail"]["last"]["trigger"]), ("已定稿並寄出紀要", "王愛麗", "auto"))
+        again = self.post("finalize", self.signed_in("bob")).json()
+        self.assertEqual((again["finalizedAt"], again["finalizedBy"], again["notice"]), (body["finalizedAt"], "王愛麗", ""))
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.query("SELECT trigger, sent_by, ok FROM minutes_mail"), [("auto", "alice", True)])
+
+    def test_finalize_with_auto_send_off(self):
+        self.item("decision", "採用新報價")
+        body = self.post("finalize").json()
+        self.assertEqual((body["notice"], body["mail"]["last"]), ("已定稿", None))
+        self.assertIsNotNone(body["finalizedAt"])
+        self.assertEqual(self.sent, [])
+
+    def test_a_failed_automatic_send_keeps_the_finalize(self):
+        self.settings(auto=True)
+        self.item("decision", "採用新報價")
+        self.refuse = mailer.smtplib.SMTPRecipientsRefused({"alice@corp.example": (550, b"no such user")})
+        body = self.post("finalize").json()
+        self.assertIsNotNone(body["finalizedAt"])
+        self.assertTrue(body["notice"].startswith("已定稿；寄送失敗：SMTPRecipientsRefused"), body["notice"])
+        self.assertFalse(body["mail"]["last"]["ok"])
+
+    def test_finalize_with_nothing_to_send_still_finalizes(self):
+        self.settings(auto=True)
+        body = self.post("finalize").json()
+        self.assertEqual(body["notice"], "已定稿；紀要還沒有內容可寄送，沒有自動寄送")
+        self.assertIsNotNone(body["finalizedAt"])
+
+    # Send minutes
+    def test_send_to_members_lists_those_without_an_address(self):
+        self.item("decision", "採用新報價")
+        body = self.post("send").json()
+        self.assertEqual(self.sent[0]["To"], "alice@corp.example")
+        self.assertEqual(self.sent[0]["Subject"], "[語橋 Live] 會議紀要：報價會議")
+        self.assertEqual((body["last"]["recipients"], body["last"]["skipped"], body["last"]["sentBy"]), (1, ["bob"], "王愛麗"))
+        mail = self.alice.get(f"/api/meetings/{self.meeting}/minutes").json()["mail"]
+        self.assertEqual((mail["recipients"], mail["missing"], mail["configured"]), (1, ["bob"], True))
+
+    def test_only_confirmed_items_are_sent(self):
+        self.item("decision", "採用新報價")
+        self.item("action", "寄出報價單", state="proposed")
+        self.item("action", "整理交期", owner="bob", due=date(2026, 11, 20))
+        self.post("send")
+        text, page = self.parts(self.sent[0])
+        for part in (text, page):
+            self.assertIn("採用新報價", part)
+            self.assertIn("整理交期", part)
+            self.assertNotIn("寄出報價單", part)
+        self.assertIn("負責人：bob", text)
+        self.assertIn("2026-11-20", page)
+        self.assertIn(f"https://asr.example/meetings/{self.meeting}/minutes", text)
+        self.assertIn(f'href="https://asr.example/meetings/{self.meeting}/minutes"', page)
+
+    def test_nothing_to_send(self):
+        self.item("decision", "還沒確認", state="proposed")
+        response = self.post("send")
+        self.assertEqual((response.status_code, response.json()["detail"]), (422, "紀要還沒有內容可寄送"))
+        self.assertEqual((self.sent, self.query("SELECT count(*) FROM minutes_mail")), ([], [(0,)]))
+
+    def test_no_recipient(self):
+        run_sql("UPDATE users SET email = NULL, email_source = NULL")
+        self.item("decision", "採用新報價")
+        response = self.post("send")
+        self.assertEqual((response.status_code, response.json()["detail"]), (422, "沒有可寄送的收件人"))
+        self.assertEqual(self.sent, [])
+
+    def test_meeting_text_is_escaped_in_the_html_part(self):
+        self.item("decision", "<b>報價</b> & 交期")
+        run_sql("UPDATE meetings SET title = %s", ("報價\n會議<script>",))
+        self.post("send")
+        text, page = self.parts(self.sent[0])
+        self.assertIn("&lt;b&gt;報價&lt;/b&gt; &amp; 交期", page)
+        self.assertNotIn("<b>報價</b>", page)
+        self.assertNotIn("<script>", page)
+        self.assertIn("<b>報價</b> & 交期", text)
+        self.assertEqual(self.sent[0]["Subject"], "[語橋 Live] 會議紀要：報價 會議<script>")
+
+    def test_a_summary_alone_can_be_sent(self):
+        self.alice.patch(f"/api/meetings/{self.meeting}/minutes/summary", json={"version": 1, "summary": "討論報價。"})
+        self.assertEqual(self.post("send").status_code, 200)
+
+    def test_only_team_members_send(self):
+        self.item("decision", "採用新報價")
+        self.assertEqual(self.post("send", self.signed_in("carol")).status_code, 404)
+
+    # Mail server configuration
+    def test_smtp_not_configured(self):
+        self.item("decision", "採用新報價")
+        with patch("mailer.SMTP_HOST", ""):
+            response = self.post("send")
+            self.assertEqual((response.status_code, response.json()["detail"]), (503, "尚未設定寄信伺服器"))
+            self.assertFalse(self.alice.get(f"/api/meetings/{self.meeting}/minutes").json()["mail"]["configured"])
+
+    def test_mail_server_refuses(self):
+        self.item("decision", "採用新報價")
+        self.refuse = mailer.smtplib.SMTPAuthenticationError(535, b"5.7.8 authentication failed")
+        with patch("mailer.SMTP_PASSWORD", "very-secret-pw"):
+            response = self.post("send")
+        self.assertEqual(response.status_code, 502)
+        self.assertTrue(response.json()["detail"].startswith("寄送失敗：SMTPAuthenticationError"), response.json())
+        last = self.alice.get(f"/api/meetings/{self.meeting}/minutes").json()["mail"]["last"]
+        self.assertFalse(last["ok"])
+        self.assertNotIn("very-secret-pw", last["error"])
+
+    def test_connection_errors_count_as_failed_sends(self):
+        self.item("decision", "採用新報價")
+        self.refuse = ConnectionRefusedError(111, "Connection refused")
+        self.assertEqual(self.post("send").status_code, 502)
+        self.assertEqual(self.query("SELECT ok FROM minutes_mail"), [(False,)])
+
+    # Send record
+    def test_the_latest_send_is_shown(self):
+        self.settings(auto=True)
+        self.item("decision", "採用新報價")
+        self.post("finalize")
+        self.post("send", self.signed_in("bob"))
+        last = self.alice.get(f"/api/meetings/{self.meeting}/minutes").json()["mail"]["last"]
+        self.assertEqual((last["trigger"], last["sentBy"], last["recipients"], last["ok"]), ("manual", "bob", 1, True))
+        self.assertEqual(self.query("SELECT trigger, sent_by FROM minutes_mail ORDER BY id"), [("auto", "alice"), ("manual", "bob")])
+
+    def test_the_real_sender_uses_the_configured_tls_and_login(self):
+        calls = []
+
+        class FakeSMTP:
+            def __init__(self, host, port, timeout):
+                calls.append(("connect", host, port, timeout))
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def starttls(self, context):
+                calls.append(("starttls",))
+
+            def login(self, user, _password):
+                calls.append(("login", user))
+
+            def send_message(self, message):
+                calls.append(("send", message["To"]))
+        message = mailer.EmailMessage()
+        message["To"] = "x@corp.example"
+        with patch("mailer.smtplib.SMTP", FakeSMTP), patch("mailer.SMTP_HOST", "smtp.corp"), patch("mailer.SMTP_PORT", 587), \
+                patch("mailer.SMTP_TLS", "starttls"), patch("mailer.SMTP_USER", "svc"):
+            REAL_SEND(message)
+        self.assertEqual(calls, [("connect", "smtp.corp", 587, 15), ("starttls",), ("login", "svc"), ("send", "x@corp.example")])
 
 
 if __name__ == "__main__":

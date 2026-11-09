@@ -1,5 +1,6 @@
 # Test accounts for the dev-only directory (compose profile "dev-ldap"). Never use these passwords elsewhere.
 # displayName values are base64 UTF-8 (LDIF requires it for non-ASCII): 楊（測試）、王愛麗（測試）、陳柏（測試）
+# alice has a mail attribute (minutes-mail: the address comes from LDAP); myyang and bob enter their own.
 dn: ou=people,dc=yuqiao,dc=test
 objectClass: organizationalUnit
 ou: people
@@ -18,6 +19,7 @@ uid: alice
 cn: alice
 sn: Wang
 displayName:: 546L5oSb6bqX77yI5ris6Kmm77yJ
+mail: alice@yuqiao.test
 userPassword: yq-test-alice
 
 dn: uid=bob,ou=people,dc=yuqiao,dc=test

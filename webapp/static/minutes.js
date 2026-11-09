@@ -129,6 +129,7 @@ function render(){
   // The panel follows its item: closed when a regeneration replaced it, retitled after an edit.
   if(peeking&&!peeking.subject){if(data.items.some(i=>i.id===peeking.itemId))renderPeek();else closePeek()}
   renderProgress();
+  renderMail();
 }
 async function load(){
   const polling=data?.status==='running';
@@ -189,3 +190,61 @@ function renderProgress(){
 }
 call('GET',`/api/meetings/${meetingId}/progress`).then(list=>{progress=list;renderProgress()}).catch(()=>{});
 call('GET',`/api/meetings/${meetingId}`).then(result=>{meeting=result;MeetingNav.show(meeting);if(data)render();if(peeking)renderPeek()}).catch(error=>notice(error.message));
+
+// --- Finalize and send (minutes-mail) ---
+const when=iso=>new Date(iso).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+let mailBusy=false,mailMessage=null;   // [text, 'ok'|'warn'] from the last action
+function renderMail(){
+  const mail=data.mail;
+  $('finalState').textContent=data.finalizedAt?`已定稿・${when(data.finalizedAt)}・${data.finalizedBy}`:'尚未定稿';
+  $('finalState').classList.toggle('done',!!data.finalizedAt);
+  $('finalize').hidden=!!data.finalizedAt;
+  $('finalize').disabled=mailBusy;
+  $('finalize').title=mail.auto?'定稿後會自動寄送紀要':'';
+  $('sendMail').textContent=mailBusy?'寄送中…':mail.last?.ok?'再寄一次':'寄送紀要';
+  $('sendMail').disabled=mailBusy||!mail.configured;
+  $('sendMail').title=mail.configured?'':'尚未設定寄信伺服器（SMTP_HOST）';
+  const to=mail.target==='team'?`寄到團隊信箱 ${mail.address}`:`寄給 ${mail.recipients} 位成員的個人信箱`;
+  const lines=[];
+  if(!mail.configured)lines.push(['尚未設定寄信伺服器（請在 .env 設定 SMTP_HOST），目前只能定稿。','warn']);
+  else lines.push([`${to}${mail.auto?'；定稿後自動寄送':''}。${mail.target==='members'&&mail.missing.length?`沒有 Email：${mail.missing.join('、')}。`:''}`,'']);
+  const last=mail.last;
+  if(last)lines.push(last.ok?[`最近寄送：${when(last.sentAt)}・${last.sentBy}${last.trigger==='auto'?'（定稿自動寄送）':''}・寄給 ${last.recipients} 人${last.skipped.length?`，未寄到 ${last.skipped.join('、')}（沒有 Email）`:''}。`,'ok']
+    :[`最近一次寄送失敗（${when(last.sentAt)}・${last.sentBy}）：${last.error}`,'error']);
+  if(mailMessage)lines.unshift(mailMessage);
+  $('mailInfo').replaceChildren(...lines.map(([text,kind])=>el('span',{className:`mail-line ${kind}`,textContent:text})));
+}
+function mailSettingsOpen(open){
+  $('mailSettings').hidden=!open;$('mailSettingsToggle').setAttribute('aria-expanded',String(open));
+  if(!open)return;
+  const mail=data.mail;
+  for(const radio of $('mailSettings').elements.target)radio.checked=radio.value===mail.target;
+  $('mailAddress').value=mail.address;$('mailAuto').checked=mail.auto;
+  syncAddress();
+}
+function syncAddress(){const team=$('mailSettings').elements.target.value==='team';$('mailAddress').disabled=!team;$('mailAddress').required=team}
+async function mailAction(work){
+  if(mailBusy)return;
+  mailBusy=true;mailMessage=null;renderMail();
+  try{await act(work)}finally{mailBusy=false;renderMail()}
+}
+$('finalize').onclick=()=>mailAction(async()=>{
+  const result=await call('POST',`/api/meetings/${meetingId}/minutes/finalize`);
+  // A failed automatic send is already shown as the latest send; other notices (nothing to send, no SMTP) are not.
+  const failed=result.mail.last&&!result.mail.last.ok;
+  mailMessage=result.notice&&!failed?[result.notice,result.notice.includes('；')?'warn':'ok']:null;
+  data=result;render();
+});
+$('sendMail').onclick=()=>mailAction(async()=>{
+  try{const {last}=await call('POST',`/api/meetings/${meetingId}/minutes/send`);data.mail.last=last;mailMessage=['紀要已寄出','ok']}
+  finally{data.mail=(await call('GET',`/api/meetings/${meetingId}/minutes`)).mail}
+});
+$('mailSettingsToggle').onclick=()=>mailSettingsOpen($('mailSettings').hidden);
+$('mailSettingsCancel').onclick=()=>mailSettingsOpen(false);
+$('mailSettings').onchange=event=>{if(event.target.name==='target')syncAddress()};
+$('mailSettings').onsubmit=event=>{event.preventDefault();act(async()=>{
+  const body={target:$('mailSettings').elements.target.value,address:$('mailAddress').value,auto:$('mailAuto').checked};
+  await call('PUT',`/api/teams/${data.mail.teamId}/mail`,body);
+  data.mail=(await call('GET',`/api/meetings/${meetingId}/minutes`)).mail;
+  mailSettingsOpen(false);mailMessage=['寄送設定已儲存','ok'];renderMail();
+})};

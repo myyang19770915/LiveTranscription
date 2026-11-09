@@ -21,6 +21,7 @@ import auth
 import db
 import diarize
 import mai_asr
+import mailer
 import meeting_audio
 import actions
 import minutes
@@ -122,6 +123,7 @@ app.include_router(review.router)
 # Before minutes: its /items/{id}/{action} would otherwise take /items/{id}/status.
 app.include_router(actions.router)
 app.include_router(minutes.router)
+app.include_router(mailer.router)
 app.include_router(series.router)
 app.include_router(metrics.router)
 app.include_router(search.router)
