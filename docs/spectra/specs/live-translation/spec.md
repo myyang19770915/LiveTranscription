@@ -120,7 +120,7 @@ code:
 ---
 ### Requirement: Screen view with subtitles
 
-When the session's audio source includes the shared tab or screen (分頁／系統聲音 or 麥克風＋系統聲音), the live page SHALL offer 畫面＋字幕: an in-page full-window view showing the shared picture with a subtitle box laid over it. The box SHALL show the last two finalized translation segments and the draft in a distinct style, and, when its 原文 toggle is on (on by default, remembered in the browser for this view), a source line with the previous finalized segment's source text followed by the source text still being translated. The source text still being translated and the draft translation SHALL share one highlight colour, distinct from the colour of finalized source and translation, so the reader can match what is being said to its translation. The source line, the finalized translation and the draft SHALL use one text size and weight. The box SHALL keep a fixed height while text arrives: the source line SHALL take two lines, the finalized translation two lines and the draft one line, whether empty or full (without the source line when 原文 is off), and the whole box SHALL be at most half the window height; when a part is longer, its newest text SHALL stay visible and the oldest be cut, so a long finalized translation never hides the source line or the draft. The box SHALL share its text size with the floating subtitles window, SHALL have a background opacity slider from 20% to 100% (default 55%) that changes only the background, SHALL be draggable to any position, and the opacity, position and 原文 toggle SHALL be remembered in the browser. The view SHALL offer full screen and SHALL close on its close button or Esc. The shared picture SHALL be shown locally only: never recorded or sent to the server. Without a shared picture (microphone-only source, or no session) the button SHALL be disabled with the reason 需要分頁／系統聲音來源, and ending the session SHALL close the view.
+When the session's audio source includes the shared tab or screen (分頁／系統聲音 or 麥克風＋系統聲音), the live page SHALL offer 畫面＋字幕: an in-page full-window view showing the shared picture with a subtitle box laid over it. The box SHALL show the last two finalized translation segments and the draft in a distinct style, and, when its 原文 toggle is on (on by default, remembered in the browser for this view), a source line with the previous finalized segment's source text followed by the source text still being translated. The source text still being translated and the draft translation SHALL share one highlight colour, distinct from the colour of finalized source and translation, so the reader can match what is being said to its translation. The source line, the finalized translation and the draft SHALL use one text size and weight. The box SHALL keep a fixed height while text arrives: the source line SHALL take two lines, the finalized translation two lines and the draft one line, whether empty or full (without the source line when 原文 is off), and the whole box SHALL be at most half the window height, also in a short window: the text size SHALL shrink with the window height (at most 5.5% of it) and nothing SHALL be drawn outside the box; when a part is longer, its newest text SHALL stay visible and the oldest be cut, so a long finalized translation never hides the source line or the draft. The box SHALL share its text size with the floating subtitles window, SHALL have a background opacity slider from 20% to 100% (default 55%) that changes only the background, SHALL be draggable to any position, and the opacity, position and 原文 toggle SHALL be remembered in the browser. The view SHALL offer full screen and SHALL close on its close button or Esc. The shared picture SHALL be shown locally only: never recorded or sent to the server. Without a shared picture (microphone-only source, or no session) the button SHALL be disabled with the reason 需要分頁／系統聲音來源, and ending the session SHALL close the view.
 
 #### Scenario: Subtitles over the shared tab
 
@@ -136,6 +136,11 @@ When the session's audio source includes the shared tab or screen (分頁／系�
 
 - **WHEN** the box shows a long source, translation and draft and then the source Hello., the translation 你好。 and no draft
 - **THEN** the box height is the same in both cases, and the source, translation and draft text have the same font size
+
+#### Scenario: A short window
+
+- **WHEN** the view is 1366×600 with the largest text size and 原文 on, and the box shows a long source, translation and draft
+- **THEN** the box is no taller than half the window and the draft line lies inside the box
 
 #### Scenario: Current speech and its draft share a colour
 
@@ -160,15 +165,24 @@ When the session's audio source includes the shared tab or screen (分頁／系�
 | missing or invalid | rgba(0,0,0,.55) | 50% across, 88% down | shown |
 
 <!-- @trace
-source: overlay-fixed-height
+source: review-followups
 updated: 2026-11-09
 code:
-  - meeting-2026-11-01T00-16-53.txt
-  - bench/translate_e2e.mjs
   - webapp/static/overlay.js
+  - webapp/static/subtitles.js
+  - webapp/reminders.py
   - webapp/static/index.html
   - webapp/static/overlay.css
-  - login_ui_template.jpg
-  - 20261029_185428.mp4
-  - 20261108_143903.mp4
+  - webapp/static/app.js
+  - webapp/mailer.py
+  - bench/translate_e2e.mjs
+  - bench/reminders_e2e.mjs
+  - README.md
+  - webapp/static/actions.html
+  - webapp/auth.py
+  - webapp/static/actions.css
+  - webapp/static/actions.js
+  - webapp/static/minutes.html
+tests:
+  - webapp/test_server.py
 -->

@@ -19,6 +19,7 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from zoneinfo import ZoneInfo
 
+import auth
 import db
 import mailer
 import minutes
@@ -52,10 +53,17 @@ def reminder_kind(due: date, today: date) -> tuple[str, date] | None:
     return None
 
 
-def next_run(now: datetime) -> datetime:
-    """The next REMIND_AT after now, in now's time zone."""
-    at = datetime.combine(now.date(), REMIND_AT, tzinfo=now.tzinfo)
-    return at if at > now else datetime.combine(now.date() + timedelta(days=1), REMIND_AT, tzinfo=now.tzinfo)
+CHECK_EVERY = 300        # seconds between schedule checks
+RETRY_AFTER = timedelta(minutes=30)
+
+
+def due_now(now: datetime, ran_on: date | None, retry_at: datetime | None) -> bool:
+    """Whether the worker runs now: today's REMIND_AT has passed and today has not run yet, or a failed run of today
+    is due for its retry. Checked every few minutes, so a server that starts, wakes up or changes its clock late
+    still sends the day's reminders; claims keep a repeated run from sending anything twice."""
+    if retry_at is not None and retry_at.date() == now.date() and now >= retry_at:
+        return True
+    return now >= datetime.combine(now.date(), REMIND_AT, tzinfo=now.tzinfo) and ran_on != now.date()
 
 
 # --- Choosing and claiming -------------------------------------------------------------------------
@@ -159,45 +167,63 @@ async def run(today: date | None = None) -> dict:
     async with db.connect() as conn:
         claimed: dict[str, dict] = {}
         for item in await candidates(conn, today):
+            # An address stored before the stricter rule that no longer passes counts as none (review-followups).
+            if not auth.valid_email(item["email"]):
+                continue
             found = reminder_kind(item["due_date"], today)
             if found and await claim(conn, item, *found):
                 entry = claimed.setdefault(item["owner"], {"owner": item, "groups": {}, "claims": []})
                 entry["groups"].setdefault(found[0], []).append(item)
                 entry["claims"].append((item["id"], *found))
-    for owner, entry in claimed.items():
-        groups = entry["groups"]
-        groups.get("overdue", []).sort(key=lambda i: (i["due_date"], i["id"]))
-        error = await mailer.deliver(compose(entry["owner"], groups, today))
-        if error:
-            logger.warning("reminder mail to %s failed, retried on the next run: %s", owner, error)
-            async with db.connect() as conn:
-                for item_id, kind, day in entry["claims"]:
-                    await conn.execute("DELETE FROM reminder_log WHERE item_id = %s AND kind = %s AND day = %s", (item_id, kind, day))
-            result["failed"] += 1
-        else:
-            result["owners"] += 1
-            result["items"] += len(entry["claims"])
+    done: set[str] = set()   # owners whose claims are settled: sent, or given back after a failed send
+    try:
+        for owner, entry in claimed.items():
+            groups = entry["groups"]
+            groups.get("overdue", []).sort(key=lambda i: (i["due_date"], i["id"]))
+            error = await mailer.deliver(compose(entry["owner"], groups, today))
+            if error:
+                logger.warning("reminder mail to %s failed, retried later: %s", owner, error)
+                await release(entry["claims"])
+                result["failed"] += 1
+            else:
+                result["owners"] += 1
+                result["items"] += len(entry["claims"])
+            done.add(owner)
+    finally:
+        # Interrupted (cancelled at shutdown, or an unexpected error): the owners not mailed yet get their claims back,
+        # so a later run sends them instead of believing they were sent.
+        unsent = [claim for owner, entry in claimed.items() if owner not in done for claim in entry["claims"]]
+        if unsent:
+            await release(unsent)
     return result
 
 
+async def release(claims: list[tuple]) -> None:
+    async with db.connect() as conn:
+        for item_id, kind, day in claims:
+            await conn.execute("DELETE FROM reminder_log WHERE item_id = %s AND kind = %s AND day = %s", (item_id, kind, day))
+
+
 async def worker() -> None:
-    """Run once at start-up when today's REMIND_AT has passed (the reminders that day are still due), then every
-    day at REMIND_AT. A failure is logged and the next day runs as usual."""
+    """Every CHECK_EVERY seconds: run when due_now (once a day after REMIND_AT, and 30 minutes after a failed run of
+    the same day). A failure is logged and retried; the worker never stops."""
     zone = ZoneInfo(team_access.MEETING_TIMEZONE)
     logger.info("action reminders at %s (%s) every day", REMIND_AT.strftime("%H:%M"), team_access.MEETING_TIMEZONE)
-    now = datetime.now(zone)
-    due_now = now >= datetime.combine(now.date(), REMIND_AT, tzinfo=zone)
+    ran_on, retry_at = None, None
     while True:
-        if due_now:
+        now = datetime.now(zone)
+        if due_now(now, ran_on, retry_at):
+            ran_on, retry_at = now.date(), None
             try:
-                result = await run()
+                result = await run(now.date())
                 if result["owners"] or result["failed"]:
                     logger.info("action reminders: %s", result)
+                if result["failed"]:
+                    retry_at = now + RETRY_AFTER
             except Exception:   # noqa: BLE001 - the worker must survive a bad day
                 logger.exception("action reminders failed")
-        now = datetime.now(zone)
-        await asyncio.sleep(max(1.0, (next_run(now) - now).total_seconds()))
-        due_now = True
+                retry_at = now + RETRY_AFTER
+        await asyncio.sleep(CHECK_EVERY)
 
 
 def main() -> None:

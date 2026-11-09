@@ -16,10 +16,8 @@ window.Subtitles=(()=>{
   // Sentences of a text: split at 。！？!?. and line breaks (3.5, U.S. stay whole); lastSentences joins the last n back,
   // Chinese/Japanese sentences without a space.
   const sentences=text=>(text||'').split(/(?<=[。！？])\s*|(?<=[!?.])(?:\s+|$)|\n+/).map(s=>s.trim()).filter(Boolean);
-  function lastSentences(text,n){
-    const parts=sentences(text).slice(-n);
-    return parts.join(parts.some(p=>/[぀-ヿ㐀-鿿]/.test(p))?'':' ');
-  }
+  const joinSentences=parts=>parts.join(parts.some(p=>/[぀-ヿ㐀-鿿]/.test(p))?'':' ');
+  const lastSentences=(text,n)=>joinSentences(sentences(text).slice(-n));
   const supported=()=>'documentPictureInPicture' in window;
   const button=()=>document.getElementById('subtitles');
   function render(){
@@ -51,7 +49,7 @@ window.Subtitles=(()=>{
     d.documentElement.lang='zh-Hant';
     d.title='語橋 Live 字幕';
     for(const href of ['/assets/tokens.css?v=20261108d','/assets/subtitles.css?v=20261109a']){const link=d.createElement('link');link.rel='stylesheet';link.href=href;d.head.append(link)}
-    d.body.innerHTML='<div class="sub-bar"><button type="button" class="sub-toggle-source" aria-pressed="false" title="顯示原文：上一段與正在講的">原文</button>'
+    d.body.innerHTML='<div class="sub-bar"><button type="button" class="sub-toggle-source" aria-pressed="false" title="顯示原文">原文</button>'
       +'<button type="button" class="sub-smaller" title="縮小字">A−</button><button type="button" class="sub-bigger" title="放大字">A+</button>'
       +'<span class="sub-title">語橋 Live 字幕</span><button type="button" class="sub-close" title="關閉字幕視窗">✕</button></div>'
       +'<div class="sub-body"><div class="sub-history"></div><div class="sub-current"><p class="sub-now" hidden></p><p class="sub-draft" hidden></p></div><p class="sub-empty">等待語音…</p></div>';
@@ -77,5 +75,5 @@ window.Subtitles=(()=>{
     b.onclick=()=>{if(win)close();else open().catch(error=>{win=null;b.setAttribute('aria-pressed','false');window.toast?.(error.message||'無法開啟字幕視窗')})};
   }
   init();
-  return {open,close,update,lastSentences,sentences,supported,getSettings,setSettings};
+  return {open,close,update,lastSentences,sentences,joinSentences,supported,getSettings,setSettings};
 })();

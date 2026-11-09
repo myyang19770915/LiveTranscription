@@ -1,7 +1,9 @@
 // 畫面＋字幕 (screen-subtitles): the shared tab's picture shown full-window on this page with a translucent subtitle box
 // over it. Document Picture-in-Picture windows cannot be transparent, so the picture comes here instead: the video
-// track getDisplayMedia already gave us. The box shows what the floating subtitles show (app.js subtitleParts(), the
-// shared text size); the 原文 toggle (on by default here), background opacity and position live in localStorage.overlay.
+// track getDisplayMedia already gave us. The box is subtitle-sized with fixed lines (原文 2, 譯文 2, 暫譯 1: the previous
+// segment's source and the speech now, the last two finalized translations, the draft; app.js subtitleParts()) and shares
+// the floating window's text size; the 原文 toggle (on by default here), background opacity and position live in
+// localStorage.overlay.
 window.Overlay=(()=>{
   const KEY='overlay',DEFAULTS={opacity:55,x:50,y:88,source:true},NO_TRACK='需要分頁／系統聲音來源',READY='把分享的畫面放大顯示，字幕半透明疊在上面';
   let track=null,latest={done:'',pending:'',translation:'',draft:''},settings=load(),drag=null;

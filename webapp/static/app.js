@@ -60,9 +60,12 @@ function setStatus(text, kind='idle') { $('status').className = `status ${kind}`
 // history: the recent finalized segments for the floating window, which shows as many as it has room for.
 const SUBTITLE_HISTORY=30;
 function subtitleParts(){
-  const pending=transcript.slice(translationOffset),last=s=>window.Subtitles?.lastSentences(s,1)||'',two=s=>window.Subtitles?.lastSentences(s,2)||'';
-  if(!translateOnly())return {done:last(transcript.slice(0,translationOffset)),pending:pending+tentative,translation:two(translated),draft:draftText,   // 開會: sentences, as before
-    history:(window.Subtitles?.sentences(translated)||[]).slice(-SUBTITLE_HISTORY).map(target=>({source:'',target}))};
+  const pending=transcript.slice(translationOffset),last=s=>window.Subtitles?.lastSentences(s,1)||'';
+  if(!translateOnly()){   // 開會: sentences, as before; the translation is split once for both the last two and the history
+    const sentences=window.Subtitles?.sentences(translated)||[];
+    return {done:last(transcript.slice(0,translationOffset)),pending:pending+tentative,translation:window.Subtitles?.joinSentences(sentences.slice(-2))||'',draft:draftText,
+      history:sentences.slice(-SUBTITLE_HISTORY).map(target=>({source:'',target}))};
+  }
   const finals=finalizedRecords();
   return {done:finals.at(-1)?.source||'',pending:pending+tentative,translation:finals.slice(-2).map(s=>s.target).join(' '),draft:draftText,
     history:finals.slice(-SUBTITLE_HISTORY).map(s=>({source:s.source,target:s.target}))};

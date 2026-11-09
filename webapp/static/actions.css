@@ -103,7 +103,7 @@
 .detail-value { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; min-height: 40px; }
 .detail-value > .status-control { width: 100%; }
 /* One width for every control in the panel, so their edges line up; chips and avatars follow on the right. */
-.detail-value .input, .detail-value .status-select { flex: none; width: 220px; min-width: 0; }
+.detail-value .input, .detail-value .status-select { flex: none; width: min(220px, 100%); min-width: 0; }
 .field-hint { flex-basis: 100%; margin: -2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .detail-value select.input { appearance: auto; }
 .detail-value a { color: var(--accent); overflow-wrap: anywhere; }

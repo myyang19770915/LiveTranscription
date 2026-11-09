@@ -323,7 +323,9 @@ async def me(user: CurrentUser):
 
 # --- E-mail address (minutes-mail) -----------------------------------------------------------------
 
-EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+# A plain ASCII address only (review-followups): no quotes, commas, semicolons, angle brackets or spaces, which would
+# change the To header the address is joined into, and no non-ASCII, which company SMTP servers often refuse.
+EMAIL_PATTERN = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+")
 BAD_EMAIL = "Email 格式不正確"
 EMAIL_FROM_DIRECTORY = "Email 由公司目錄提供，無法修改"
 

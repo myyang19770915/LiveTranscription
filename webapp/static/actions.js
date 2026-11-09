@@ -234,13 +234,18 @@ function reminderField(item){
   button.setAttribute('role','switch');button.setAttribute('aria-checked',String(item.remind));
   button.onclick=async()=>{
     button.disabled=true;
-    const response=await fetch(`${actionUrl(item.id)}/remind`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({on:!item.remind})});
-    const result=await response.json().catch(()=>({}));
-    if(response.ok)fresh(item,result);
-    await reload();
-    // The switch does not change the item's version, so the reload keeps the panel as it was: redraw it.
-    if(!$('detail').hidden&&Number(params.get('item'))===item.id)openDetail(item.id,{keep:true});
-    panelError(response.ok?'':typeof result.detail==='string'?result.detail:'切換失敗');
+    let message='切換失敗';
+    try{
+      const response=await fetch(`${actionUrl(item.id)}/remind`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({on:!item.remind})});
+      const result=await response.json().catch(()=>({}));
+      if(response.ok){fresh(item,result);message=''}else if(typeof result.detail==='string')message=result.detail;
+      await reload();
+    }catch{}   // offline: the panel is redrawn below with the switch usable again
+    // The switch does not change the item's version, so the reload keeps the panel as it was: redraw it, and keep the
+    // keyboard focus on the switch.
+    if(!$('detail').hidden&&Number(params.get('item'))===item.id){openDetail(item.id,{keep:true});$('detailBody').querySelector('.remind-switch')?.focus()}
+    else button.disabled=false;
+    panelError(message);
   };
   return [el('div',{className:'remind-row'},button,state),note];
 }
@@ -299,7 +304,7 @@ async function openCreate(){
     el('h2',{id:'detailTitle',className:'detail-title',textContent:'新增待辦'}),
     el('p',{id:'detailError',className:'alert',role:'alert',hidden:true}),
     content,field('團隊',team),field('負責人',owner),field('到期日',due),
-    field('系列',series,el('span',{className:'muted small',textContent:'選了系列，下次這個系列開會時會帶出來追蹤'})),
+    field('系列',series,el('p',{className:'field-hint',textContent:'選了系列，下次這個系列開會時會帶出來追蹤'})),
     el('div',{className:'detail-edit-actions'},create,el('button',{type:'button',className:'text-button',textContent:'取消',onclick:closeDetail})));
   form.onsubmit=async event=>{event.preventDefault();
     if(!content.value.trim()){content.focus();return}

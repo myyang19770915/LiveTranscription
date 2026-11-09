@@ -76,6 +76,13 @@ try {
       await page.click('.remind-switch');
       await page.waitForFunction(() => document.querySelector('.remind-state')?.textContent === '已關閉');
       check('switched off: the card shows the muted mark', await page.isVisible(`#action-${overdue} .issue-muted`) && await page.getAttribute('.remind-switch', 'aria-checked') === 'false');
+      check('the keyboard focus stays on the switch', await page.evaluate(() => document.activeElement?.classList.contains('remind-switch')));
+      // Offline: the switch comes back usable with 切換失敗, and nothing changes.
+      await page.route('**/remind', route => route.abort());
+      await page.click('.remind-switch');
+      await page.waitForFunction(() => document.getElementById('detailError')?.textContent === '切換失敗');
+      check('offline: the switch is usable again and says 切換失敗', !(await page.isDisabled('.remind-switch')) && await page.getAttribute('.remind-switch', 'aria-checked') === 'false');
+      await page.unroute('**/remind');
     }
     await page.screenshot({path: join(out, `reminders-${theme}.png`)});
     await context.close();

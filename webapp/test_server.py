@@ -2953,9 +2953,11 @@ class MemberEmailTests(AccountTestCase):
 
     def test_address_checks(self):
         bob = self.signed_in("bob")
-        for bad in ("bob@corp", "a b@corp.example", "@corp.example", "x" * 250 + "@c.example"):
+        for bad in ("bob@corp", "a b@corp.example", "@corp.example", "x" * 250 + "@c.example",
+                    '"x@corp.example', "a@b.example,root", "測試@corp.example", "a<b>@corp.example", "a;b@corp.example"):
             response = bob.put("/api/me/email", json={"email": bad})
             self.assertEqual((response.status_code, response.json()["detail"]), (422, "Email 格式不正確"), bad)
+        self.assertEqual(bob.put("/api/me/email", json={"email": "bob.chen+mt@corp-tw.example"}).json()["email"], "bob.chen+mt@corp-tw.example")
 
     def test_directory_address_removed_clears_it_but_not_a_self_entered_one(self):
         self.ldap.add("dora", "pw-dora", mail="dora@corp.example")
@@ -2996,6 +2998,7 @@ class MinutesMailTests(ReviewTestCase):
         if self.refuse:
             raise self.refuse
         self.sent.append(message)
+        return getattr(self, "refused", {})
 
     def item(self, kind, content, state="confirmed", owner=None, due=None):
         with psycopg.connect(TEST_DATABASE_URL) as conn:
@@ -3144,6 +3147,65 @@ class MinutesMailTests(ReviewTestCase):
         self.refuse = ConnectionRefusedError(111, "Connection refused")
         self.assertEqual(self.post("send").status_code, 502)
         self.assertEqual(self.query("SELECT ok FROM minutes_mail"), [(False,)])
+
+    # review-followups
+    def test_a_stored_address_that_no_longer_passes_counts_as_none(self):
+        run_sql("UPDATE users SET email = %s, email_source = 'self' WHERE username = 'bob'", ('"x@corp.example',))
+        self.item("decision", "採用新報價")
+        body = self.post("send").json()
+        self.assertEqual((self.sent[0]["To"], body["last"]["skipped"]), ("alice@corp.example", ["bob"]))
+
+    def test_some_recipients_refused(self):
+        run_sql("UPDATE users SET email = 'bob@corp.example', email_source = 'self' WHERE username = 'bob'")
+        self.item("decision", "採用新報價")
+        self.refused = {"bob@corp.example": (550, b"no such user")}
+        response = self.post("send")
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("bob@corp.example", response.json()["detail"])
+        last = self.alice.get(f"/api/meetings/{self.meeting}/minutes").json()["mail"]["last"]
+        self.assertFalse(last["ok"])
+        self.assertEqual(last["error"], "部分收件人被拒收：bob@corp.example（550）")
+
+    def test_unknown_smtp_tls_value_uses_starttls(self):
+        self.assertEqual([mailer.tls_mode(v) for v in ("tls", "true", "", "SSL", " none ")], ["starttls", "starttls", "starttls", "ssl", "none"])
+        calls = []
+
+        class FakeSMTP:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def starttls(self, context):
+                calls.append("starttls")
+
+            def login(self, user, _password):
+                calls.append("login")
+
+            def send_message(self, message):
+                calls.append("send")
+        with patch("mailer.smtplib.SMTP", FakeSMTP), patch("mailer.SMTP_TLS", mailer.tls_mode("tls")), patch("mailer.SMTP_USER", "svc"):
+            REAL_SEND(mailer.EmailMessage())
+        self.assertEqual(calls, ["starttls", "login", "send"])
+
+    def test_a_stored_team_address_that_no_longer_passes_is_no_recipient(self):
+        run_sql("UPDATE teams SET mail_target = 'team', mail_address = 'team@corp.example,root'")
+        self.item("decision", "採用新報價")
+        response = self.post("send")
+        self.assertEqual((response.status_code, response.json()["detail"]), (422, "沒有可寄送的收件人"))
+        self.assertEqual(self.sent, [])
+
+    def test_an_unexpected_error_while_sending_keeps_the_finalize(self):
+        self.settings(auto=True)
+        self.item("decision", "採用新報價")
+        self.refuse = ValueError("SMTP_PASSWORD=should-not-show")
+        body = self.post("finalize").json()
+        self.assertIsNotNone(body["finalizedAt"])
+        self.assertEqual((body["mail"]["last"]["ok"], body["mail"]["last"]["error"]), (False, "ValueError"))
 
     # Send record
     def test_the_latest_send_is_shown(self):
@@ -3356,13 +3418,33 @@ class ActionReminderTests(ReviewTestCase):
         self.alice.patch(f"/api/meetings/{self.meeting}/minutes/items/{item}", json={"version": version, "owner": "bob"})
         self.assertEqual(self.query("SELECT remind FROM minute_items"), [(True,)])
 
-    def test_next_run(self):
+    def test_due_now_example(self):
         zone = reminders.ZoneInfo("Asia/Taipei")
+        at = lambda d, h, m: datetime(2026, 11, d, h, m, tzinfo=zone)
+        rows = [(at(10, 8, 59), date(2026, 11, 9), None, False), (at(10, 9, 0), date(2026, 11, 9), None, True),
+                (at(10, 15, 0), date(2026, 11, 10), None, False), (at(10, 9, 40), date(2026, 11, 10), at(10, 9, 35), True),
+                (at(11, 9, 10), date(2026, 11, 10), at(10, 9, 35), True), (at(11, 0, 20), date(2026, 11, 10), at(10, 23, 50), False)]
         with patch("reminders.REMIND_AT", reminders.time(9, 0)):
-            self.assertEqual(reminders.next_run(datetime(2026, 11, 10, 8, 59, tzinfo=zone)), datetime(2026, 11, 10, 9, 0, tzinfo=zone))
-            self.assertEqual(reminders.next_run(datetime(2026, 11, 10, 9, 0, tzinfo=zone)), datetime(2026, 11, 11, 9, 0, tzinfo=zone))
-        self.assertEqual(reminders.remind_at("7:30"), reminders.time(7, 30))
-        self.assertEqual(reminders.remind_at("25:00"), reminders.time(9, 0))
+            for now, ran_on, retry_at, expected in rows:
+                self.assertEqual(reminders.due_now(now, ran_on, retry_at), expected, now)
+        self.assertEqual((reminders.remind_at("7:30"), reminders.remind_at("25:00")), (reminders.time(7, 30), reminders.time(9, 0)))
+
+    def test_an_interrupted_run_loses_nothing(self):
+        self.item("bob 的", date(2026, 11, 8))
+        self.item("carol 的", date(2026, 11, 8), owner="carol")
+
+        async def interrupted(_message):
+            raise asyncio.CancelledError
+        with patch("mailer.deliver", interrupted), self.assertRaises(asyncio.CancelledError):
+            asyncio.run(reminders.run(self.TODAY))
+        self.assertEqual(self.query("SELECT count(*) FROM reminder_log"), [(0,)])
+        self.assertEqual(self.run_on(self.TODAY), {"owners": 2, "items": 2, "failed": 0})
+
+    def test_a_stored_address_that_no_longer_passes_gets_no_reminder(self):
+        self.item("逾期的", date(2026, 11, 8))
+        run_sql("UPDATE users SET email = 'bob@corp.example,root' WHERE username = 'bob'")
+        self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 0})
+        self.assertEqual(self.sent, [])
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ minutes_mail. Tests replace send_message.
 """
 import asyncio
 import html
+import logging
 import os
 import smtplib
 import ssl
@@ -28,7 +29,20 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "") or 587)
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "")
-SMTP_TLS = (os.getenv("SMTP_TLS", "") or "starttls").lower()   # starttls | ssl | none
+TLS_MODES = ("starttls", "ssl", "none")
+
+
+def tls_mode(value: str) -> str:
+    """starttls | ssl | none; anything else is a mistake, and falls back to starttls so a password is never sent in
+    the clear because of a typo."""
+    mode = (value or "starttls").strip().lower()
+    if mode not in TLS_MODES:
+        logging.getLogger("uvicorn.error").error("SMTP_TLS %r is not starttls, ssl or none; using starttls", value)
+        return "starttls"
+    return mode
+
+
+SMTP_TLS = tls_mode(os.getenv("SMTP_TLS", ""))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 SMTP_TIMEOUT = 15
 ERROR_MAX = 300
@@ -49,8 +63,9 @@ def sender() -> str:
     return SMTP_FROM or SMTP_USER or "yuqiao-live@localhost"
 
 
-def send_message(message: EmailMessage) -> None:
-    """Hand one message to the SMTP server (blocking); tests replace this."""
+def send_message(message: EmailMessage) -> dict:
+    """Hand one message to the SMTP server (blocking); returns the recipients it refused while accepting others
+    (smtplib raises only when it refuses them all). Tests replace this."""
     if SMTP_TLS == "ssl":
         client = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT, context=ssl.create_default_context())
     else:
@@ -60,17 +75,24 @@ def send_message(message: EmailMessage) -> None:
             client.starttls(context=ssl.create_default_context())
         if SMTP_USER:
             client.login(SMTP_USER, SMTP_PASSWORD)
-        client.send_message(message)
+        return client.send_message(message) or {}
+
+
+def refused_text(refused: dict) -> str:
+    return "部分收件人被拒收：" + "、".join(f"{address}（{code}）" for address, (code, _reply) in refused.items())
 
 
 async def deliver(message: EmailMessage) -> str:
-    """"" when sent, otherwise the error to record and show (never the password: smtplib errors carry only the
-    server's reply)."""
+    """"" when every recipient was accepted, otherwise the error to record and show. SMTP and connection errors keep
+    the server's reply (smtplib never puts the password in it); any other error is recorded by its type only, so a
+    message cannot carry a setting's value."""
     try:
-        await asyncio.to_thread(send_message, message)
-        return ""
+        refused = await asyncio.to_thread(send_message, message)
     except (smtplib.SMTPException, OSError) as exc:
         return f"{type(exc).__name__}: {exc}"[:ERROR_MAX]
+    except Exception as exc:   # noqa: BLE001 - recorded as a failed send instead of a 500
+        return type(exc).__name__
+    return refused_text(refused)[:ERROR_MAX] if refused else ""
 
 
 # --- Recipients and settings -----------------------------------------------------------------------
@@ -82,11 +104,14 @@ async def team_settings(conn, team_id: int) -> dict:
 async def recipients(conn, team: dict) -> tuple[list[str], list[str]]:
     """(addresses, usernames not reached): the team address, or every member with an address."""
     if team["mail_target"] == "team":
-        return ([team["mail_address"]] if team["mail_address"] else []), []
+        address = team["mail_address"]
+        return ([address] if address and auth.valid_email(address) else []), []
     rows = await (await conn.execute(
         "SELECT m.username, u.email FROM team_members m LEFT JOIN users u USING (username) WHERE m.team_id = %s ORDER BY m.username",
         (team["id"],))).fetchall()
-    return [r["email"] for r in rows if r["email"]], [r["username"] for r in rows if not r["email"]]
+    # An address stored before the stricter rule that no longer passes counts as none: it must not spoil the mail.
+    usable = lambda r: bool(r["email"]) and auth.valid_email(r["email"])
+    return [r["email"] for r in rows if usable(r)], [r["username"] for r in rows if not usable(r)]
 
 
 def last_payload(row: dict | None, members: dict) -> dict | None:
@@ -194,7 +219,12 @@ async def send_minutes(meeting: dict, user: auth.User, trigger: Literal["auto", 
         if not to:
             raise HTTPException(status_code=422, detail=NO_RECIPIENT)
         members, times = await minutes.item_context(conn, meeting)
-    error = await deliver(compose(meeting, team["name"], summary, items, members, times, to))
+    try:
+        message = compose(meeting, team["name"], summary, items, members, times, to)
+    except Exception as exc:   # noqa: BLE001 - recorded as a failed send
+        message, error = None, type(exc).__name__
+    if message is not None:
+        error = await deliver(message)
     async with db.connect() as conn:
         record = await (await conn.execute(
             "INSERT INTO minutes_mail (meeting_id, trigger, recipients, skipped, sent_by, ok, error) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *",

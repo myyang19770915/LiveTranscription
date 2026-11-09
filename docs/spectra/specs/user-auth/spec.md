@@ -151,7 +151,7 @@ code:
 ---
 ### Requirement: Member e-mail address
 
-At sign-in the system SHALL read the user's e-mail address from the LDAP attribute named by `LDAP_MAIL_ATTR` (default `mail`) and store it as the user's address with source `ldap`. When LDAP has no address and the stored address came from LDAP, the stored address SHALL be cleared; an address the user entered (source `self`) SHALL be kept. A signed-in user whose address does not come from LDAP SHALL be able to set or clear their own address; an address from LDAP SHALL NOT be changeable by the user. `GET /api/me` SHALL report the address and its source.
+At sign-in the system SHALL read the user's e-mail address from the LDAP attribute named by `LDAP_MAIL_ATTR` (default `mail`) and store it as the user's address with source `ldap`. When LDAP has no address and the stored address came from LDAP, the stored address SHALL be cleared; an address the user entered (source `self`) SHALL be kept. A signed-in user whose address does not come from LDAP SHALL be able to set or clear their own address; an address from LDAP SHALL NOT be changeable by the user. `GET /api/me` SHALL report the address and its source. An address SHALL be accepted only as a plain ASCII address: a local part of letters, digits and the characters ``.!#$%&'*+/=?^_`{|}~-`` (no quotes, commas, semicolons, angle brackets or spaces), `@`, and a domain of letters, digits and hyphens with at least one dot, at most 254 characters; an LDAP value that is not such an address SHALL be ignored.
 
 #### Scenario: Address from the directory
 
@@ -174,39 +174,32 @@ At sign-in the system SHALL read the user's e-mail address from the LDAP attribu
 | ----- | ------ |
 | " bob@corp.example " | stored as "bob@corp.example" |
 | "" | address cleared |
+| "bob.chen+mt@corp-tw.example" | stored |
 | "bob@corp" | 422 Email 格式不正確 |
 | "a b@corp.example" | 422 Email 格式不正確 |
+| "\"x@corp.example" | 422 Email 格式不正確 |
+| "a@b.example,root" | 422 Email 格式不正確 |
+| "測試@corp.example" | 422 Email 格式不正確 |
 
 <!-- @trace
-source: minutes-mail
+source: review-followups
 updated: 2026-11-09
 code:
-  - webapp/auth.py
-  - webapp/static/ask.html
-  - webapp/static/metrics.html
-  - meeting-2026-11-01T00-16-53.txt
-  - webapp/static/minutes.css
+  - webapp/static/overlay.js
+  - webapp/static/subtitles.js
+  - webapp/reminders.py
   - webapp/static/index.html
-  - webapp/migrations/014_minutes_mail.sql
-  - webapp/static/admin.html
-  - webapp/static/minutes.html
-  - login_ui_template.jpg
-  - webapp/static/actions.html
-  - docker/dev-ldap/users.ldif
+  - webapp/static/overlay.css
+  - webapp/static/app.js
   - webapp/mailer.py
-  - webapp/server.py
-  - webapp/static/minutes.js
-  - webapp/static/account.js
-  - webapp/static/meetings.html
-  - compose.yaml
-  - webapp/static/review.html
-  - webapp/minutes.py
-  - webapp/static/search.html
-  - .env.example
+  - bench/translate_e2e.mjs
+  - bench/reminders_e2e.mjs
   - README.md
-  - 20261108_143903.mp4
-  - 20261029_185428.mp4
-  - bench/mail_e2e.mjs
+  - webapp/static/actions.html
+  - webapp/auth.py
+  - webapp/static/actions.css
+  - webapp/static/actions.js
+  - webapp/static/minutes.html
 tests:
   - webapp/test_server.py
 -->

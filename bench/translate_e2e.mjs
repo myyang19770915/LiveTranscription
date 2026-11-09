@@ -20,7 +20,7 @@ try {
   const context = await browser.newContext({viewport: {width: 1440, height: 900}, permissions: ['microphone'], acceptDownloads: true});
   await context.addInitScript(() => localStorage.setItem('interpreter-theme', 'light'));
   // Document Picture-in-Picture is not in headless Chromium: a popup window stands in for it (same document API).
-  await context.addInitScript(() => { window.documentPictureInPicture = {requestWindow: async () => window.open('', 'subtitles', 'width=760,height=180')}; });
+  await context.addInitScript(() => { window.documentPictureInPicture = {requestWindow: async () => window.open('', 'subtitles', 'width=760,height=260')}; });
   // Headless Chromium has no tab to share: 分頁／系統聲音 gets a canvas picture plus the fake microphone's audio.
   await context.addInitScript(() => { navigator.mediaDevices.getDisplayMedia = async () => { const c = document.createElement('canvas'); c.width = 320; c.height = 180;
     const g = c.getContext('2d'); let n = 0; setInterval(() => { g.fillStyle = n++ % 2 ? '#335577' : '#336688'; g.fillRect(0, 0, 320, 180); }, 200);   // frames only flow while the canvas is drawn to
@@ -86,6 +86,7 @@ try {
   const popup = await popupPromise;
   check('浮動字幕 opens a window', popup !== null && (await page.getAttribute('#subtitles', 'aria-pressed')) === 'true');
   if (popup) {
+    await popup.setViewportSize({width: 760, height: 260});   // headless ignores window.open's size; the PiP window opens at 760×260
     await popup.waitForFunction(() => document.querySelector('.sub-text')?.textContent.trim().length > 0, null, {timeout: 20000}).catch(() => {});
     const shown = await popup.evaluate(() => { const last = [...document.querySelectorAll('.sub-text')].at(-1);
       return {text: last.textContent, source: !!document.querySelector('.sub-source')?.offsetParent, size: getComputedStyle(last).fontSize}; });
@@ -104,6 +105,9 @@ try {
     await page.evaluate(() => Subtitles.update({pending: '', draft: '', history: Array.from({length: 5}, (_, i) => ({source: `原文第${i + 1}段。`, target: `Segment ${i + 1}.`}))}));
     const kept = await popup.evaluate(() => { const segs = [...document.querySelectorAll('.sub-seg')], size = e => getComputedStyle(e).fontSize;
       return {count: segs.length, old: segs.map(s => s.classList.contains('old')), first: segs[0]?.textContent, sizes: [size(document.querySelector('.sub-source')), size(document.querySelector('.sub-text'))]}; });
+    const newest = await popup.evaluate(() => { const body = document.querySelector('.sub-body').getBoundingClientRect(), last = [...document.querySelectorAll('.sub-seg')].at(-1).getBoundingClientRect();
+      return {inside: last.top >= body.top - 1 && last.bottom <= body.bottom + 1, body: Math.round(body.height)}; });
+    check('the newest segment is inside the visible part of the window', newest.inside, newest);
     check('the floating window keeps earlier segments above, source and translation the same size', kept.count === 5 && kept.old.join() === 'true,true,true,false,false'
       && kept.first === '原文第1段。Segment 1.' && kept.sizes[0] === kept.sizes[1], kept);
     await page.evaluate(() => Subtitles.update({done: '第一句。', pending: '第二句還在講', translation: 'First.', draft: 'Second being'}));
@@ -194,6 +198,15 @@ try {
   const fixed = await page.evaluate(() => { const b = document.querySelector('#screenView .overlay-subs'), size = s => getComputedStyle(b.querySelector(s)).fontSize;
     return {height: b.getBoundingClientRect().height, sizes: [size('.ov-done'), size('.ov-text'), size('.ov-draft')]}; });
   check('the subtitle box keeps its height and source and translation are the same size', Math.abs(fixed.height - fixedBefore) < 1 && new Set(fixed.sizes).size === 1, {fixedBefore, ...fixed});
+  // A short window at the largest size: the box stays within half the window and the draft line inside the box.
+  await page.setViewportSize({width: 1366, height: 600});
+  const shortWindow = await page.evaluate(() => { const before = Subtitles.getSettings(); Subtitles.setSettings({size: 4});
+    Overlay.update({done: '很長的原文'.repeat(20), pending: '正在講'.repeat(20), translation: 'Long translation. '.repeat(20), draft: 'draft words '.repeat(20)});
+    const b = document.querySelector('#screenView .overlay-subs').getBoundingClientRect(), d = document.querySelector('#screenView .ov-draft').getBoundingClientRect();
+    Subtitles.setSettings({size: before.size});
+    return {ratio: b.height / innerHeight, draftInside: d.top >= b.top && d.bottom <= b.bottom + 1, boxBottom: Math.round(b.bottom), draftBottom: Math.round(d.bottom)}; });
+  await page.setViewportSize({width: 1440, height: 900});
+  check('a short window at the largest size: the box within half the window, the draft inside it', shortWindow.ratio <= 0.5 && shortWindow.draftInside, shortWindow);
   await page.evaluate(() => Overlay.update({done: '上一段原文', pending: '', translation: 'Seg A. Seg B.', draft: ''}));
   const segs = await page.evaluate(() => ({done: document.querySelector('#screenView .ov-done').textContent, text: document.querySelector('#screenView .ov-text').textContent}));
   check('the overlay shows the previous segment source and the last two segments as given', segs.done === '上一段原文' && segs.text === 'Seg A. Seg B.', segs);

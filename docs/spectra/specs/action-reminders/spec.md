@@ -8,7 +8,7 @@ Owners of action items get an e-mail before an item is due, on the day it is due
 
 ### Requirement: Reminder timing
 
-Once a day, after `REMIND_AT` (default 09:00) in `MEETING_TIMEZONE`, the system SHALL e-mail the owner of every confirmed action item whose status is 未開始 or 進行中, that has an owner who is still a member of the item's team and has an e-mail address, that has a due date, and whose reminders are on. An item SHALL be reminded once while it is due in one to three days, once on its due date, and once every day while it is overdue. A changed due date SHALL count as a new due date. Without a configured mail server no reminder SHALL be sent.
+Once a day, after `REMIND_AT` (default 09:00) in `MEETING_TIMEZONE`, the system SHALL e-mail the owner of every confirmed action item whose status is 未開始 or 進行中, that has an owner who is still a member of the item's team and has an e-mail address, that has a due date, and whose reminders are on. An item SHALL be reminded once while it is due in one to three days, once on its due date, and once every day while it is overdue. A changed due date SHALL count as a new due date. Without a configured mail server no reminder SHALL be sent. The schedule SHALL be checked at least every five minutes, so a server that starts, wakes up or changes its clock after `REMIND_AT` still sends that day's reminders. A reminder that was not sent, because its mail failed or because the run was interrupted, SHALL be sent by a later run: a failed send SHALL be retried 30 minutes later on the same day.
 
 #### Scenario: The daily reminders
 
@@ -42,6 +42,26 @@ Once a day, after `REMIND_AT` (default 09:00) in `MEETING_TIMEZONE`, the system 
 - **WHEN** the mail server refuses an owner's reminder
 - **THEN** the next run sends that owner's reminders again
 
+#### Scenario: An interrupted run loses nothing
+
+- **WHEN** a run is interrupted while sending the first of two owners' reminders
+- **THEN** neither owner's reminders stay recorded as sent, and the next run sends both
+
+#### Scenario: When the schedule runs
+
+- **WHEN** the schedule is checked with `REMIND_AT` 09:00
+- **THEN** it runs as in the example below
+
+##### Example: due_now
+
+| Now | Last run | Retry at | Runs |
+| --- | -------- | -------- | ---- |
+| 2026-11-10 08:59 | 2026-11-09 | none | no |
+| 2026-11-10 09:00 | 2026-11-09 | none | yes |
+| 2026-11-10 15:00 | 2026-11-10 | none | no |
+| 2026-11-10 09:40 | 2026-11-10 | 2026-11-10 09:35 | yes |
+| 2026-11-11 09:10 | 2026-11-10 | 2026-11-10 09:35 | yes |
+
 #### Scenario: Owners who cannot be reached
 
 - **WHEN** an item's owner has no e-mail address or is no longer a member of the item's team
@@ -49,34 +69,24 @@ Once a day, after `REMIND_AT` (default 09:00) in `MEETING_TIMEZONE`, the system 
 
 
 <!-- @trace
-source: action-reminders
+source: review-followups
 updated: 2026-11-09
 code:
-  - webapp/migrations/015_action_reminders.sql
-  - webapp/static/actions.js
-  - README.md
-  - webapp/static/search.html
+  - webapp/static/overlay.js
+  - webapp/static/subtitles.js
   - webapp/reminders.py
-  - webapp/static/meetings.html
-  - compose.yaml
-  - webapp/static/ask.html
-  - webapp/minutes.py
-  - webapp/server.py
-  - webapp/static/minutes.html
   - webapp/static/index.html
-  - webapp/static/account.js
-  - webapp/static/metrics.html
-  - .env.example
-  - 20261108_143903.mp4
-  - webapp/static/review.html
-  - 20261029_185428.mp4
-  - meeting-2026-11-01T00-16-53.txt
-  - webapp/static/actions.html
-  - webapp/static/admin.html
-  - login_ui_template.jpg
-  - webapp/actions.py
-  - webapp/static/actions.css
+  - webapp/static/overlay.css
+  - webapp/static/app.js
+  - webapp/mailer.py
+  - bench/translate_e2e.mjs
   - bench/reminders_e2e.mjs
+  - README.md
+  - webapp/static/actions.html
+  - webapp/auth.py
+  - webapp/static/actions.css
+  - webapp/static/actions.js
+  - webapp/static/minutes.html
 tests:
   - webapp/test_server.py
 -->
