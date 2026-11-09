@@ -397,9 +397,10 @@ async def change_item(meeting_id: str, item_id: int, body: ItemChange, user: aut
         # A person chose the owner: the model's unmatched name no longer applies.
         hint = "" if "owner" in given else row["owner_hint"]
         return await updated(conn, meeting, item_id,
-                             "kind = %s, content = %s, owner = %s, due_date = %s, due_text = %s, owner_hint = %s, edited = edited OR %s",
+                             "kind = %s, content = %s, owner = %s, due_date = %s, due_text = %s, owner_hint = %s, edited = edited OR %s, "
+                             "remind = remind OR %s",   # a new owner gets reminders again (action-reminders)
                              (values["kind"], values["content"], values["owner"], values["due_date"], values["due_text"], hint,
-                              changed_by_hand(row, values)), user)
+                              changed_by_hand(row, values), values["owner"] != row["owner"]), user)
 
 
 @router.post("/api/meetings/{meeting_id}/minutes/items/{item_id}/{action}")

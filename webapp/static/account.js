@@ -271,7 +271,7 @@ function emailDialog(me,make){
   actions.append(...[clear,close,save].filter(Boolean));
   const form=make('form',{method:'dialog'});
   form.append(make('h2',{textContent:'我的 Email'}),
-    make('p',{textContent:fixed?'由公司目錄提供，如需更改請洽 IT。':'用來收會議紀要。公司目錄沒有提供你的 Email，請自行填寫。'}),
+    make('p',{textContent:fixed?'由公司目錄提供，如需更改請洽 IT。':'用來收會議紀要與待辦提醒。公司目錄沒有提供你的 Email，請自行填寫。'}),
     ...(fixed?[make('p',{className:'email-value',textContent:me.email})]:[input]),error,
     actions);
   const dialog=make('dialog',{className:'email-dialog',ariaLabel:'我的 Email'});

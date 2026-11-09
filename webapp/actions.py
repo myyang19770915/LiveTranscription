@@ -26,6 +26,7 @@ REASON_REQUIRED = "取消待辦請填寫原因"
 BOARD_LIMIT = 500
 ITEM_NOT_FOUND = "找不到這個待辦"
 MEETING_ITEM_NOT_DELETABLE = "會議產生的待辦請改用已取消"
+REMIND_FORBIDDEN = "只有負責人或系統管理員可以切換提醒"
 
 router = APIRouter()
 
@@ -156,7 +157,7 @@ async def action_rows(conn, user: auth.User, where: list[str], params: dict) -> 
              "content": r["content"], "owner": r["owner"], "ownerName": r["owner_name"], "ownerHint": r["owner_hint"],
              "dueDate": r["due_date"].isoformat() if r["due_date"] else None, "dueText": r["due_text"],
              "status": r["status"], "statusNote": r["status_note"], "overdueDays": r["overdue"], "version": r["version"],
-             "statusAt": r["status_at"].isoformat() if r["status_at"] else None, "series": r["series_name"]}
+             "statusAt": r["status_at"].isoformat() if r["status_at"] else None, "series": r["series_name"], "remind": r["remind"]}
             for r in rows]
 
 
@@ -233,9 +234,11 @@ async def change_action(item_id: int, body: ActionChange, user: auth.CurrentUser
         values = {"content": body.content if "content" in given and body.content else row["content"],
                   "owner": minutes.require_owner(body.owner, members) if "owner" in given else row["owner"],
                   "due_date": body.dueDate if "dueDate" in given else row["due_date"]}
-        await minutes.updated(conn, home, item_id, "content = %s, owner = %s, due_date = %s, owner_hint = %s, edited = edited OR %s",
+        # A new owner gets reminders again (action-reminders): switching them off was the previous owner's choice.
+        await minutes.updated(conn, home, item_id,
+                              "content = %s, owner = %s, due_date = %s, owner_hint = %s, edited = edited OR %s, remind = remind OR %s",
                               (values["content"], values["owner"], values["due_date"], "" if "owner" in given else row["owner_hint"],
-                               minutes.changed_by_hand(row, values)), user)
+                               minutes.changed_by_hand(row, values), values["owner"] != row["owner"]), user)
         return await item_row(conn, user, item_id)
 
 
@@ -247,6 +250,21 @@ async def change_action_status(item_id: int, body: StatusIn, user: auth.CurrentU
             return await stale_action(conn, user, row)
         check_status(row, body)
         await apply_status(conn, home, row, body.status, body.note, user)
+        return await item_row(conn, user, item_id)
+
+
+class RemindIn(BaseModel):
+    on: bool
+
+
+@router.post("/api/actions/{item_id}/remind")
+async def switch_reminders(item_id: int, body: RemindIn, user: auth.CurrentUser):
+    """Due-date e-mail reminders on or off for one item (action-reminders): its owner or an administrator only."""
+    async with db.connect() as conn:
+        _, row = await locked_action(conn, user, item_id)
+        if not (user.admin or row["owner"] == user.username):
+            raise HTTPException(status_code=403, detail=REMIND_FORBIDDEN)
+        await conn.execute("UPDATE minute_items SET remind = %s WHERE id = %s", (body.on, item_id))
         return await item_row(conn, user, item_id)
 
 

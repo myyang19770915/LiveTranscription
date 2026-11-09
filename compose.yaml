@@ -155,6 +155,8 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_TLS: ${SMTP_TLS:-starttls}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      # Daily due-date reminders to action item owners (HH:MM in MEETING_TIMEZONE); needs SMTP_HOST.
+      REMIND_AT: ${REMIND_AT:-09:00}
       # Behind an HTTPS reverse proxy: trust its X-Forwarded-Proto (uvicorn reads this) and/or force Secure cookies.
       # With the tunnel service it connects from the Compose network: e.g. 127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}

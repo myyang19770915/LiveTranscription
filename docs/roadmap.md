@@ -30,7 +30,7 @@
 | P3 追蹤閉環 | ① `action-tracking`：待辦狀態（未開始／進行中／已完成／已取消，取消需原因）、狀態歷程、逾期標示、待辦看板 `/actions`<br>② `meeting-series`：系列會議（開會前選擇）、會前帶出未完成事項、會議中即時提示進度更新（需人確認，套用後寫入歷程） | 完成（2026-11-06） |
 | P4 查詢 | ① `meeting-search`：全文搜尋與條件篩選（Postgres `pg_trgm`，取代原規劃的 SQLite FTS5）<br>② `meeting-qa`：問答，混合檢索（關鍵字＋本機 CPU 的 bge-m3 embedding，pgvector，RRF 合併）＋紀要模型回答，每句附出處、無依據回找不到 | ① 完成（2026-11-07）、② 完成（2026-11-07；擬真評測混合排序 MRR 0.90／驗證題 0.93，可回答 52 題中 50 題引用正確出處，無解 8 題全部回找不到；出處在右側側欄查看與播放；見 `bench/qa_eval.py`） |
 | 即時翻譯 | `live-translation`：開會頁的「即時翻譯」模式（不建會議、不存伺服器，給對談與看影片用）與永遠在最上層的浮動字幕視窗（Document PiP） | 完成（2026-11-08） |
-| P5 整合 | ① `speaker-diarization`：會後說話者辨識（評估 sherpa-onnx 與 MOSS-Transcribe-Diarize 後採用 MOSS Q8，CPU 執行、不占 GPU）、說話者命名為團隊成員、紀要帶說話者<br>② 寄送、③ 外部工具同步 | ① 完成（2026-11-08）、②③ 待辦 |
+| P5 整合 | ① `speaker-diarization`：會後說話者辨識（評估 sherpa-onnx 與 MOSS-Transcribe-Diarize 後採用 MOSS Q8，CPU 執行、不占 GPU）、說話者命名為團隊成員、紀要帶說話者<br>② 寄送：`minutes-mail` 紀要定稿後 Email 寄給團隊（公司 SMTP、成員 Email 由 LDAP 帶入或自填）、`action-reminders` 待辦到期前 3 天／當天／逾期每天提醒負責人<br>③ 外部工具同步 | ①（2026-11-08）、②（2026-11-09）完成；③ 待辦 |
 
 ## P1 設計
 

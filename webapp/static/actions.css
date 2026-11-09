@@ -133,3 +133,9 @@
 /* The contrast colour (brand-palette-blue): the one action that adds something. */
 #create { border-color: var(--accent-2); background: var(--accent-2); color: var(--accent-2-ink); }
 #create:hover { filter: brightness(1.06); }
+
+/* Due-date e-mail reminders (action-reminders). */
+.issue-muted { display: inline-flex; color: var(--muted); }
+.issue-muted svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.remind-state { font-size: 14px; }
+.remind-state.off { color: var(--muted); }

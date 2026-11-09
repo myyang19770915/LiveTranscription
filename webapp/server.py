@@ -29,6 +29,7 @@ import review
 import series
 import metrics
 import qa
+import reminders
 import search
 import team_access
 from translation_quality import (TERMS_SCHEMA, apply_aliases, asr_context, consolidate_terms, glossary_entries, learned_replacements,
@@ -107,9 +108,11 @@ async def lifespan(_app: FastAPI):
     indexing = asyncio.create_task(qa.indexer()) if qa.EMBED_URL else None
     # Speaker diarization (speaker-diarization) after meetings; without DIARIZE_URL segments get no speakers.
     diarizing = asyncio.create_task(diarize.worker()) if diarize.configured() else None
+    # Due-date reminders to action item owners (action-reminders); without SMTP_HOST nothing is mailed.
+    reminding = asyncio.create_task(reminders.worker()) if mailer.configured() else None
     logger.info("system administrators (ADMIN_USERS): %s", ", ".join(sorted(auth.ADMIN_USERS)) or "none")
     yield
-    for task in (indexing, diarizing):
+    for task in (indexing, diarizing, reminding):
         if task:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

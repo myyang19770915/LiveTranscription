@@ -395,6 +395,9 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
   - **新增待辦**：按右上角「＋ 新增待辦」或鍵盤 `c`，填內容、團隊、負責人、到期日，可選系列；建立後是未開始，來源顯示「看板新增」。選了系列的話，下次這個系列開會時會列在會前未完成事項，也會納入會中進度提示。
   - **修改內容**：詳細面板標題旁按「編輯」（Enter 儲存、Esc 取消）。
   - **刪除**：只有看板新增的待辦可以刪（按兩次確認，連同歷程一起刪除）；會議產生的待辦請改成「已取消」並填原因。
+- **到期提醒信**：每天 `REMIND_AT`（預設 09:00，`MEETING_TIMEZONE` 時間）寄 Email 給負責人：到期前 3 天內提醒一次、到期當天一次、逾期後每天一次。同一位負責人當天的提醒合併成一封，分成逾期、今天到期、即將到期，每件附看板連結。只提醒未開始或進行中、有負責人與到期日、負責人仍在團隊且有 Email 的待辦；改了到期日會重新提醒；同一天重啟服務不會重寄，寄送失敗下次會重試。需要先設定寄信伺服器（見[定稿與寄送紀要](#定稿與寄送紀要)）。
+  - **關閉提醒**：詳細面板的「Email 提醒」欄按「關閉提醒」，只有負責人與系統管理員能切換；關閉後卡片上顯示 🔕。負責人換人時會自動恢復提醒。
+  - **立即執行一次**（補寄或測試）：`docker compose exec app python -m reminders run`，可加 `--today 2026-11-20` 假設今天的日期。
 
 ## 搜尋
 
@@ -470,7 +473,8 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `SMTP_USER` / `SMTP_PASSWORD` | 空 | SMTP 登入帳密；`SMTP_USER` 空白則不登入 |
 | `SMTP_FROM` | 空（沿用 `SMTP_USER`） | 寄件人地址 |
 | `SMTP_TLS` | `starttls` | `starttls`（通常 587）、`ssl`（通常 465）或 `none`（只用於本機測試信箱） |
-| `PUBLIC_BASE_URL` | 空 | 信中「開啟紀要」連結的網址開頭，例如 `https://asr.my-yang.online`；空白則信中不放連結 |
+| `REMIND_AT` | `09:00` | 待辦到期提醒每天寄出的時間（`MEETING_TIMEZONE`，`HH:MM`）；app 在這個時間之後才啟動時會立刻補寄當天的提醒 |
+| `PUBLIC_BASE_URL` | 空 | 信中連結（紀要頁、提醒信的看板連結）的網址開頭，例如 `https://asr.my-yang.online`；空白則信中不放連結 |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 前面有 HTTPS 反向代理時，填代理的 IP，app 才會相信它轉來的 `https` |
 | `MEETING_TIMEZONE` | `Asia/Taipei` | 會議列表的日期篩選、紀要的會議日期與 ASR 微調資料匯出，都以這個時區計算 |
 | `MINUTES_URL` / `_MODEL` / `_KEY` | 空（沿用 `TRANSLATE_REFINE_*`） | 產生會議紀要的模型（OpenAI 相容，整場一次送出，需足夠的 context）；問答也用它回答 |
@@ -525,6 +529,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `PUT /api/teams/{team}/mail` | 團隊寄送設定 `{target: members\|team, address, auto}`（團隊成員或系統管理員） |
 | `GET /actions` | 待辦看板 |
 | `POST /api/actions`、`PATCH`／`DELETE /api/actions/{id}`、`POST /api/actions/{id}/status`、`GET /api/actions/{id}/updates` | 看板新增待辦、修改內容／負責人／到期日、刪除（限看板新增的）、改狀態、歷程；權限依待辦的團隊 |
+| `POST /api/actions/{id}/remind` | 開關這件待辦的到期提醒信 `{on}`（限負責人或系統管理員，否則 403） |
 | `GET /api/search?q=&team=&series=&from=&to=&kind=` | 全文搜尋（`kind`：`all`、`segments`、`items`、`meetings`），依會議分組，最多 300 筆 |
 | `GET /ask` | 問答頁 |
 | `POST /api/ask` | 問答：`{"question", "team", "series", "from", "to"}`；回 `answer`（含 `[n]`）、`notFound`、`degraded`（只用關鍵字）與被引用的 `sources`；問題 1–300 字（否則 422），紀要模型未設定 503 |

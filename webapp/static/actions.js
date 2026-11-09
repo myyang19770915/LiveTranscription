@@ -34,6 +34,8 @@ function dueChip(item){
   return el('span',{className:`due-chip ${tone}`,title:item.dueText?`原話：${item.dueText}`:''},el('span',{className:'due-icon',innerHTML:CALENDAR}),`${m}/${d}`);
 }
 const actionUrl=id=>`/api/actions/${id}`;
+let me=null;   // the signed-in user (/api/me): who may switch an item's reminders
+const MUTED='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 9.3-5M18 8c0 7 3 9 3 9H9M13.7 21a2 2 0 0 1-3.4 0M3 3l18 18M6 8c0 7-3 9-3 9h3"/></svg>';
 const meetingName=item=>item.meetingId?`${item.team} · ${MeetingCatalog.displayTitle({title:item.meetingTitle,startedAt:item.startedAt})}`
   :`${item.team} · ${ActionBoard.BOARD_SOURCE}${item.series?` · ${item.series}`:''}`;
 function laneName(item){
@@ -48,7 +50,9 @@ function card(item){
     el('p',{className:'issue-source',textContent:meetingName(item)}),
     el('p',{className:'issue-summary',textContent:item.content}),
     el('div',{className:'issue-foot'},
-      el('span',{className:'issue-key',textContent:`#${item.id}`}),dueChip(item),el('span',{className:'issue-gap'}),
+      el('span',{className:'issue-key',textContent:`#${item.id}`}),dueChip(item),
+      item.remind?null:el('span',{className:'issue-muted',title:'已關閉 Email 提醒',ariaLabel:'已關閉 Email 提醒',innerHTML:MUTED}),
+      el('span',{className:'issue-gap'}),
       avatarFor(item.owner,item.ownerName)));
   node.onclick=()=>openDetail(item.id);
   node.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openDetail(item.id)}};
@@ -163,8 +167,8 @@ async function patchItem(item,body){
 }
 // The server's answer carries the new version: take it at once, so a second edit before the board reloads is not stale.
 function fresh(item,next){
-  const {version,status,statusNote,owner,ownerName,dueDate,dueText,overdueDays,content}=next;
-  Object.assign(item,{version,status,statusNote,owner,ownerName,dueDate,dueText,overdueDays},content?{content}:{});
+  const {version,status,statusNote,owner,ownerName,dueDate,dueText,overdueDays,content,remind}=next;
+  Object.assign(item,{version,status,statusNote,owner,ownerName,dueDate,dueText,overdueDays,remind},content?{content}:{});
 }
 function panelError(message){const box=$('detailError');if(box){box.textContent=message||'';box.hidden=!message}}
 function showPanel(key){
@@ -217,6 +221,26 @@ function deleteButton(item){
   };
   return button;
 }
+// Due-date e-mail reminders (action-reminders): the owner or an administrator switches them; others see the state.
+function reminderField(item){
+  const open=['todo','doing'].includes(item.status);
+  const state=!item.remind?'已關閉':!item.owner||!item.dueDate?'需要負責人與到期日才會提醒':!open?'已完成或取消，不再提醒'
+    :'開啟（到期前 3 天、到期當天、逾期每天寄給負責人）';
+  const text=el('span',{className:`remind-state${item.remind?'':' off'}`,textContent:state});
+  if(!(me?.admin||me?.username===item.owner))return [text];
+  const button=el('button',{type:'button',className:'text-button',textContent:item.remind?'關閉提醒':'開啟提醒'});
+  button.onclick=async()=>{
+    button.disabled=true;
+    const response=await fetch(`${actionUrl(item.id)}/remind`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({on:!item.remind})});
+    const result=await response.json().catch(()=>({}));
+    if(response.ok)fresh(item,result);
+    await reload();
+    // The switch does not change the item's version, so the reload keeps the panel as it was: redraw it.
+    if(!$('detail').hidden&&Number(params.get('item'))===item.id)openDetail(item.id,{keep:true});
+    panelError(response.ok?'':typeof result.detail==='string'?result.detail:'切換失敗');
+  };
+  return [text,button];
+}
 function openDetail(id,{cancel=false,keep=false}={}){
   const item=data.items.find(i=>i.id===id);
   if(!item){closeDetail();return}
@@ -238,6 +262,7 @@ function openDetail(id,{cancel=false,keep=false}={}){
     field('狀態',status),
     field('負責人',avatarFor(item.owner,item.ownerName),owner),
     field('到期日',due,dueChip(item),item.dueText?el('span',{className:'muted small',textContent:`原話：「${item.dueText}」`}):null),
+    field('Email 提醒',...reminderField(item)),
     field('團隊',el('span',{textContent:item.team})),
     field('來源',item.meetingId?el('a',{href:`/meetings/${item.meetingId}/minutes#item-${item.id}`,textContent:meetingName(item)})
       :el('span',{textContent:`${ActionBoard.BOARD_SOURCE}${item.series?`，系列「${item.series}」的會議會帶出`:''}`})),
@@ -314,4 +339,4 @@ document.addEventListener('keydown',event=>{
   if(event.key==='c'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!typing&&!document.querySelector('dialog[open]')){event.preventDefault();openCreate()}
 });
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
-window.accountReady.then(reload);
+window.accountReady.then(account=>{me=account;return reload()});

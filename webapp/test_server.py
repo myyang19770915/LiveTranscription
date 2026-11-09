@@ -30,6 +30,7 @@ import mailer
 import meeting_audio
 import minutes
 import qa
+import reminders
 import search
 import server
 from server import (TO_TRADITIONAL, TranscriptDisplay, TranslationRequest, app, asr_engine, detect_pair_language,
@@ -116,6 +117,8 @@ TEST_DATABASE_URL = test_database_url()
 db.DATABASE_URL = TEST_DATABASE_URL
 # Tests never reach the real diarize service; DiarizeApiTests turn it on with a fake service call.
 diarize.DIARIZE_URL = ""
+# Nor a mail server: tests that send replace mailer.send_message (the container may point SMTP_HOST at dev-mail).
+mailer.SMTP_HOST = ""
 
 
 class DatabaseTestCase(unittest.TestCase):
@@ -3179,6 +3182,187 @@ class MinutesMailTests(ReviewTestCase):
                 patch("mailer.SMTP_TLS", "starttls"), patch("mailer.SMTP_USER", "svc"):
             REAL_SEND(message)
         self.assertEqual(calls, [("connect", "smtp.corp", 587, 15), ("starttls",), ("login", "svc"), ("send", "x@corp.example")])
+
+
+class ActionReminderTests(ReviewTestCase):
+    """action-reminders: timing, one mail per owner, switching reminders per item."""
+    TODAY = date(2026, 11, 10)
+
+    def setUp(self):
+        super().setUp()
+        self.ldap.add("carol", "pw-carol")
+        self.alice, self.meeting = self.signed_in("alice"), self.meeting_id()
+        self.team_id = self.query("SELECT team_id FROM meetings")[0][0]
+        for member in ("bob", "carol", "admin"):
+            run_sql("INSERT INTO team_members (team_id, username, added_by) VALUES (%s, %s, 'admin')", (self.team_id, member))
+        self.bob = self.signed_in("bob")
+        run_sql("INSERT INTO users (username) VALUES ('carol'), ('admin') ON CONFLICT DO NOTHING")
+        run_sql("UPDATE users SET email = username || '@corp.example', email_source = 'self'")
+        run_sql("UPDATE meetings SET title = '週會'")
+        self.sent, self.refuse = [], None
+        for name, value in (("mailer.SMTP_HOST", "smtp.test"), ("mailer.PUBLIC_BASE_URL", "https://asr.example"),
+                            ("mailer.send_message", self.fake_send)):
+            p = patch(name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def fake_send(self, message):
+        if self.refuse:
+            raise self.refuse
+        self.sent.append(message)
+
+    def item(self, content, due, status="todo", owner="bob", state="confirmed", kind="action"):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            return conn.execute(
+                "INSERT INTO minute_items (meeting_id, kind, content, owner, due_date, origin, state, status) VALUES (%s, %s, %s, %s, %s, 'ai', %s, %s) RETURNING id",
+                (self.meeting, kind, content, owner, due, state, status)).fetchone()[0]
+
+    def run_on(self, day):
+        self.sent.clear()
+        return asyncio.run(reminders.run(day))
+
+    def text(self, message):
+        return message.get_body(("plain",)).get_content()
+
+    def test_reminder_kind_example(self):
+        today = self.TODAY
+        cases = [(date(2026, 11, 13), ("soon", date(2026, 11, 13))), (date(2026, 11, 11), ("soon", date(2026, 11, 11))),
+                 (date(2026, 11, 14), None), (today, ("due", today)), (date(2026, 11, 8), ("overdue", today))]
+        for due, expected in cases:
+            self.assertEqual(reminders.reminder_kind(due, today), expected, due)
+
+    def test_the_daily_reminders(self):
+        self.item("報價單 A", date(2026, 11, 13))
+        self.item("報價單 B", date(2026, 11, 11), status="doing")
+        self.item("太遠的", date(2026, 11, 14))
+        self.item("今天的", self.TODAY)
+        self.item("逾期的", date(2026, 11, 8), status="doing")
+        self.item("做完的", date(2026, 11, 8), status="done")
+        self.item("沒期限", None)
+        self.item("未確認", date(2026, 11, 8), state="proposed")
+        self.item("決議不是待辦", date(2026, 11, 8), kind="decision")
+        result = self.run_on(self.TODAY)
+        self.assertEqual(result, {"owners": 1, "items": 4, "failed": 0})
+        self.assertEqual(len(self.sent), 1)
+        text = self.text(self.sent[0])
+        for content in ("報價單 A", "報價單 B", "今天的", "逾期的"):
+            self.assertIn(content, text)
+        for content in ("太遠的", "做完的", "沒期限", "未確認", "決議不是待辦"):
+            self.assertNotIn(content, text)
+        self.assertIn("逾期 2 天", text)
+        self.assertEqual(self.sent[0]["Subject"], "[語橋 Live] 待辦提醒：逾期 1 件、今天到期 1 件、3 天內到期 2 件")
+        self.assertEqual(self.sent[0]["To"], "bob@corp.example")
+
+    def test_running_twice_on_one_day(self):
+        self.item("逾期的", date(2026, 11, 8))
+        self.item("快到期", date(2026, 11, 12))
+        self.run_on(self.TODAY)
+        self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 0})
+        self.assertEqual(self.sent, [])
+
+    def test_overdue_every_day_due_soon_only_once(self):
+        self.item("逾期的", date(2026, 11, 8))
+        self.item("快到期", date(2026, 11, 13))
+        self.run_on(self.TODAY)
+        self.assertIn("快到期", self.text(self.sent[0]))
+        self.run_on(date(2026, 11, 11))
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("逾期的", self.text(self.sent[0]))
+        self.assertNotIn("快到期", self.text(self.sent[0]))
+        self.run_on(date(2026, 11, 13))
+        self.assertIn("今天到期", self.text(self.sent[0]))
+
+    def test_a_changed_due_date_is_reminded_again(self):
+        item = self.item("快到期", date(2026, 11, 12))
+        self.run_on(self.TODAY)
+        run_sql("UPDATE minute_items SET due_date = '2026-11-13' WHERE id = %s", (item,))
+        self.run_on(date(2026, 11, 11))
+        self.assertEqual(len(self.sent), 1)
+
+    def test_a_failed_send_is_retried(self):
+        self.item("逾期的", date(2026, 11, 8))
+        self.refuse = mailer.smtplib.SMTPServerDisconnected("gone")
+        self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 1})
+        self.assertEqual(self.query("SELECT count(*) FROM reminder_log"), [(0,)])
+        self.refuse = None
+        self.assertEqual(self.run_on(self.TODAY), {"owners": 1, "items": 1, "failed": 0})
+
+    def test_owners_who_cannot_be_reached(self):
+        self.item("沒信箱", date(2026, 11, 8), owner="carol")
+        self.item("離開團隊", date(2026, 11, 8), owner="bob")
+        run_sql("UPDATE users SET email = NULL WHERE username = 'carol'")
+        run_sql("DELETE FROM team_members WHERE username = 'bob'")
+        self.assertEqual(self.run_on(self.TODAY)["items"], 0)
+
+    def test_without_a_mail_server_nothing_is_sent(self):
+        self.item("逾期的", date(2026, 11, 8))
+        with patch("mailer.SMTP_HOST", ""):
+            self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 0})
+        self.assertEqual(self.query("SELECT count(*) FROM reminder_log"), [(0,)])
+
+    def test_one_mail_per_owner(self):
+        self.item("逾期的", date(2026, 11, 8))
+        self.item("今天的", self.TODAY)
+        self.item("carol 的", self.TODAY, owner="carol")
+        self.run_on(self.TODAY)
+        bob = next(m for m in self.sent if m["To"] == "bob@corp.example")
+        self.assertEqual(len(self.sent), 2)
+        self.assertEqual(bob["Subject"], "[語橋 Live] 待辦提醒：逾期 1 件、今天到期 1 件")
+        self.assertNotIn("carol 的", self.text(bob))
+
+    def test_mail_content_links_and_escapes(self):
+        item = self.item("<b>報價</b> & 交期", date(2026, 11, 8))
+        self.run_on(self.TODAY)
+        text, page = self.text(self.sent[0]), self.sent[0].get_body(("html",)).get_content()
+        self.assertIn(f"https://asr.example/actions?item={item}", text)
+        self.assertIn("測試團隊・週會", text)
+        self.assertIn("&lt;b&gt;報價&lt;/b&gt; &amp; 交期", page)
+        self.assertNotIn("<b>報價</b>", page)
+
+    # Reminders per item
+    def remind(self, client, item, on):
+        return client.post(f"/api/actions/{item}/remind", json={"on": on})
+
+    def test_the_owner_switches_reminders_off(self):
+        item = self.item("逾期的", date(2026, 11, 8))
+        response = self.remind(self.bob, item, False)
+        self.assertEqual((response.status_code, response.json()["remind"]), (200, False))
+        self.assertEqual(self.run_on(self.TODAY)["items"], 0)
+        board = self.bob.get("/api/actions").json()["items"]
+        self.assertEqual([i["remind"] for i in board if i["id"] == item], [False])
+        self.assertTrue(self.remind(self.bob, item, True).json()["remind"])
+
+    def test_another_member_cannot_switch_reminders_off(self):
+        item = self.item("逾期的", date(2026, 11, 8))
+        response = self.remind(self.alice, item, False)
+        self.assertEqual((response.status_code, response.json()["detail"]), (403, "只有負責人或系統管理員可以切換提醒"))
+        self.assertEqual(self.query("SELECT remind FROM minute_items"), [(True,)])
+        self.assertEqual(self.remind(self.signed_in("admin"), item, False).status_code, 200)
+        outsider = self.signed_in("bob")
+        run_sql("DELETE FROM team_members WHERE username = 'bob'")
+        self.assertEqual(self.remind(outsider, item, True).status_code, 404)
+
+    def test_a_new_owner_gets_reminders(self):
+        item = self.item("逾期的", date(2026, 11, 8))
+        self.remind(self.bob, item, False)
+        version = self.query("SELECT version FROM minute_items")[0][0]
+        self.alice.patch(f"/api/actions/{item}", json={"version": version, "content": "逾期的（改）"})
+        self.assertEqual(self.query("SELECT remind FROM minute_items"), [(False,)])
+        version = self.query("SELECT version FROM minute_items")[0][0]
+        self.alice.patch(f"/api/actions/{item}", json={"version": version, "owner": "carol"})
+        self.assertEqual(self.query("SELECT remind FROM minute_items"), [(True,)])
+        self.remind(self.signed_in("carol"), item, False)
+        version = self.query("SELECT version FROM minute_items")[0][0]
+        self.alice.patch(f"/api/meetings/{self.meeting}/minutes/items/{item}", json={"version": version, "owner": "bob"})
+        self.assertEqual(self.query("SELECT remind FROM minute_items"), [(True,)])
+
+    def test_next_run(self):
+        zone = reminders.ZoneInfo("Asia/Taipei")
+        with patch("reminders.REMIND_AT", reminders.time(9, 0)):
+            self.assertEqual(reminders.next_run(datetime(2026, 11, 10, 8, 59, tzinfo=zone)), datetime(2026, 11, 10, 9, 0, tzinfo=zone))
+            self.assertEqual(reminders.next_run(datetime(2026, 11, 10, 9, 0, tzinfo=zone)), datetime(2026, 11, 11, 9, 0, tzinfo=zone))
+        self.assertEqual(reminders.remind_at("7:30"), reminders.time(7, 30))
+        self.assertEqual(reminders.remind_at("25:00"), reminders.time(9, 0))
 
 
 if __name__ == "__main__":
