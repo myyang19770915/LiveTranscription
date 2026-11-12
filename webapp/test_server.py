@@ -317,6 +317,16 @@ class WebAppTests(AccountTestCase):
         self.assertEqual(header["language"], "zhen")
         self.assertTrue(header["use_vad"])
 
+    def test_asr_request_id_is_the_gateways_never_the_browsers(self):
+        upstream = FakeUpstream(["好。"])
+        with patch("server.websockets.connect", return_value=upstream):
+            with self.signed_in("alice").websocket_connect("/ws/transcribe") as socket:
+                socket.send_json({"requestId": "../../outside", "meeting_id": self.meeting_id(), "language": "zh"})
+                socket.receive_json()  # the header has reached the ASR side by now
+        request_id = json.loads(upstream.sent[0])["requestId"]
+        self.assertRegex(request_id, r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+        self.assertNotIn("outside", request_id)
+
     def test_bilingual_translation_resolves_opposite_target(self):
         with patch("server.httpx.AsyncClient", FakeTranslationClient):
             response = self.signed_in("alice").post("/api/translate", json={"text": "你好", "source": "zh_ja", "target": "zh", "detected_language": "zh"})

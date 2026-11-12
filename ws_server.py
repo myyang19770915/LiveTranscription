@@ -24,6 +24,7 @@ import os,string
 import time
 from r2t2 import R2T2ASRModel
 from fireredvad import FireRedStreamVad, FireRedStreamVadConfig
+from asr_session import is_valid_request_id, new_stream_vad, request_path
 import asyncio
 
 import logging
@@ -230,6 +231,8 @@ def redact_stream_request_header(header):
     redacted = dict(header)
     if "secret_key" in redacted:
         redacted["secret_key"] = "[redacted]"
+    if "requestId" in redacted and not is_valid_request_id(redacted["requestId"]):
+        redacted["requestId"] = "[invalid]"  # never log an unchecked value before the connection is refused
     if "system_prompt" in redacted:
         system_prompt = header["system_prompt"]
         redacted["system_prompt"] = "[redacted]"
@@ -274,6 +277,7 @@ async def initialize_models(app):
         min_silence_frame=70,
         chunk_max_frame=30000)
     
+    # The template: weights loaded once; each connection takes its own state from it (asr_session.new_stream_vad).
     stream_vad = FireRedStreamVad.from_pretrained(args.vad_model_path, vad_config)
     
     logger.info("✅ VAD model initialized successfully")
@@ -468,10 +472,23 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
                 return
 
             requestId = header.get("requestId", None)
+            secret_key = header.get("secret_key", None)
+            # Both checks come before any file is named after the requestId.
+            if not is_valid_request_id(requestId):
+                logger.info(f"invalid requestId (type={type(requestId).__name__}, "
+                            f"length={len(requestId) if isinstance(requestId, str) else '-'})")
+                requestId = None
+                await ws.send(json.dumps({"status": "error", "msg": "invalid requestId"}))
+                await ws.close(code=1008, reason="invalid requestId")
+                return
+            if secret_key is None or secret_key not in secret_key_list:
+                logger.info(f"requestId={requestId}: invalid secret_key")
+                await ws.close(code=4401, reason="Unauthorized")
+                return
             # Create an independent log file for this request
             _req_log_dir = os.path.join(os.path.dirname(__file__), "logs", "requests")
             os.makedirs(_req_log_dir, exist_ok=True)
-            _req_log_path = os.path.join(_req_log_dir, f"{requestId}.log")
+            _req_log_path = request_path(_req_log_dir, requestId, ".log")
             _req_handler = logging.FileHandler(_req_log_path, encoding="utf-8")
             _req_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
             _logger = logging.getLogger(f"asr_request.{requestId}")
@@ -486,7 +503,6 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
             language = header.get("language", "zhen")
             if language == "zhen":
                 language = None
-            secret_key = header.get("secret_key", None)
             infer_mode = header.get("mode", "slow")
             nmt_fast = False
             if infer_mode != "slow":
@@ -495,11 +511,6 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
             debug_network = header.get("debug_network", False)
             if debug_network:
                 debug_network_text = ""
-            if secret_key is None or secret_key not in secret_key_list:
-                _logger.info(f"requestId={requestId}: invalid secret_key")
-                await ws.close(code=4401, reason="Unauthorized")
-                return
-
             try:
                 context = resolve_qwen_context(header, smooth)
             except ValueError as e:
@@ -520,7 +531,7 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
             _logger.info(f"requestId={requestId}: connected, language={language}, use_vad={use_vad}, nmt_fast={nmt_fast}")
 
             if args.save_audio:
-                WAV_STORE_DIR_requestId = os.path.join(WAV_STORE_DIR, f"{requestId}")
+                WAV_STORE_DIR_requestId = request_path(WAV_STORE_DIR, requestId)
                 os.makedirs(WAV_STORE_DIR_requestId, exist_ok=True)
             sr = SAMPLING_RATE
             step = int(round(STEP_MS / 1000.0 * sr))
@@ -534,9 +545,9 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
                 chunk_size_sec=CHUNK_ASR_SECONDS,
             )
 
-            if use_vad:
-                stream_vad.reset()
-                _logger.info(f"requestId={requestId}: stream_vad.reset() done")
+            # This connection's own VAD state; only the model weights are shared with other connections.
+            conn_vad = new_stream_vad(stream_vad)
+            _logger.info(f"requestId={requestId}: own VAD state created")
 
             max_new_tokens = max(1, int((step + lookahead) / 1280))
             max_new_tokens_floor = min(32, max(4,2 * int(step / 1280)))
@@ -631,10 +642,11 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
                     speech_ended_in_this_chunk = False
                     vad_cost_ms = 0.0
                     finish_cost_ms = 0.0
+                    # Every chunk runs VAD, use_vad or not: its speech_end goes to the client in every result.
                     if True or use_vad:
                         audio_seg_int16 = (audio_seg * 32768).astype(np.int16)
                         t0 = time.time()
-                        chunk_results = stream_vad.detect_chunk(audio_seg_int16)
+                        chunk_results = conn_vad.detect_chunk(audio_seg_int16)
                         for r in chunk_results:
                             if r.is_speech_end:
                                 speech_ended_in_this_chunk = True
@@ -920,10 +932,23 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                 return
 
             requestId = header.get("requestId", None)
+            secret_key = header.get("secret_key", None)
+            # Both checks come before any file is named after the requestId.
+            if not is_valid_request_id(requestId):
+                logger.info(f"invalid requestId (type={type(requestId).__name__}, "
+                            f"length={len(requestId) if isinstance(requestId, str) else '-'})")
+                requestId = None
+                await ws.send(json.dumps({"status": "error", "msg": "invalid requestId"}))
+                await ws.close(code=1008, reason="invalid requestId")
+                return
+            if secret_key is None or secret_key not in secret_key_list:
+                logger.info(f"requestId={requestId}: invalid secret_key")
+                await ws.close(code=4401, reason="Unauthorized")
+                return
             # Create an independent log file for this request
             _req_log_dir = os.path.join(os.path.dirname(__file__), "logs", "requests")
             os.makedirs(_req_log_dir, exist_ok=True)
-            _req_log_path = os.path.join(_req_log_dir, f"{requestId}.log")
+            _req_log_path = request_path(_req_log_dir, requestId, ".log")
             _req_handler = logging.FileHandler(_req_log_path, encoding="utf-8")
             _req_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
             _logger = logging.getLogger(f"asr_request.{requestId}")
@@ -938,7 +963,6 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
             language = header.get("language", "zhen")
             if language == "zhen":
                 language = None
-            secret_key = header.get("secret_key", None)
             infer_mode = header.get("mode", "slow")
             nmt_fast = False
             if infer_mode != "slow":
@@ -947,11 +971,6 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
             debug_network = header.get("debug_network", False)
             if debug_network:
                 debug_network_text = ""
-            if secret_key is None or secret_key not in secret_key_list:
-                _logger.info(f"requestId={requestId}: invalid secret_key")
-                await ws.close(code=4401, reason="Unauthorized")
-                return
-
             try:
                 context = resolve_qwen_context(header, smooth)
             except ValueError as e:
@@ -972,7 +991,7 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
             _logger.info(f"requestId={requestId}: connected, language={language}, use_vad={use_vad}, nmt_fast={nmt_fast}")
 
             if args.save_audio:
-                WAV_STORE_DIR_requestId = os.path.join(WAV_STORE_DIR, f"{requestId}")
+                WAV_STORE_DIR_requestId = request_path(WAV_STORE_DIR, requestId)
                 os.makedirs(WAV_STORE_DIR_requestId, exist_ok=True)
             sr = SAMPLING_RATE
             step = int(round(STEP_MS / 1000.0 * sr))
@@ -986,9 +1005,9 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                 chunk_size_sec=CHUNK_ASR_SECONDS,
             )
 
-            if use_vad:
-                stream_vad.reset()
-                _logger.info(f"requestId={requestId}: stream_vad.reset() done")
+            # This connection's own VAD state; only the model weights are shared with other connections.
+            conn_vad = new_stream_vad(stream_vad)
+            _logger.info(f"requestId={requestId}: own VAD state created")
 
             max_new_tokens = max(1, int((step + lookahead) / 1280))
             max_new_tokens_floor = min(32, max(4,2 * int(step / 1280)))
@@ -1085,10 +1104,11 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                     speech_ended_in_this_chunk = False
                     vad_cost_ms = 0.0
                     finish_cost_ms = 0.0
+                    # Every chunk runs VAD, use_vad or not: its speech_end goes to the client in every result.
                     if True or use_vad:
                         audio_seg_int16 = (audio_seg * 32768).astype(np.int16)
                         t0 = time.time()
-                        chunk_results = stream_vad.detect_chunk(audio_seg_int16)
+                        chunk_results = conn_vad.detect_chunk(audio_seg_int16)
                         for r in chunk_results:
                             if r.is_speech_end:
                                 speech_ended_in_this_chunk = True

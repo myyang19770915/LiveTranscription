@@ -597,7 +597,8 @@ async def transcribe(browser: WebSocket):
         safe_header = {
             "channels": 1,
             "sample_rate": 16000,
-            "requestId": str(header.get("requestId") or uuid.uuid4()),
+            # Ours, never the browser's: the ASR service builds file paths from it.
+            "requestId": str(uuid.uuid4()),
             "language": LANGUAGES.get(header.get("language"), (None,))[0] or "zhen",
             "use_vad": bilingual or bool(header.get("use_vad", False)),
             "secret_key": ASR_SECRET_KEY,
