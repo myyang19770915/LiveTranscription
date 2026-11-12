@@ -15,6 +15,8 @@ import re
 import secrets
 import ssl
 import sys
+import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -52,6 +54,39 @@ SESSION_COOKIE = "yq_session"
 SESSION_LIFETIME = timedelta(hours=12)
 MAX_FAILURES = 5
 FAILURE_WINDOW = timedelta(minutes=5)
+
+
+def positive_int(name: str, default: int) -> int:
+    value = os.getenv(name, "").strip()
+    if value.isdigit() and int(value) > 0:
+        return int(value)
+    if value:
+        logging.getLogger("uvicorn.error").error("%s=%r is not a positive integer; using %d", name, value, default)
+    return default
+
+
+# Failed sign-ins per client address (stream-limits): kept in memory, as the app runs as one process.
+LOGIN_IP_MAX_FAILURES = positive_int("LOGIN_IP_MAX_FAILURES", 30)
+ip_failures: dict[str, deque] = {}
+
+
+def ip_blocked(address: str, now: float | None = None) -> bool:
+    """Whether this address has failed LOGIN_IP_MAX_FAILURES times within the last FAILURE_WINDOW."""
+    now = time.monotonic() if now is None else now
+    recent = ip_failures.get(address)
+    while recent and recent[0] <= now - FAILURE_WINDOW.total_seconds():
+        recent.popleft()
+    if recent is not None and not recent:
+        del ip_failures[address]
+    return bool(recent) and len(recent) >= LOGIN_IP_MAX_FAILURES
+
+
+def record_ip_failure(address: str, now: float | None = None) -> None:
+    now = time.monotonic() if now is None else now
+    if len(ip_failures) > 10_000:   # forget addresses whose failures have all expired
+        for stale in [a for a, times in ip_failures.items() if times and times[-1] <= now - FAILURE_WINDOW.total_seconds()]:
+            del ip_failures[stale]
+    ip_failures.setdefault(address, deque()).append(now)
 
 WRONG_CREDENTIALS = "帳號或密碼錯誤"
 TOO_MANY_ATTEMPTS = "嘗試次數過多，請稍後再試"
@@ -259,8 +294,12 @@ async def login_page():
 
 @router.post("/api/login")
 async def login(body: LoginRequest, request: Request, response: Response):
+    address = request.client.host if request.client else ""
+    if ip_blocked(address):
+        raise HTTPException(status_code=429, detail=TOO_MANY_ATTEMPTS)
     username = body.username.strip().lower()
     if not username or not body.password:
+        record_ip_failure(address)
         raise HTTPException(status_code=401, detail=WRONG_CREDENTIALS)
     # Each step commits on its own: raising inside a transaction would roll the count back.
     async with db.connect() as conn:
@@ -275,6 +314,7 @@ async def login(body: LoginRequest, request: Request, response: Response):
             await release_attempt(conn, username)
         raise HTTPException(status_code=503, detail=LDAP_UNREACHABLE) from exc
     if profile is None:
+        record_ip_failure(address)
         raise HTTPException(status_code=401, detail=WRONG_CREDENTIALS)
     display_name = profile.display_name
     async with db.connect() as conn:

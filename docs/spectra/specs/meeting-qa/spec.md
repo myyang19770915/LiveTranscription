@@ -64,7 +64,7 @@ tests:
 ---
 ### Requirement: Asking a question
 
-The system SHALL provide `POST /api/ask` for signed-in users with a question of 1 to 300 characters after trimming (otherwise 422) and the same team, series and date filters as full-text search (a team or series the user cannot see gets 404). It SHALL retrieve candidates from the user's teams only, by keyword (latin words other than English function words and Chinese two-character terms of the question, keeping a passage only when it contains two of the terms, or the only term of a one-term question, or a latin term, and ranking by the summed rarity of the terms it contains, so a rare word such as a name counts more than a common one and one shared everyday word does not count) and by embedding similarity, merge both rankings with reciprocal rank fusion, and give the top 8 to the minutes model. The answer SHALL be in Traditional Chinese, based only on the candidates, with a citation `[n]` on every sentence; citations to numbers that were not given SHALL be removed, and an answer without any valid citation SHALL be returned as not found. The response SHALL list only the cited sources, each with its meeting, time or item kind, text and link. When nothing relevant is found the response SHALL say not found and SHALL NOT contain an answer. When the embedding service is unavailable the system SHALL answer from keyword retrieval only and mark the response degraded; when the minutes model is not configured it SHALL return 503.
+The system SHALL provide `POST /api/ask` for signed-in users with a question of 1 to 300 characters after trimming (otherwise 422) and the same team, series and date filters as full-text search (a team or series the user cannot see gets 404). It SHALL retrieve candidates from the user's teams only, by keyword (latin words other than English function words and Chinese two-character terms of the question, keeping a passage only when it contains two of the terms, or the only term of a one-term question, or a latin term, and ranking by the summed rarity of the terms it contains, so a rare word such as a name counts more than a common one and one shared everyday word does not count) and by embedding similarity, merge both rankings with reciprocal rank fusion, and give the top 8 to the minutes model. The answer SHALL be in Traditional Chinese, based only on the candidates, with a citation `[n]` on every sentence; citations to numbers that were not given SHALL be removed, every sentence (ending in 。, ！, ？, ! or ? together with any closing quotes or brackets after it, or at a line end) without a valid citation SHALL be removed from the answer, and an answer left with no sentence SHALL be returned as not found. The response SHALL list only the cited sources, each with its meeting, time or item kind, text and link. When nothing relevant is found the response SHALL say not found and SHALL NOT contain an answer. When the embedding service is unavailable the system SHALL answer from keyword retrieval only and mark the response degraded; when the minutes model is not configured it SHALL return 503.
 
 #### Scenario: A paraphrased question
 
@@ -78,6 +78,16 @@ The system SHALL provide `POST /api/ask` for signed-in users with a question of 
 | `報價維持八五折 [2]。` | 1–8 | answer with source 2 |
 | `報價維持八五折 [2][9]。` | 1–8 | answer with source 2 only; [9] removed |
 | `報價維持八五折。` | 1–8 | not found |
+| `報價維持八五折 [2]。下週三回覆對方。` | 1–8 | answer `報價維持八五折 [2]。` with source 2; the uncited sentence removed |
+| `結論如下：
+- 八五折 [2]
+- 下週三回覆` | 1–8 | answer `- 八五折 [2]` with source 2 |
+| `報價維持八五折。[2]` | 1–8 | answer `報價維持八五折。[2]` with source 2; a citation right after the period belongs to that sentence |
+| `客戶說：「先壓八五折。」[2]下週回覆。` | 1–8 | answer `客戶說：「先壓八五折。」[2]` with source 2; closing quotes after the end mark belong to that sentence |
+| `- 八五折 [2]
+- 下週回覆
+- 先寄報價 [2]` | 1–8 | answer `- 八五折 [2]
+- 先寄報價 [2]`; a removed line leaves no blank line |
 | `{"notFound": true}` | 1–8 | not found |
 | (not called) | none | not found |
 
@@ -93,41 +103,41 @@ The system SHALL provide `POST /api/ask` for signed-in users with a question of 
 
 
 <!-- @trace
-source: meeting-qa
-updated: 2026-11-08
+source: qa-cited-sentences
+updated: 2026-11-12
 code:
-  - docs/roadmap.md
-  - webapp/search.py
-  - compose.yaml
-  - webapp/static/admin.html
-  - webapp/static/review.html
-  - webapp/static/actions.html
-  - webapp/static/minutes.html
-  - webapp/static/index.html
-  - webapp/static/metrics.html
-  - bench/qa_e2e.mjs
-  - webapp/static/minutes.css
-  - .env.example
-  - webapp/static/search.css
-  - webapp/static/search.js
-  - webapp/server.py
-  - meeting-2026-11-01T00-16-53.txt
-  - bench/qa_eval_data.json
-  - webapp/migrations/011_qa.sql
-  - webapp/static/meetings.html
-  - bench/qa_eval.py
-  - webapp/static/minutes.js
-  - 20261029_185428.mp4
-  - webapp/static/ask.js
-  - bench/README.md
-  - webapp/static/evidence-panel.js
-  - webapp/qa.py
-  - webapp/static/search.html
-  - webapp/static/account.js
-  - webapp/static/evidence-panel.css
-  - webapp/static/ask.css
+  - webapp/.dockerignore
+  - docker/asr/constraints.txt
+  - bench/contextcheck.js
+  - docker/asr/entrypoint.sh
   - README.md
-  - webapp/static/ask.html
+  - webapp/static/index.html
+  - webapp/static/review.html
+  - ws_server.py
+  - bench/guardcheck.js
+  - test_asr_session.py
+  - compose.yaml
+  - bench/savecheck.js
+  - bench/closecheck.js
+  - webapp/static/review.js
+  - webapp/stream_limits.py
+  - bench/catalogcheck.js
+  - webapp/static/minutes.html
+  - bench/mailchangecheck.js
+  - bench/reviewcheck.js
+  - asr_session.py
+  - webapp/static/styles.css
+  - webapp/Dockerfile
+  - webapp/migrations/016_reminder_claims.sql
+  - webapp/auth.py
+  - webapp/reminders.py
+  - webapp/static/app.js
+  - webapp/mailer.py
+  - webapp/migrations/017_mail_setting_changes.sql
+  - webapp/static/minutes.js
+  - webapp/qa.py
+  - bench/checks.js
+  - webapp/server.py
 tests:
   - webapp/test_server.py
 -->

@@ -175,3 +175,53 @@ code:
 tests:
   - webapp/test_server.py
 -->
+
+---
+### Requirement: Bounded receive queue
+
+The ASR service SHALL hold at most `ASR_RECV_QUEUE_MAX` (default 500) received messages per connection that recognition has not processed yet. When the queue is full, the service SHALL stop reading from that connection until recognition takes a message out, so a client sending faster than recognition is slowed down by the connection itself; no received audio SHALL be dropped.
+
+#### Scenario: A client sends faster than recognition
+
+- **WHEN** a client sends audio much faster than real time
+- **THEN** the number of unprocessed messages held for its connection never exceeds 500, and every chunk sent is still recognized in order
+
+<!-- @trace
+source: stream-limits
+updated: 2026-11-12
+code:
+  - bench/guardcheck.js
+  - bench/checks.js
+  - docker/asr/entrypoint.sh
+  - webapp/.dockerignore
+  - webapp/static/app.js
+  - bench/contextcheck.js
+  - webapp/auth.py
+  - README.md
+  - webapp/Dockerfile
+  - bench/reviewcheck.js
+  - test_asr_session.py
+  - webapp/static/index.html
+  - webapp/static/styles.css
+  - webapp/mailer.py
+  - docker/asr/constraints.txt
+  - webapp/static/review.html
+  - webapp/qa.py
+  - compose.yaml
+  - ws_server.py
+  - webapp/migrations/016_reminder_claims.sql
+  - bench/savecheck.js
+  - webapp/static/minutes.html
+  - bench/closecheck.js
+  - webapp/static/minutes.js
+  - webapp/static/review.js
+  - bench/mailchangecheck.js
+  - webapp/migrations/017_mail_setting_changes.sql
+  - webapp/stream_limits.py
+  - asr_session.py
+  - bench/catalogcheck.js
+  - webapp/reminders.py
+  - webapp/server.py
+tests:
+  - webapp/test_server.py
+-->

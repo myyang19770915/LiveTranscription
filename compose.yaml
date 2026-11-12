@@ -1,6 +1,6 @@
 services:
   asr:
-    image: qwenllm/qwen3-asr:latest
+    image: qwenllm/qwen3-asr:latest@sha256:fb75b775f089e06e5a1aaebffd421e37505cc630d50c86d889d95ffa45a7e16a   # pinned (app-image-reproducible); see README 固定版本
     gpus: all
     working_dir: /workspace
     command: ["bash", "/workspace/docker/asr/entrypoint.sh"]
@@ -15,6 +15,7 @@ services:
       # Request logs (logs/requests/) never hold recognized text unless ASR_LOG_TEXT=1 (debugging; never for 即時翻譯)
       ASR_LOG_TEXT: ${ASR_LOG_TEXT:-0}
       ASR_LOG_RETENTION_DAYS: ${ASR_LOG_RETENTION_DAYS:-14}
+      ASR_RECV_QUEUE_MAX: ${ASR_RECV_QUEUE_MAX:-500}   # unprocessed messages held per connection (stream-limits)
     volumes:
       - ./:/workspace
       - model-cache:/models
@@ -28,7 +29,7 @@ services:
       start_period: 10m
 
   translate:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:bfb3264fc2166e01e2b4f9b537e45d7006d87c75021b911f132ef607f5bbced3   # pinned (app-image-reproducible); see README 固定版本
     gpus: all
     command:
       - --hf-repo
@@ -66,7 +67,7 @@ services:
   # (問答 falls back to keyword retrieval). bge-m3 was chosen with bench/qa_eval.py (see the meeting-qa design); the first
   # start downloads it.
   embed:
-    image: ghcr.io/ggml-org/llama.cpp:server
+    image: ghcr.io/ggml-org/llama.cpp:server@sha256:6d581c788abba2dfa23ff78dba37ea0abfc7d838c49bcc98f4be2103df9772b3   # pinned (app-image-reproducible); see README 固定版本
     command:
       - --hf-repo
       - ${EMBED_MODEL_REPO:-ggml-org/bge-m3-Q8_0-GGUF}
@@ -162,8 +163,15 @@ services:
       # Daily due-date reminders to action item owners (HH:MM in MEETING_TIMEZONE); needs SMTP_HOST.
       REMIND_AT: ${REMIND_AT:-09:00}
       # Behind an HTTPS reverse proxy: trust its X-Forwarded-Proto (uvicorn reads this) and/or force Secure cookies.
-      # With the tunnel service it connects from the Compose network: e.g. 127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16.
-      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      # Proxy headers (client IP, https) are believed only from the yuqiao-edge network the tunnel uses; LAN users
+      # reaching port 18082 directly arrive through the Compose gateway and their headers are ignored (edge-proxy-trust).
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-10.250.250.0/28}
+      # stream-limits: recognition WebSocket and sign-in limits
+      STREAM_HEADER_TIMEOUT: ${STREAM_HEADER_TIMEOUT:-30}
+      MAX_STREAMS_PER_USER: ${MAX_STREAMS_PER_USER:-2}
+      MAX_STREAM_HOURS: ${MAX_STREAM_HOURS:-4}
+      STREAM_RECHECK_MINUTES: ${STREAM_RECHECK_MINUTES:-5}
+      LOGIN_IP_MAX_FAILURES: ${LOGIN_IP_MAX_FAILURES:-30}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
       # Local dates for the ASR training export's date range.
       MEETING_TIMEZONE: ${MEETING_TIMEZONE:-Asia/Taipei}
@@ -178,6 +186,15 @@ services:
       DIARIZE_URL: ${DIARIZE_URL-http://diarize:5002}
     ports:
       - "${APP_PORT:-18082}:8080"
+    networks:
+      - default
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3).read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     depends_on:
       asr:
         condition: service_healthy
@@ -237,9 +254,20 @@ services:
     command: ["tunnel", "--no-autoupdate", "run"]
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}   # empty: cloudflared stops with an error; set it in .env
+    networks:
+      - edge        # reaches the app as http://app:8080 from the trusted proxy network
     depends_on:
       - app
     restart: unless-stopped
+
+networks:
+  # The tunnel's way in. Fixed name and subnet: FORWARDED_ALLOW_IPS trusts exactly this range, and a cloudflared of
+  # another project can join it with: docker network connect yuqiao-edge <container>
+  edge:
+    name: yuqiao-edge
+    ipam:
+      config:
+        - subnet: 10.250.250.0/28
 
 volumes:
   model-cache:

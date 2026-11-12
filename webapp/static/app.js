@@ -198,7 +198,7 @@ async function startMeeting() {
     await new Promise((resolve, reject) => { socket.onopen=resolve; socket.onerror=()=>reject(new Error('WebSocket 連線失敗')); });
     socket.send(JSON.stringify({requestId:crypto.randomUUID(),meeting_id:meetingId,mode:translate?'translate':'meeting',language:$('language').value,use_vad:direction.source==='zh_ja',system_prompt:$('context').value,engine:asrEngine(),refine:cloudRefineOn()}));
     socket.onmessage = onMessage;
-    socket.onclose = event => { if(event.code===4401)return location.replace('/login'); if (stream && !stopping) stopMeeting(false).then(()=>setStatus(event.code===4404?'找不到這場會議，請重新整理後再試':'辨識連線已中斷','error')); };
+    socket.onclose = onSocketClose;
 
     audioContext = new AudioContext();
     await audioContext.audioWorklet.addModule('/assets/pcm-worklet.js?v=20261108a');
@@ -269,6 +269,7 @@ function resetMeetingState(){
   transcript='';tentative='';sourceRevision=0;finalizeRemaining=false;
   segmentRecords.clear();languageSpans.length=0;utteranceBoundaries.clear();timeMarks.length=0;
   updateTranslationDirection();meetingEpoch=translationEpoch;resetLearnedTerms();render('transcript','');
+  ownSegments(meetingId);   // after the previous meeting's segments were flushed and cleared
 }
 // Debounced; bound to the meeting it was scheduled for, and flushed at once if a new meeting starts first.
 function storeTranscript(){
@@ -290,12 +291,59 @@ function storeSegments(){
   saveSegmentsNow=()=>{clearTimeout(segmentSaveTimer);segmentSaveTimer=saveSegmentsNow=null;sendSegments(id)};
   segmentSaveTimer=setTimeout(saveSegmentsNow,stream?10000:800);
 }
+// --- Segment saving (segment-save-retry) ---
+// A failed save is shown next to the status and retried with the latest segments; 401 waits for a new sign-in.
+const SEGMENT_RETRY_SECONDS=[5,15,30,60];
+let segmentSave={unsaved:false,failures:0,retry:null,signedOut:false,savedAt:null};
+let segmentOwner='';   // the meeting whose segments the page holds; set once a new meeting has cleared the old ones
+function ownSegments(id){
+  clearTimeout(segmentSave.retry);segmentOwner=id;
+  segmentSave={unsaved:false,failures:0,retry:null,signedOut:false,savedAt:null};showSegmentSave();
+}
+function showSegmentSave(){
+  const state=$('saveState'),wait=SEGMENT_RETRY_SECONDS[Math.min(segmentSave.failures,SEGMENT_RETRY_SECONDS.length)-1];
+  const [text,warn]=segmentSave.signedOut?['登入已失效，段落尚未儲存，請重新登入',true]
+    :segmentSave.failures?[`段落尚未儲存，${wait} 秒後重試`,true]
+    :segmentSave.savedAt?[`段落已儲存 ${segmentSave.savedAt.toLocaleTimeString('zh-TW',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})}`,false]:['',false];
+  state.textContent=text;state.className=warn?'save-state warn':'save-state';state.hidden=!text;
+}
+function unsavedSegments(){return segmentSave.unsaved}
+// Leaving now would lose something: the recording, a save still waiting for its timer, or segments not saved yet.
+function leavingLosesData(){return Boolean(recorder||segmentSaveTimer||unsavedSegments())}
 function sendSegments(id){
+  if(id!==segmentOwner)return;   // another meeting has started: the page no longer holds this meeting's segments
   const segments=finalizedRecords().map((s,i)=>({seq:i+1,startMs:s.startMs||0,endMs:s.endMs||0,source:s.source,target:s.target,detected:s.detected||''}));
   if(!segments.length)return;
+  clearTimeout(segmentSave.retry);segmentSave.retry=null;segmentSave.unsaved=true;
   fetch(`/api/meetings/${id}/segments`,{method:'PUT',headers:{'content-type':'application/json'},
     body:JSON.stringify({glossary:$('context').value.trim(),learned:learnedTerms,sourceLanguage:direction.source,targetLanguage:direction.target,segments})})
-    .then(response=>{if(!response.ok)console.warn('Segment save failed',response.status);else window.MeetingSeries?.saved(id,segments.length)}).catch(error=>console.warn('Segment save failed',error.message));
+    .then(response=>{
+      if(response.ok)window.MeetingSeries?.saved(id,segments.length);
+      if(id!==segmentOwner)return;   // a late answer for the previous meeting must not change the new one's state
+      if(response.status===401){segmentSave.signedOut=true;showSegmentSave();return}
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      segmentSave={unsaved:false,failures:0,retry:null,signedOut:false,savedAt:new Date()};showSegmentSave();
+    })
+    .catch(error=>{
+      console.warn('Segment save failed',error.message);
+      if(id!==segmentOwner||segmentSave.signedOut)return;   // signed out: no retries until a save gets through again
+      segmentSave.failures++;
+      const wait=SEGMENT_RETRY_SECONDS[Math.min(segmentSave.failures,SEGMENT_RETRY_SECONDS.length)-1];
+      clearTimeout(segmentSave.retry);segmentSave.retry=setTimeout(()=>sendSegments(id),wait*1000);showSegmentSave();
+    });
+}
+// --- End segment saving ---
+// The recognition connection closed. 4401 mid-meeting (signed out elsewhere): stop first, so the browser recording is
+// kept for download, then say why; 4401 with no meeting running goes to the sign-in page (stream-limits).
+function onSocketClose(event){
+  if(stream&&!stopping)return stopMeeting(false).then(()=>setStatus(closeMessage(event.code,event.reason),'error'));
+  if(event.code===4401)location.replace('/login');
+}
+// Why the server closed the recognition connection; for stream limits its reason is the message to show (stream-limits).
+function closeMessage(code,reason){
+  if(code===4401)return '登入已失效，錄音已停止；請先下載錄音，再重新登入';
+  if([4403,4408,4413,4429].includes(code)&&reason)return reason;
+  return code===4404?'找不到這場會議，請重新整理後再試':'辨識連線已中斷';
 }
 function updateTimer(){const sec=Math.floor((Date.now()-startedAt)/1000);$('timer').textContent=`${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;}
 function onMessage(event){
@@ -517,7 +565,7 @@ $('clear').onclick=()=>location.reload();
 $('download').onclick=()=>saveFile(transcriptFile(),`${filePrefix()}-${meetingStamp||new Date().toISOString().slice(0,19).replaceAll(':','-')}.txt`);
 $('downloadAudio').onclick=saveRecording;
 // Closing the tab mid-meeting would drop the in-memory recording.
-addEventListener('beforeunload',event=>{if(recorder)event.preventDefault()});
+addEventListener('beforeunload',event=>{if(leavingLosesData())event.preventDefault()});
 document.querySelectorAll('[data-copy]').forEach(button=>button.onclick=async()=>{const value=button.dataset.copy==='transcript'?transcript:visibleTranslation();if(!value)return toast('目前沒有可複製的內容');await navigator.clipboard.writeText(value);toast('已複製到剪貼簿')});
 
 // Reuse the same controls and reading surfaces across phone and desktop layouts.

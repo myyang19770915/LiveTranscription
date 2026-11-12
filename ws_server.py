@@ -25,7 +25,7 @@ import time
 from r2t2 import R2T2ASRModel
 from fireredvad import FireRedStreamVad, FireRedStreamVadConfig
 from asr_session import (is_valid_request_id, keep_request_text, new_part, new_stream_vad, prune_request_logs,
-                         reason_kind, request_path, retention_days, text_note)
+                         new_recv_queue, reason_kind, recv_queue_max, request_path, retention_days, text_note)
 import asyncio
 
 import logging
@@ -401,6 +401,7 @@ secret_key_list=[
     if key.strip()
 ] # Configure with ASR_SECRET_KEY; the legacy value is retained for direct use.
 
+RECV_QUEUE_MAX = recv_queue_max(os.environ.get("ASR_RECV_QUEUE_MAX"))
 REQUEST_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "requests")
 
 
@@ -458,7 +459,8 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
     _req_handler = None  # Per-request log handler
 
     _STOP = object()  # Sentinel object that tells the processor to exit
-    recv_queue: asyncio.Queue = asyncio.Queue()
+    # Bounded: when recognition falls behind, the receiver stops reading and the connection slows the client down.
+    recv_queue: asyncio.Queue = new_recv_queue(RECV_QUEUE_MAX)
     RECV_TIMEOUT = 120
 
     async def receiver():
@@ -922,7 +924,8 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
     _req_handler = None  # Per-request log handler
 
     _STOP = object()  # Sentinel object that tells the processor to exit
-    recv_queue: asyncio.Queue = asyncio.Queue()
+    # Bounded: when recognition falls behind, the receiver stops reading and the connection slows the client down.
+    recv_queue: asyncio.Queue = new_recv_queue(RECV_QUEUE_MAX)
     RECV_TIMEOUT = 120
 
     async def receiver():

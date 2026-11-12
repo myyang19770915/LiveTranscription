@@ -380,6 +380,22 @@ def build_messages(question: str, sources: list[dict]) -> list[dict]:
 
 
 CITATION = re.compile(r"\s*\[(\d+)\]")
+# A sentence: up to its end mark (。！？!?), the closing quotes or brackets right after it (「…。」), and the citations
+# right after those; or what is left of a line without an end mark.
+SENTENCE = re.compile(r"[^。！？!?\n]*[。！？!?]+[」』）)\"'”’]*(?:\s*\[\d+\])*|[^。！？!?\n]+")
+
+
+def cited_sentences(answer: str) -> str:
+    """The answer without its sentences that carry no [n] citation (meeting-qa: every sentence has a source).
+    Line by line, so a line whose sentences all go leaves no blank line behind."""
+    lines = []
+    for line in answer.split("\n"):
+        kept = "".join(piece for piece in SENTENCE.findall(line) if CITATION.search(piece))
+        if kept.strip():
+            lines.append(kept)
+        elif not line.strip() and lines and lines[-1]:
+            lines.append("")   # a blank line the answer had between kept lines (paragraphs)
+    return "\n".join(lines).strip()
 
 
 def check_answer(reply: str, given: int) -> tuple[str | None, list[int]]:
@@ -393,8 +409,9 @@ def check_answer(reply: str, given: int) -> tuple[str | None, list[int]]:
     if not isinstance(data, dict) or data.get("notFound") is True or not isinstance(data.get("answer"), str):
         return None, []
     answer = data["answer"].translate(str.maketrans("［］０１２３４５６７８９", "[]0123456789"))
-    cited = sorted({int(n) for n in re.findall(r"\[(\d+)\]", answer) if 1 <= int(n) <= given})
-    answer = CITATION.sub(lambda m: m.group(0) if 1 <= int(m.group(1)) <= given else "", answer).strip()
+    answer = CITATION.sub(lambda m: m.group(0) if 1 <= int(m.group(1)) <= given else "", answer)
+    answer = cited_sentences(answer)
+    cited = sorted({int(n) for n in re.findall(r"\[(\d+)\]", answer)})
     return (answer, cited) if cited and answer else (None, [])
 
 

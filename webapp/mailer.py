@@ -129,7 +129,18 @@ async def mail_state(conn, meeting: dict, members: dict) -> dict:
     last = await (await conn.execute("SELECT * FROM minutes_mail WHERE meeting_id = %s ORDER BY id DESC LIMIT 1", (meeting["id"],))).fetchone()
     return {"configured": configured(), "teamId": team["id"], "target": team["mail_target"], "address": team["mail_address"],
             "auto": team["mail_auto"], "recipients": len(to), "missing": [members.get(u, u) for u in skipped],
-            "last": last_payload(last, members)}
+            "last": last_payload(last, members), "lastChange": await last_change(conn, team["id"])}
+
+
+async def last_change(conn, team_id: int) -> dict | None:
+    """The latest change of the team's mail settings (mail-settings-audit), or None."""
+    row = await (await conn.execute(
+        "SELECT c.*, coalesce(nullif(u.display_name, ''), c.changed_by) AS name FROM team_mail_changes c "
+        "LEFT JOIN users u ON u.username = c.changed_by WHERE c.team_id = %s ORDER BY c.id DESC LIMIT 1", (team_id,))).fetchone()
+    if row is None:
+        return None
+    return {"at": row["changed_at"].isoformat(), "by": row["name"], "member": row["by_member"],
+            "target": row["target_after"], "address": row["address_after"], "auto": row["auto_after"]}
 
 
 class MailSettings(BaseModel):
@@ -145,12 +156,23 @@ async def change_settings(team_id: int, body: MailSettings, user: auth.CurrentUs
     async with db.connect() as conn:
         if not await team_access.team_exists(conn, team_id):
             raise HTTPException(status_code=404, detail=team_access.TEAM_NOT_FOUND)
-        if not (user.admin or await team_access.is_member(conn, user.username, team_id)):
+        member = await team_access.is_member(conn, user.username, team_id)
+        if not (user.admin or member):
             raise HTTPException(status_code=403, detail="只有團隊成員可以修改寄送設定")
         if (address or body.target == "team") and not auth.valid_email(address):
             raise HTTPException(status_code=422, detail=auth.BAD_EMAIL)
+        # Locked until this transaction ends, so two saves at once record what each one really replaced.
+        before = await (await conn.execute("SELECT mail_target, mail_address, mail_auto FROM teams WHERE id = %s FOR UPDATE",
+                                           (team_id,))).fetchone()
         await conn.execute("UPDATE teams SET mail_target = %s, mail_address = %s, mail_auto = %s WHERE id = %s",
                            (body.target, address, body.auto, team_id))
+        if (before["mail_target"], before["mail_address"], before["mail_auto"]) != (body.target, address, body.auto):
+            # Kept so the team sees who changed where its minutes go, above all an administrator from outside the team.
+            await conn.execute(
+                "INSERT INTO team_mail_changes (team_id, changed_by, by_member, target_before, address_before, auto_before, "
+                "target_after, address_after, auto_after) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (team_id, user.username, member, before["mail_target"], before["mail_address"], before["mail_auto"],
+                 body.target, address, body.auto))
     return {"target": body.target, "address": address, "auto": body.auto}
 
 

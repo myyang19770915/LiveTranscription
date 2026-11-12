@@ -216,7 +216,7 @@ code:
 ---
 ### Requirement: Concurrent edits are detected
 
-Each segment SHALL carry a version number that every save increments. A save based on an older version SHALL be refused with 409, the review page SHALL show 這段已被其他人修改，已重新載入 and SHALL reload that segment.
+Each segment SHALL carry a version number that every save increments. A save based on an older version SHALL be refused with 409, the review page SHALL show 這段已被其他人修改，已重新載入 and SHALL reload that segment. A retranslation SHALL be saved against the version the segment had when the retranslation started, so an edit made while the translation was running makes the save refused rather than overwritten; when the segment's original text changed while the translation was running, the review page SHALL discard the result without saving and show 原文已再次修改，略過這次重譯.
 
 #### Scenario: Two reviewers
 
@@ -224,13 +224,58 @@ Each segment SHALL carry a version number that every save increments. A save bas
 - **THEN** alice's save succeeds with version 3, bob's save is refused with 409, and bob sees alice's text
 
 
+#### Scenario: An edit during a retranslation
+
+- **WHEN** a segment at version 4 is being retranslated after an edit, and before the translation finishes the segment is edited again to version 5
+- **THEN** the finished translation is not saved, the segment keeps the version-5 text, and the page shows 原文已再次修改，略過這次重譯
+
+##### Example: what a finished retranslation does
+
+| Version at start | Text at finish | Version at finish | Result |
+| ---------------- | -------------- | ----------------- | ------ |
+| 4 | unchanged | 4 | saved with version 4 |
+| 4 | changed | 5 | discarded, not sent |
+| 4 | unchanged | 5 (confirmed by someone else) | sent with version 4, refused with 409, segment reloaded |
+
+
 <!-- @trace
-source: meeting-review
-updated: 2026-11-05
+source: review-retranslate-race
+updated: 2026-11-12
 code:
-  - 20261029_185428.mp4
-  - meeting-2026-11-01T00-16-53.txt
-  - docs/roadmap.md
+  - docker/asr/entrypoint.sh
+  - webapp/migrations/017_mail_setting_changes.sql
+  - webapp/server.py
+  - bench/mailchangecheck.js
+  - bench/closecheck.js
+  - webapp/static/app.js
+  - webapp/mailer.py
+  - bench/savecheck.js
+  - webapp/reminders.py
+  - webapp/static/minutes.js
+  - bench/contextcheck.js
+  - webapp/.dockerignore
+  - webapp/static/styles.css
+  - ws_server.py
+  - README.md
+  - bench/catalogcheck.js
+  - bench/reviewcheck.js
+  - test_asr_session.py
+  - webapp/qa.py
+  - bench/guardcheck.js
+  - docker/asr/constraints.txt
+  - webapp/Dockerfile
+  - compose.yaml
+  - webapp/migrations/016_reminder_claims.sql
+  - webapp/static/review.html
+  - webapp/static/index.html
+  - bench/checks.js
+  - webapp/static/minutes.html
+  - webapp/auth.py
+  - asr_session.py
+  - webapp/stream_limits.py
+  - webapp/static/review.js
+tests:
+  - webapp/test_server.py
 -->
 
 ---

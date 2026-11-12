@@ -87,6 +87,25 @@ def prune_request_logs(directory: str, days: int, now: float = None) -> int:
     return removed
 
 
+DEFAULT_RECV_QUEUE_MAX = 500   # about 80 s of audio in the browser's 0.16 s chunks
+
+
+def recv_queue_max(value) -> int:
+    """ASR_RECV_QUEUE_MAX: how many received messages a connection may hold unprocessed; a positive integer, else 500."""
+    text = str(value or "").strip()
+    if text.isdigit() and int(text) > 0:
+        return int(text)
+    if text:
+        logging.getLogger(__name__).error("ASR_RECV_QUEUE_MAX=%r is not a positive integer; using %d", value, DEFAULT_RECV_QUEUE_MAX)
+    return DEFAULT_RECV_QUEUE_MAX
+
+
+def new_recv_queue(maxsize: int):
+    """A connection's queue of received messages: holding `maxsize` at most, a full queue stops the reader."""
+    import asyncio
+    return asyncio.Queue(maxsize=maxsize)
+
+
 def new_stream_vad(template):
     """A FireRedStreamVad for one connection: the template's model weights, its own streaming state.
 

@@ -194,6 +194,13 @@ call('GET',`/api/meetings/${meetingId}`).then(result=>{meeting=result;MeetingNav
 // --- Finalize and send (minutes-mail) ---
 const when=iso=>new Date(iso).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
 let mailBusy=false,mailMessage=null;   // [text, 'ok'|'warn'] from the last action
+// Who last changed where the team's minutes go (mail-settings-audit); an administrator from outside the team is a warning.
+function mailChangeLine(change){
+  if(!change)return null;
+  if(change.member)return [`寄送設定由 ${change.by} 於 ${when(change.at)} 修改`,''];
+  const target=change.target==='team'?`改寄團隊信箱 ${change.address}`:'改寄給成員的個人信箱';
+  return [`寄送設定由 ${change.by}（系統管理員，非團隊成員）於 ${when(change.at)} 修改：${target}${change.auto?'，定稿後自動寄送':''}`,'warn'];
+}
 function renderMail(){
   const mail=data.mail;
   $('finalState').textContent=data.finalizedAt?`已定稿・${when(data.finalizedAt)}・${data.finalizedBy}`:'尚未定稿';
@@ -208,6 +215,8 @@ function renderMail(){
   const lines=[];
   if(!mail.configured)lines.push(['尚未設定寄信伺服器（請在 .env 設定 SMTP_HOST），目前只能定稿。','warn']);
   else lines.push([`${to}${mail.auto?'；定稿後自動寄送':''}。${mail.target==='members'&&mail.missing.length?`沒有 Email：${mail.missing.join('、')}。`:''}`,'']);
+  const change=mailChangeLine(mail.lastChange);
+  if(change)lines.push(change);
   const last=mail.last;
   if(last)lines.push(last.ok?[`最近寄送：${when(last.sentAt)}・${last.sentBy}${last.trigger==='auto'?'（定稿自動寄送）':''}・寄給 ${last.recipients} 人${last.skipped.length?`，未寄到 ${last.skipped.join('、')}（沒有 Email）`:''}。`,'ok']
     :[`最近一次寄送失敗（${when(last.sentAt)}・${last.sentBy}）：${last.error}`,'error']);

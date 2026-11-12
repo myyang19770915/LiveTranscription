@@ -10,7 +10,7 @@ function inline(finals,record,transcript,direction,glossary,learned,refine){
     history:history.map(s=>s.source).join('\n'),history_translation:history.map(s=>strip(s.target)).join('\n'),
     following:next&&same(next)?next.source.slice(0,120):transcript.slice(record.end,record.end+120).trim(),glossary,learned,refine};
 }
-const t=(name,got,want)=>console.log(JSON.stringify(got)===JSON.stringify(want)?'ok  ':'FAIL',name);
+const t=(name,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'ok  ':'FAIL',name);if(!ok)process.exitCode=1};
 const span=(source,target,detected,start)=>({source,target,detected,start,end:start+source.length});
 const zh=[span('第一句。','First.','',0),span('第二句，','Second,','',4),span('第三句。','Third.','',8),span('第四句。','Fourth.','',12)];
 const transcriptZh=zh.map(s=>s.source).join('')+'後面還有一些話。';

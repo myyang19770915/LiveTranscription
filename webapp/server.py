@@ -27,6 +27,7 @@ import actions
 import minutes
 import review
 import series
+import stream_limits
 import metrics
 import qa
 import reminders
@@ -562,9 +563,18 @@ async def transcribe(browser: WebSocket):
     if browser.state.user is None:
         await browser.close(code=4401, reason="請先登入")
         return
+    user = browser.state.user
+    if not stream_limits.take_place(user.username):
+        # The reason is what the live page shows (stream-limits).
+        await browser.close(code=4429, reason=stream_limits.TOO_MANY.format(n=stream_limits.MAX_STREAMS_PER_USER))
+        return
     audio, meeting = None, None
     try:
-        raw_header = await browser.receive_text()
+        try:
+            raw_header = await asyncio.wait_for(browser.receive_text(), stream_limits.STREAM_HEADER_TIMEOUT)
+        except asyncio.TimeoutError:
+            await browser.close(code=4408, reason=stream_limits.NO_START)
+            return
         header = json.loads(raw_header)
         # 即時翻譯 (live-translation): no meeting, nothing kept — audio goes to the engine and the events come back.
         translate_only = header.get("mode") == "translate"
@@ -587,10 +597,12 @@ async def transcribe(browser: WebSocket):
         language = header.get("language") if header.get("language") in ("auto", "zh_ja", *LANGUAGES) else "auto"
         bilingual = language == "zh_ja"
         display = TranscriptDisplay(language, glossary, audio)
+        # Both engines read the browser through the guard: audio length, session and membership are checked there.
+        guarded = stream_limits.StreamGuard(browser, user, browser.cookies.get(auth.SESSION_COOKIE), meeting)
         if asr_engine(str(header.get("engine", "")), language) == "mai":
             # Audio goes to Azure; text goes to the cloud text model only when 雲端精修 is on.
             cloud_marks = PUNCTUATE_MAI and bool(header.get("refine")) and language == "zh" and bool(REFINE_URL and REFINE_MODEL)
-            await mai_asr.MaiBridge(browser, language, display, punctuate_item if cloud_marks else None).run()
+            await mai_asr.MaiBridge(guarded, language, display, punctuate_item if cloud_marks else None).run()
             if browser.client_state == WebSocketState.CONNECTED:
                 await browser.close()
             return
@@ -612,7 +624,7 @@ async def transcribe(browser: WebSocket):
 
             async def browser_to_asr():
                 while True:
-                    event = await browser.receive()
+                    event = await guarded.receive()
                     if event.get("type") == "websocket.disconnect":
                         return
                     if event.get("bytes") is not None:
@@ -647,6 +659,9 @@ async def transcribe(browser: WebSocket):
                 task.result()
             if browser.client_state == WebSocketState.CONNECTED:
                 await browser.close()
+    except stream_limits.StreamStopped as stop:
+        if browser.client_state == WebSocketState.CONNECTED:
+            await browser.close(code=stop.code, reason=stop.reason)
     except (WebSocketDisconnect, websockets.ConnectionClosed):
         pass
     except Exception as exc:
@@ -655,5 +670,6 @@ async def transcribe(browser: WebSocket):
         except Exception:
             pass
     finally:
+        stream_limits.free_place(user.username)
         if audio is not None:
             await asyncio.shield(finish_recording(audio, meeting["id"]))

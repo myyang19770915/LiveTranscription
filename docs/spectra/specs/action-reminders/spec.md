@@ -8,7 +8,7 @@ Owners of action items get an e-mail before an item is due, on the day it is due
 
 ### Requirement: Reminder timing
 
-Once a day, after `REMIND_AT` (default 09:00) in `MEETING_TIMEZONE`, the system SHALL e-mail the owner of every confirmed action item whose status is 未開始 or 進行中, that has an owner who is still a member of the item's team and has an e-mail address, that has a due date, and whose reminders are on. An item SHALL be reminded once while it is due in one to three days, once on its due date, and once every day while it is overdue. A changed due date SHALL count as a new due date. Without a configured mail server no reminder SHALL be sent. The schedule SHALL be checked at least every five minutes, so a server that starts, wakes up or changes its clock after `REMIND_AT` still sends that day's reminders. A reminder that was not sent, because its mail failed or because the run was interrupted, SHALL be sent by a later run: a failed send SHALL be retried 30 minutes later on the same day.
+Once a day, after `REMIND_AT` (default 09:00) in `MEETING_TIMEZONE`, the system SHALL e-mail the owner of every confirmed action item whose status is 未開始 or 進行中, that has an owner who is still a member of the item's team and has an e-mail address, that has a due date, and whose reminders are on. An item SHALL be reminded once while it is due in one to three days, once on its due date, and once every day while it is overdue. A changed due date SHALL count as a new due date. Without a configured mail server no reminder SHALL be sent. The schedule SHALL be checked at least every five minutes, so a server that starts, wakes up or changes its clock after `REMIND_AT` still sends that day's reminders. A reminder that was not sent, because its mail failed or because the run was interrupted, SHALL be sent by a later run: a failed send SHALL be retried 30 minutes later on the same day. A reminder SHALL count as sent only once the mail server has accepted its mail; until then it is only claimed. A claim that is still unsent 10 minutes after it was made (the run that made it was killed, the scheduled one or one started by hand) SHALL be taken over by a later run, the schedule SHALL run, once today's `REMIND_AT` has passed, when such a claim for today or a later day exists, a run SHALL remove such claims that no item took over, a claim that disappears while a run looks at it SHALL count as not sent, and a run that skips reminders because another run claimed them less than 10 minutes ago SHALL be retried 30 minutes later on the same day.
 
 #### Scenario: The daily reminders
 
@@ -47,6 +47,19 @@ Once a day, after `REMIND_AT` (default 09:00) in `MEETING_TIMEZONE`, the system 
 - **WHEN** a run is interrupted while sending the first of two owners' reminders
 - **THEN** neither owner's reminders stay recorded as sent, and the next run sends both
 
+#### Scenario: A killed run is recovered
+
+- **WHEN** the process is killed after claiming an owner's reminders and before sending them, and the reminders run again
+- **THEN** a run less than 10 minutes after the claim sends nothing for that owner and is retried 30 minutes later, and a run 10 minutes or more after the claim sends the reminders
+
+##### Example: claims seen by a later run
+
+| Claim made | Sent | Later run at | Result |
+| ---------- | ---- | ------------ | ------ |
+| 09:00 | no | 09:05 | skipped, pending; retried at 09:35 |
+| 09:00 | no | 09:35 | sent |
+| 09:00 | yes (09:00) | 09:35 | not sent again |
+
 #### Scenario: When the schedule runs
 
 - **WHEN** the schedule is checked with `REMIND_AT` 09:00
@@ -69,24 +82,41 @@ Once a day, after `REMIND_AT` (default 09:00) in `MEETING_TIMEZONE`, the system 
 
 
 <!-- @trace
-source: review-followups
-updated: 2026-11-09
+source: reminder-outbox
+updated: 2026-11-12
 code:
-  - webapp/static/overlay.js
-  - webapp/static/subtitles.js
-  - webapp/reminders.py
-  - webapp/static/index.html
-  - webapp/static/overlay.css
-  - webapp/static/app.js
+  - webapp/qa.py
   - webapp/mailer.py
-  - bench/translate_e2e.mjs
-  - bench/reminders_e2e.mjs
-  - README.md
-  - webapp/static/actions.html
-  - webapp/auth.py
-  - webapp/static/actions.css
-  - webapp/static/actions.js
   - webapp/static/minutes.html
+  - bench/mailchangecheck.js
+  - docker/asr/constraints.txt
+  - bench/guardcheck.js
+  - webapp/server.py
+  - bench/savecheck.js
+  - webapp/static/review.html
+  - bench/reviewcheck.js
+  - asr_session.py
+  - webapp/static/app.js
+  - webapp/static/index.html
+  - webapp/auth.py
+  - webapp/Dockerfile
+  - webapp/reminders.py
+  - bench/closecheck.js
+  - webapp/migrations/016_reminder_claims.sql
+  - webapp/migrations/017_mail_setting_changes.sql
+  - bench/contextcheck.js
+  - webapp/static/minutes.js
+  - docker/asr/entrypoint.sh
+  - webapp/static/styles.css
+  - ws_server.py
+  - README.md
+  - test_asr_session.py
+  - bench/catalogcheck.js
+  - compose.yaml
+  - webapp/stream_limits.py
+  - webapp/.dockerignore
+  - bench/checks.js
+  - webapp/static/review.js
 tests:
   - webapp/test_server.py
 -->

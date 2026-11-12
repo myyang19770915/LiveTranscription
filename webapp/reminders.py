@@ -3,8 +3,10 @@ action item gets an e-mail while the item is due in one to three days (once per 
 and every day while it is overdue. One mail per owner per run. Reminders can be switched off per item
 (minute_items.remind) by its owner or an administrator.
 
-Every reminder sent is kept in reminder_log: a run first claims the reminders it is about to send, so two runs never
-send the same one, and a failed send gives its claims back so the next run retries.
+Every reminder is kept in reminder_log: a run first claims the reminders it is about to send, so two runs never
+send the same one, marks them sent once the mail server accepts the mail, and gives the claims back when a send fails
+so the next run retries. A claim still unsent after CLAIM_TIMEOUT belongs to a run that was killed (reminder-outbox)
+and is taken over by the next run.
 Run inside the app container:
     python -m reminders run [--today YYYY-MM-DD]   send today's reminders now
 """
@@ -55,6 +57,14 @@ def reminder_kind(due: date, today: date) -> tuple[str, date] | None:
 
 CHECK_EVERY = 300        # seconds between schedule checks
 RETRY_AFTER = timedelta(minutes=30)
+CLAIM_TIMEOUT = timedelta(minutes=10)   # an unsent claim this old was left by a killed run
+
+
+def should_run(now: datetime, ran_on: date | None, retry_at: datetime | None, leftover: bool) -> bool:
+    """due_now, or a claim a killed run left (reminder-outbox) once today's REMIND_AT has passed: such a run sends the
+    day's reminders, so it must not happen before the time the team expects them."""
+    after = now >= datetime.combine(now.date(), REMIND_AT, tzinfo=now.tzinfo)
+    return due_now(now, ran_on, retry_at) or (leftover and after)
 
 
 def due_now(now: datetime, ran_on: date | None, retry_at: datetime | None) -> bool:
@@ -82,10 +92,27 @@ async def candidates(conn, today: date) -> list[dict]:
         "ORDER BY i.owner, i.due_date, i.id", (today + timedelta(days=DAYS_BEFORE),))).fetchall()
 
 
-async def claim(conn, item: dict, kind: str, day: date) -> bool:
+async def claim(conn, item: dict, kind: str, day: date) -> str:
+    """'claimed' (this run sends it), 'sent' (already sent) or 'pending' (another run claimed it less than
+    CLAIM_TIMEOUT ago and may still be sending it). An unsent claim older than CLAIM_TIMEOUT is taken over."""
     row = await (await conn.execute(
         "INSERT INTO reminder_log (item_id, kind, day, owner, due_date) VALUES (%s, %s, %s, %s, %s) "
-        "ON CONFLICT DO NOTHING RETURNING item_id", (item["id"], kind, day, item["owner"], item["due_date"]))).fetchone()
+        "ON CONFLICT (item_id, kind, day) DO UPDATE SET claimed_at = now(), owner = excluded.owner, due_date = excluded.due_date "
+        "WHERE reminder_log.sent_at IS NULL AND reminder_log.claimed_at < now() - %s RETURNING item_id",
+        (item["id"], kind, day, item["owner"], item["due_date"], CLAIM_TIMEOUT))).fetchone()
+    if row is not None:
+        return "claimed"
+    held = await (await conn.execute("SELECT sent_at FROM reminder_log WHERE item_id = %s AND kind = %s AND day = %s",
+                                     (item["id"], kind, day))).fetchone()
+    # No row: the other run gave its claim back meanwhile; still not sent, so count it as pending (retried later).
+    return "sent" if held and held["sent_at"] is not None else "pending"
+
+
+async def stale_claims(conn, today: date) -> bool:
+    """Whether a run was killed before sending reminders that still matter (keyed today or later)."""
+    row = await (await conn.execute(
+        "SELECT 1 FROM reminder_log WHERE sent_at IS NULL AND claimed_at < now() - %s AND day >= %s LIMIT 1",
+        (CLAIM_TIMEOUT, today))).fetchone()
     return row is not None
 
 
@@ -158,10 +185,10 @@ def compose(owner: dict, groups: dict, today: date) -> EmailMessage:
 # --- Running ---------------------------------------------------------------------------------------
 
 async def run(today: date | None = None) -> dict:
-    """Send today's reminders; returns {"owners", "items", "failed"} (owners mailed, items reminded, owners whose
-    mail failed). Without a mail server nothing is sent."""
+    """Send today's reminders; returns {"owners", "items", "failed", "pending"} (owners mailed, items reminded, owners
+    whose mail failed, reminders another run is still sending). Without a mail server nothing is sent."""
     today = today or minutes.local_today()
-    result = {"owners": 0, "items": 0, "failed": 0}
+    result = {"owners": 0, "items": 0, "failed": 0, "pending": 0}
     if not mailer.configured():
         return result
     async with db.connect() as conn:
@@ -171,10 +198,17 @@ async def run(today: date | None = None) -> dict:
             if not auth.valid_email(item["email"]):
                 continue
             found = reminder_kind(item["due_date"], today)
-            if found and await claim(conn, item, *found):
+            if not found:
+                continue
+            state = await claim(conn, item, *found)
+            if state == "pending":
+                result["pending"] += 1
+            if state == "claimed":
                 entry = claimed.setdefault(item["owner"], {"owner": item, "groups": {}, "claims": []})
                 entry["groups"].setdefault(found[0], []).append(item)
                 entry["claims"].append((item["id"], *found))
+        # Claims a killed run left that no item took over (the item was done, cancelled or switched off meanwhile).
+        await conn.execute("DELETE FROM reminder_log WHERE sent_at IS NULL AND claimed_at < now() - %s", (CLAIM_TIMEOUT,))
     done: set[str] = set()   # owners whose claims are settled: sent, or given back after a failed send
     try:
         for owner, entry in claimed.items():
@@ -186,6 +220,7 @@ async def run(today: date | None = None) -> dict:
                 await release(entry["claims"])
                 result["failed"] += 1
             else:
+                await mark_sent(entry["claims"])
                 result["owners"] += 1
                 result["items"] += len(entry["claims"])
             done.add(owner)
@@ -198,6 +233,18 @@ async def run(today: date | None = None) -> dict:
     return result
 
 
+async def mark_sent(claims: list[tuple]) -> None:
+    async with db.connect() as conn:
+        for item_id, kind, day in claims:
+            await conn.execute("UPDATE reminder_log SET sent_at = now() WHERE item_id = %s AND kind = %s AND day = %s",
+                               (item_id, kind, day))
+
+
+def retry_time(result: dict, now: datetime) -> datetime | None:
+    """When to run again today: 30 minutes on when a mail failed or another run still held some reminders."""
+    return now + RETRY_AFTER if result["failed"] or result["pending"] else None
+
+
 async def release(claims: list[tuple]) -> None:
     async with db.connect() as conn:
         for item_id, kind, day in claims:
@@ -205,21 +252,26 @@ async def release(claims: list[tuple]) -> None:
 
 
 async def worker() -> None:
-    """Every CHECK_EVERY seconds: run when due_now (once a day after REMIND_AT, and 30 minutes after a failed run of
-    the same day). A failure is logged and retried; the worker never stops."""
+    """Every CHECK_EVERY seconds: run when due_now (once a day after REMIND_AT, and 30 minutes after a run of the same
+    day that failed or found reminders another run still held), or after REMIND_AT when a killed run left unsent
+    claims (stale_claims). A failure is logged and retried; the worker never stops."""
     zone = ZoneInfo(team_access.MEETING_TIMEZONE)
     logger.info("action reminders at %s (%s) every day", REMIND_AT.strftime("%H:%M"), team_access.MEETING_TIMEZONE)
     ran_on, retry_at = None, None
     while True:
         now = datetime.now(zone)
-        if due_now(now, ran_on, retry_at):
+        try:
+            async with db.connect() as conn:
+                leftover = await stale_claims(conn, now.date())   # a killed run, even a manual one (reminder-outbox)
+        except Exception:   # noqa: BLE001 - the database being away only delays this check
+            leftover = False
+        if should_run(now, ran_on, retry_at, leftover):
             ran_on, retry_at = now.date(), None
             try:
                 result = await run(now.date())
-                if result["owners"] or result["failed"]:
+                if result["owners"] or result["failed"] or result["pending"]:
                     logger.info("action reminders: %s", result)
-                if result["failed"]:
-                    retry_at = now + RETRY_AFTER
+                retry_at = retry_time(result, now)
             except Exception:   # noqa: BLE001 - the worker must survive a bad day
                 logger.exception("action reminders failed")
                 retry_at = now + RETRY_AFTER

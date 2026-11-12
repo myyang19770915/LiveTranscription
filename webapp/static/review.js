@@ -67,20 +67,24 @@ function select(seq){
 function finals(){return segments.map(s=>({source:s.source,target:s.target,detected:s.detected}))}
 async function retranslate(seq,offerNext){
   const index=segments.findIndex(s=>s.seq===seq),segment=segments[index];
+  // Saved against the version it was asked for: an edit meanwhile makes the save refused (409), never overwritten.
+  const base={version:segment.version,source:segment.source};
   const source=meeting.sourceLanguage||meeting.language,pair=source==='zh_ja',refine=$('refine').checked&&!$('refineRow').hidden;
   const {body,neighbours}=TranslationContext.refinementRequest(finals(),index,{source,target:meeting.targetLanguage||'zh',
     glossary:meeting.glossary,learned:meeting.learned,refine,tail:segments.slice(index+1).map(s=>s.source).join('')});
-  notes.set(seq,{text:'重譯中…'});render();
+  // This call's note: a later retranslation of the same segment replaces it, and then this one leaves the note alone.
+  const mine={text:'重譯中…'},note=value=>{if(notes.get(seq)===mine){notes.set(seq,value);render()}};
+  notes.set(seq,mine);render();
   try{
     const result=await TranslationContext.translateStream(body);
-    if(!TranslationContext.plausibleRefinement(segment.target,result.text,neighbours)){notes.set(seq,{text:'重譯結果重複了前後文，已保留原譯文'});render();return}
-    const current=bySeq(seq);
-    replace(await call('POST',`/api/meetings/${meetingId}/segments/${seq}/translation`,{version:current.version,target:TranslationContext.labelled(result.text,result.source,pair),refine}));
+    if(bySeq(seq).source!==base.source){note({text:'原文已再次修改，略過這次重譯'});return}
+    if(!TranslationContext.plausibleRefinement(segment.target,result.text,neighbours)){note({text:'重譯結果重複了前後文，已保留原譯文'});return}
+    replace(await call('POST',`/api/meetings/${meetingId}/segments/${seq}/translation`,{version:base.version,target:TranslationContext.labelled(result.text,result.source,pair),refine}));
     const next=segments[index+1];
-    notes.set(seq,{text:'已重譯',next:offerNext&&next?next.seq:null});render();
+    note({text:'已重譯',next:offerNext&&next?next.seq:null});
   }catch(error){
-    if(error.stale)return;
-    notes.set(seq,{text:'重譯失敗',retry:()=>retranslate(seq,offerNext)});render();
+    if(error.stale){note({text:'這段已重新載入，未套用這次重譯'});return}
+    note({text:'重譯失敗',retry:()=>retranslate(seq,offerNext)});
   }
 }
 async function saveEdit(seq,text,button){

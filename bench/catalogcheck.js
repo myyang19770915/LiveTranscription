@@ -1,6 +1,6 @@
 // Spec meeting-catalog: default topic display and 今天／本週／更早 grouping (run with TZ=Asia/Taipei).
 const C=require('../webapp/static/meeting-catalog.js');
-const t=(name,got,want)=>console.log(JSON.stringify(got)===JSON.stringify(want)?'ok  ':'FAIL',name,JSON.stringify(got));
+const t=(name,got,want)=>{const ok=JSON.stringify(got)===JSON.stringify(want);console.log(ok?'ok  ':'FAIL',name,JSON.stringify(got));if(!ok)process.exitCode=1};
 t('no topic shows start time',C.displayTitle({title:'',startedAt:'2026-11-04T23:37:00+08:00'}),'11/04 23:37 的會議');
 t('topic shown as is',C.displayTitle({title:'週會',startedAt:'2026-11-04T23:37:00+08:00'}),'週會');
 const now=new Date('2026-11-04T15:00:00+08:00');  // Wednesday

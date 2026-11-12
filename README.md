@@ -454,6 +454,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `ASR_SECRET_KEY` | 請自行設定 | ASR 容器間的服務密鑰；不要把預設值用於共享或公開服務 |
 | `ASR_LOG_TEXT` | `0` | ASR 每次串流的 log（`logs/requests/`）預設只記字數、耗時與狀態，**不記辨識文字**；除錯時設 `1` 暫時記錄每段新增文字。即時翻譯的串流不論設定都不記文字 |
 | `ASR_LOG_RETENTION_DAYS` | `14` | `logs/requests/` 的 log 保留天數；ASR 啟動時與之後每 24 小時刪除過期檔案，`0` 表示不刪除 |
+| `ASR_RECV_QUEUE_MAX` | `500` | ASR 每條連線最多暫存幾段尚未辨識的音訊（約 80 秒）；滿了就暫停讀取，讓送太快的用戶端慢下來，不丟資料 |
 | `GPU_MEMORY_UTILIZATION` | `0.40` | ASR vLLM 可配置 GPU 記憶體的比例；Gemma 另外使用 GPU |
 | `ASR_MAX_MODEL_LEN` | `16384` | ASR vLLM 模型最大長度設定 |
 | `CUDA_VISIBLE_DEVICES` | `0` | 容器可見的 GPU device index |
@@ -478,7 +479,12 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `SMTP_TLS` | `starttls` | `starttls`（通常 587）、`ssl`（通常 465）或 `none`（只用於本機測試信箱） |
 | `REMIND_AT` | `09:00` | 待辦到期提醒每天寄出的時間（`MEETING_TIMEZONE`，`HH:MM`）；app 在這個時間之後才啟動時會立刻補寄當天的提醒 |
 | `PUBLIC_BASE_URL` | 空 | 信中連結（紀要頁、提醒信的看板連結）的網址開頭，例如 `https://asr.my-yang.online`；空白則信中不放連結 |
-| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 前面有 HTTPS 反向代理時，填代理的 IP，app 才會相信它轉來的 `https` |
+| `FORWARDED_ALLOW_IPS` | `10.250.250.0/28` | 只採信這些來源轉來的代理標頭（使用者真實 IP、`https`）。預設是 tunnel 專用的 `yuqiao-edge` 網路；**不要填整段私有 IP**：區網直連 18082 與經主機轉進來的連線來源相同，填了等於讓區網任何人都能偽造標頭（見[對外開放](#對外開放cloudflare-tunnel)） |
+| `STREAM_HEADER_TIMEOUT` | `30` | 辨識連線建立後幾秒內要收到開始訊息，否則關閉 |
+| `MAX_STREAMS_PER_USER` | `2` | 每位使用者同時最多幾條辨識串流（開會與即時翻譯合計），超過時頁面顯示「同時進行的辨識已達上限」 |
+| `MAX_STREAM_HOURS` | `4` | 單條串流最多收幾小時音訊；到達時停止錄音、保留已錄部分並通知頁面 |
+| `STREAM_RECHECK_MINUTES` | `5` | 串流進行中每隔幾分鐘重新確認登入仍有效、仍是團隊成員；登出或被移出團隊時停止 |
+| `LOGIN_IP_MAX_FAILURES` | `30` | 同一來源 IP 5 分鐘內登入失敗幾次後暫時拒絕（另有每個帳號 5 次的鎖定）。經反向代理或 Cloudflare Tunnel 時，tunnel 要走 `yuqiao-edge`（見[對外開放](#對外開放cloudflare-tunnel)），app 才看得到使用者真實 IP，否則經 tunnel 的所有人會被算成同一個 IP |
 | `MEETING_TIMEZONE` | `Asia/Taipei` | 會議列表的日期篩選、紀要的會議日期與 ASR 微調資料匯出，都以這個時區計算 |
 | `MINUTES_URL` / `_MODEL` / `_KEY` | 空（沿用 `TRANSLATE_REFINE_*`） | 產生會議紀要的模型（OpenAI 相容，整場一次送出，需足夠的 context）；問答也用它回答 |
 | `EMBED_MODEL_REPO` / `EMBED_MODEL_FILE` | `ggml-org/bge-m3-Q8_0-GGUF` / `bge-m3-q8_0.gguf` | 問答的 embedding 模型（`embed` 服務下載）；檔名也決定查詢與文件的前綴，換模型後背景重建索引 |
@@ -607,18 +613,27 @@ Invoke-RestMethod -Method Post -Uri http://localhost:18082/api/translate -Conten
 
 兩種做法擇一：
 
+**為什麼 tunnel 要走 `yuqiao-edge` 網路**：app 依 `FORWARDED_ALLOW_IPS` 決定相信誰轉來的代理標頭（使用者真實 IP 與 `https`）。在 Docker Desktop 上，區網使用者直連 `http://<這台主機>:18082`，以及 cloudflared 經 `host.docker.internal:18082` 轉進來的連線，到 app 時來源**是同一個** Compose 閘道位址，app 分不出來。如果信任那個位址（或整段私有 IP），區網任何人都能偽造 `X-Forwarded-For` 繞過登入失敗的 IP 限制。所以 tunnel 改走固定網段 `10.250.250.0/28` 的 Docker 網路 `yuqiao-edge`，app 只相信這個網段，區網直連照常可用，但它帶的代理標頭會被忽略。`.env` 設 `FORWARDED_ALLOW_IPS=10.250.250.0/28`（也就是預設值）。
+
 **A. 共用這台機器上已在跑的 cloudflared**（後台管理、以 `tunnel run --token` 啟動的通道）。不用新增容器，也不用處理 token：
 
-1. `.env` 設定 `FORWARDED_ALLOW_IPS=127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`，再執行 `docker compose up -d app`。cloudflared 經由 Docker Desktop 的主機閘道連進來，app 要相信它轉來的 `https`，登入 cookie 才會加上 Secure。
+1. 讓那個 cloudflared 容器接上 `yuqiao-edge`（app 啟動後這個網路就存在）：
+
+   ```powershell
+   docker compose up -d app
+   docker network connect yuqiao-edge <cloudflared 容器名稱>
+   ```
+
+   這個連線綁在容器上：那個 cloudflared 所屬的專案重建容器後，要再執行一次 `docker network connect`。
 2. Cloudflare 後台：Zero Trust → Networks → Tunnels，找到那個 cloudflared 對應的通道（狀態 HEALTHY），按 Configure / Edit。
-3. **Public hostnames**（新版介面叫 Published application routes）→ Add：Subdomain `asr`、Domain `my-yang.online`、Path 留空、Service Type `HTTP`、URL `host.docker.internal:18082` → Save。Cloudflare 會自動建立 DNS 記錄。
+3. **Public hostnames**（新版介面叫 Published application routes）→ Add 或編輯：Subdomain `asr`、Domain `my-yang.online`、Path 留空、Service Type `HTTP`、URL `app:8080` → Save。Cloudflare 會自動建立 DNS 記錄。
 
 缺點是這套系統的對外連線會跟著那個 cloudflared：停掉它所屬的專案，這個網址也會一起斷線。
 
-**B. 本專案專用的通道**：compose 的 `tunnel` 服務（profile `tunnel`）跟 app 在同一個 Compose 網路，轉送目標是 `http://app:8080`，不經過主機的 18082 port：
+**B. 本專案專用的通道**：compose 的 `tunnel` 服務（profile `tunnel`）只接在 `yuqiao-edge`，轉送目標是 `http://app:8080`，不經過主機的 18082 port：
 
 1. Cloudflare 後台：Zero Trust → Networks → Tunnels → Create a tunnel → 選 Cloudflared → 取名（例如 `yuqiao-live`）→ 在安裝畫面選 Docker，複製指令中 `--token` 後面那一長串。
-2. 貼到 `.env` 的 `CLOUDFLARE_TUNNEL_TOKEN=`，並照 A 的第 1 步設定 `FORWARDED_ALLOW_IPS`。
+2. 貼到 `.env` 的 `CLOUDFLARE_TUNNEL_TOKEN=`（`FORWARDED_ALLOW_IPS` 用預設值即可）。
 3. 啟動：
 
    ```powershell
@@ -630,6 +645,14 @@ Invoke-RestMethod -Method Post -Uri http://localhost:18082/api/translate -Conten
 4. 在後台這個通道的 Public hostnames → Add：Subdomain `asr`、Domain `my-yang.online`、Service Type `HTTP`、URL `app:8080` → Save。
 
 完成後用瀏覽器開 `https://asr.my-yang.online`，應該會出現登入頁；登入後右上角應顯示「服務就緒」。
+
+**確認區網無法偽造代理標頭**（在 Windows PowerShell 5.1 執行；PowerShell 7 會自己處理引號，請把 `-d` 的內容改成 `'{"username":"<帳號>","password":"<密碼>"}'`。兩個指令都應登入成功；第一個的 cookie 沒有 `Secure`、app log 的來源不是 203.0.113.9，第二個有 `Secure`、來源是 203.0.113.9）：
+
+```powershell
+curl.exe -s -D - -o NUL -X POST http://127.0.0.1:18082/api/login -H "Content-Type: application/json" -H "X-Forwarded-For: 203.0.113.9" -H "X-Forwarded-Proto: https" -d '{\"username\":\"<帳號>\",\"password\":\"<密碼>\"}'
+docker run --rm --network yuqiao-edge curlimages/curl:8.11.1 -s -D - -o /dev/null -X POST http://app:8080/api/login -H "Content-Type: application/json" -H "X-Forwarded-For: 203.0.113.9" -H "X-Forwarded-Proto: https" -d '{\"username\":\"<帳號>\",\"password\":\"<密碼>\"}'
+docker compose logs --tail 5 app
+```
 
 補充：
 
@@ -647,13 +670,15 @@ docker compose ps
 docker compose logs --tail 100 app asr translate
 ```
 
-執行 FastAPI 代理單元測試：
+自動測試共三組，任何一項失敗都會以非 0 結束（可直接用在腳本或排程）：
 
 ```powershell
-docker compose exec -T app python -m unittest -v test_server
+docker compose exec -T app python -m unittest -q test_server                    # app：需要 db；LDAP、SMTP、ASR、模型都以假物件代替
+docker compose exec -T -w /workspace asr python -m unittest -q test_asr_session  # ASR：需要 asr 已就緒；部分測試用 bench\data 的錄音，沒有時跳過
+node bench\checks.js                                                            # 前端規則：只需要 Node，不需任何服務
 ```
 
-測試使用 `db` 中另一個資料庫 `yuqiao_test`（自動建立、每個測試前清空），LDAP 以 ldap3 的模擬伺服器代替，不會連到公司 LDAP。
+`test_server` 使用 `db` 中另一個資料庫 `yuqiao_test`（第一次執行時自動建立、每個測試前清空），LDAP 以 ldap3 的模擬伺服器代替，不會連到公司 LDAP。資料庫沒開時，不需要資料庫的測試（例如 `test_server.LdapEncryptionTests`、`test_server.MinutesRulesTests`）仍可單獨執行。
 
 執行本機 WAV WebSocket smoke test（需要 Python 專案環境、`websockets` 套件，以及自行準備的 16 kHz／單聲道／16-bit PCM WAV）：
 
@@ -679,6 +704,26 @@ docker volume rm asr_confucius4-r2t2_translation-model-cache   # 只刪翻譯模
 ```
 
 用 `docker volume ls` 查看 volume 名稱；名稱是 `<專案資料夾名稱>_<volume>`，**不要刪除 `…_meeting-db`**。
+
+### 固定版本
+
+部署用的版本都固定住，`docker compose pull` 或重建不會悄悄換版：
+
+- **image**：`compose.yaml` 中原本是浮動 tag 的 `qwenllm/qwen3-asr`、`llama.cpp:server-cuda`、`llama.cpp:server` 寫成 `tag@sha256:…`，以 digest 為準；其他 image 本來就是固定版本號。
+- **ASR 的 Python 套件**：`docker/asr/constraints.txt`（ASR 容器內 `pip freeze` 的結果）。ASR 容器第一次啟動時以這份版本安裝本專案，之後重啟直接沿用，不會再解析依賴；`pyproject.toml` 或 `constraints.txt` 有改動時，下次啟動會自動重新安裝。
+- **app**：`webapp/requirements.txt` 版本固定；`webapp/Dockerfile` 把整個 `webapp/` 複製進 image，image 本身就能執行（compose 另外掛載 `./webapp` 方便開發）。
+
+要升級時（例如換新版 vLLM 映像）：
+
+```powershell
+docker pull qwenllm/qwen3-asr:latest
+docker image inspect qwenllm/qwen3-asr:latest -f "{{index .RepoDigests 0}}"   # 把 @sha256:… 換進 compose.yaml
+# 先從新映像重產 constraints，再啟動：用舊 constraints 啟動會把新映像的套件裝回舊版
+docker run --rm --entrypoint pip qwenllm/qwen3-asr@sha256:<新的 digest> freeze --exclude-editable > docker\asr\constraints.txt
+docker compose up -d asr
+```
+
+重產 constraints 後、啟動之前，把其中 `套件 @ git+…` 形式的行改成註解（pip 的 constraints 不接受網址）。換版後跑 `test_server`、`test_asr_session` 與 `bench/` 的品質評測再上線。
 
 ## 備份與還原
 

@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python -m pip install --no-cache-dir -e /workspace "huggingface_hub[cli]"
+# Install the ASR package with the versions pinned in constraints.txt (app-image-reproducible). A restart reuses the
+# install; a changed pyproject.toml or constraints.txt (new dependency, new pin) installs again.
+INSTALL_STAMP=/var/lib/confucius4-r2t2.install
+wanted="$(cat /workspace/pyproject.toml /workspace/docker/asr/constraints.txt | sha256sum | cut -d' ' -f1)"
+if ! python -m pip show confucius4-r2t2 2>/dev/null | grep -q "^Editable project location: /workspace$"     || [[ "$(cat "${INSTALL_STAMP}" 2>/dev/null)" != "${wanted}" ]]; then
+  python -m pip install --no-cache-dir -c /workspace/docker/asr/constraints.txt -e /workspace "huggingface_hub[cli]"
+  echo "${wanted}" > "${INSTALL_STAMP}"
+fi
 
 if [[ ! -f "${VAD_MODEL_PATH}/config.yaml" ]]; then
   mkdir -p "$(dirname "${VAD_MODEL_PATH}")"

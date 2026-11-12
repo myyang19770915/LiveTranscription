@@ -75,6 +75,37 @@ class LogTextTests(unittest.TestCase):
         self.assertEqual(asr_session.reason_kind(""), "")
 
 
+class RecvQueueTests(unittest.TestCase):
+    def test_queue_size_setting(self):
+        for value, expected in ((None, 500), ("", 500), ("200", 200), ("0", 500), ("-5", 500), ("many", 500)):
+            with self.subTest(value=value):
+                if value in ("0", "-5", "many"):
+                    with self.assertLogs("asr_session", "ERROR"):
+                        self.assertEqual(asr_session.recv_queue_max(value), expected)
+                else:
+                    self.assertEqual(asr_session.recv_queue_max(value), expected)
+
+
+class BoundedQueueTests(unittest.TestCase):
+    def test_a_full_queue_holds_no_more(self):
+        import asyncio
+
+        async def fill():
+            queue = asr_session.new_recv_queue(asr_session.recv_queue_max("2"))
+            queue.put_nowait(b"a")
+            queue.put_nowait(b"b")
+            with self.assertRaises(asyncio.QueueFull):
+                queue.put_nowait(b"c")
+            waiting = asyncio.create_task(queue.put(b"c"))   # the receiver waits here instead of reading on
+            await asyncio.sleep(0.05)
+            self.assertFalse(waiting.done())
+            self.assertEqual(queue.qsize(), 2)
+            self.assertEqual(await queue.get(), b"a")         # recognition takes one: the receiver goes on
+            await asyncio.wait_for(waiting, 1)
+            self.assertEqual([queue.get_nowait(), queue.get_nowait()], [b"b", b"c"])
+        asyncio.run(fill())
+
+
 class RetentionTests(unittest.TestCase):
     """Request log retention."""
 
@@ -242,12 +273,12 @@ class StreamHeaderTests(unittest.TestCase):
                 self.assertEqual(self.files(), before)
                 self.assertFalse((self.ROOT / "outside.log").exists())
 
-    def stream_clip(self, request_id, retain):
-        """Stream 15 s of a bench recording; returns every text the service sent back."""
+    def stream_clip(self, request_id, retain, seconds=15, realtime=False):
+        """Stream a bench recording (as fast as the service takes it, or in real time); returns every text sent back."""
         import asyncio
         import json
         import websockets
-        audio = speech_or_synthetic("en_sinek", 15, 1)
+        audio = speech_or_synthetic("en_sinek", seconds, 1)
         header = {"requestId": request_id, "secret_key": os.environ["ASR_SECRET_KEY"], "language": "zhen", "mode": "slow",
                   "channels": 1, "sample_rate": 16000, "use_vad": False, "system_prompt": ""}
         if retain is not None:
@@ -258,8 +289,10 @@ class StreamHeaderTests(unittest.TestCase):
             async with websockets.connect(f"{ASR_URL}/asr_stream_api_v1", ping_interval=None, max_size=None) as ws:
                 await ws.send(json.dumps(header))
                 pcm = audio.tobytes()
-                for i in range(0, len(pcm), 5120):  # 0.16 s, like the browser, sent as fast as the service takes it
+                for i in range(0, len(pcm), 5120):  # 0.16 s, like the browser
                     await ws.send(pcm[i:i + 5120])
+                    if realtime:
+                        await asyncio.sleep(0.16)
                 await ws.send("YOUDAO_ONETIME_ASR_STREAM_EOS")
                 try:
                     while True:
@@ -288,6 +321,16 @@ class StreamHeaderTests(unittest.TestCase):
                 self.assertTrue(long_texts)
                 for text in long_texts:
                     self.assertNotIn(text, log)
+
+    @unittest.skipUnless((Path(__file__).resolve().parent / "bench" / "data" / "en_sinek" / "clip.wav").exists(),
+                         "bench/data/en_sinek/clip.wav is not here (bench/data is not in git)")
+    def test_a_client_sending_faster_than_recognition(self):
+        """Bounded receive queue: 30 s sent at once are all recognized, as when sent in real time."""
+        import uuid
+        fast = self.stream_clip(f"queue-fast-{uuid.uuid4().hex[:8]}", None, seconds=30)
+        steady = self.stream_clip(f"queue-steady-{uuid.uuid4().hex[:8]}", None, seconds=30, realtime=True)
+        self.assertTrue(steady)
+        self.assertEqual("".join(fast), "".join(steady))
 
     def test_wrong_secret_creates_no_log_file(self):
         for endpoint in ("asr_stream_api_v0", "asr_stream_api_v1"):

@@ -34,6 +34,7 @@ import qa
 import reminders
 import search
 import server
+import stream_limits
 from server import (TO_TRADITIONAL, TranscriptDisplay, TranslationRequest, app, asr_engine, detect_pair_language,
                     resolve_translation_direction, translation_backend, translation_payload)
 from translation_quality import consolidate_terms, parse_discovered_terms, policy
@@ -105,17 +106,27 @@ class FakeStreamingClient(FakeTranslationClient):
         return FakeStreamResponse()
 
 
-def test_database_url() -> str:
-    """The compose database, but its separate yuqiao_test database, created on first use."""
-    main = db.DATABASE_URL or os.environ["DATABASE_URL"]
-    with psycopg.connect(main, autocommit=True) as conn:
-        if not conn.execute("SELECT 1 FROM pg_database WHERE datname = 'yuqiao_test'").fetchone():
-            conn.execute("CREATE DATABASE yuqiao_test")
-    return main.rsplit("/", 1)[0] + "/yuqiao_test"
-
-
-TEST_DATABASE_URL = test_database_url()
+MAIN_DATABASE_URL = db.DATABASE_URL or os.environ.get("DATABASE_URL", "")
+# The compose database server, but its separate yuqiao_test database. Importing connects to nothing, so the tests that
+# need no database (LDAP settings, minutes rules…) also run when it is down; setUpModule creates it if needed.
+TEST_DATABASE_URL = MAIN_DATABASE_URL.rsplit("/", 1)[0] + "/yuqiao_test"
 db.DATABASE_URL = TEST_DATABASE_URL
+
+
+def setUpModule():
+    """Create yuqiao_test if needed. unittest runs this once, before any test of this module; when the database is
+    down it only prints why, and each test that needs the database then fails on its own while the others pass."""
+    if not MAIN_DATABASE_URL:
+        print("DATABASE_URL is not set: the tests that need yuqiao_test will fail (run them in the app container)")
+        return
+    try:
+        with psycopg.connect(MAIN_DATABASE_URL, autocommit=True, connect_timeout=5) as conn:
+            if not conn.execute("SELECT 1 FROM pg_database WHERE datname = 'yuqiao_test'").fetchone():
+                conn.execute("CREATE DATABASE yuqiao_test")
+    except psycopg.OperationalError as exc:
+        print(f"yuqiao_test unavailable: {exc}")
+
+
 # Tests never reach the real diarize service; DiarizeApiTests turn it on with a fake service call.
 diarize.DIARIZE_URL = ""
 # Nor a mail server: tests that send replace mailer.send_message (the container may point SMTP_HOST at dev-mail).
@@ -254,6 +265,7 @@ class AccountTestCase(DatabaseTestCase):
 
     def setUp(self):
         super().setUp()
+        auth.ip_failures.clear()   # every test client signs in from the same address
         self.ldap = FakeLdap()
         self.ldap.add("alice", "pw-alice", "王愛麗")
         self.ldap.add("bob", "pw-bob")
@@ -755,6 +767,159 @@ class MeetingTimelineTests(AccountTestCase):
         self.assertEqual(appended, b"".join(frames))
         with wave.open(str(path)) as w:
             self.assertEqual(w.readframes(w.getnframes()), appended)
+
+
+class HoldUpstream(FakeUpstream):
+    """An engine that stays connected and silent until the browser leaves."""
+
+    def __init__(self):
+        super().__init__([])
+
+    async def __aiter__(self):
+        await asyncio.Event().wait()
+        yield ""
+
+
+class StreamLimitTests(AccountTestCase):
+    """stream-limits: start message, streams per user, stream length, access re-checked while streaming."""
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(stream_limits.active.clear)
+
+    def wait_for(self, condition):
+        for _ in range(100):
+            if condition():
+                return
+            time.sleep(0.02)
+        self.fail("condition not reached")
+
+    def closed_code(self, websocket):
+        with self.assertRaises(WebSocketDisconnect) as closed:
+            for _ in range(10):
+                websocket.receive_json()
+        return closed.exception.code
+
+    def test_a_third_stream(self):
+        client = self.signed_in("alice")
+        with patch("server.websockets.connect", side_effect=lambda *a, **k: HoldUpstream()):
+            with client.websocket_connect("/ws/transcribe") as first:
+                first.send_json({"mode": "translate", "language": "zh"})
+                with client.websocket_connect("/ws/transcribe") as second:
+                    second.send_json({"mode": "translate", "language": "zh"})
+                    self.wait_for(lambda: stream_limits.active.get("alice") == 2)
+                    with client.websocket_connect("/ws/transcribe") as third:
+                        self.assertEqual(self.closed_code(third), 4429)
+                self.wait_for(lambda: stream_limits.active.get("alice") == 1)   # the second one ended
+                with client.websocket_connect("/ws/transcribe") as again:
+                    again.send_json({"mode": "translate", "language": "zh"})
+                    self.wait_for(lambda: stream_limits.active.get("alice") == 2)
+        self.wait_for(lambda: "alice" not in stream_limits.active)
+
+    def test_no_start_message(self):
+        with patch("stream_limits.STREAM_HEADER_TIMEOUT", 0.2), patch("server.websockets.connect") as upstream:
+            with self.signed_in("alice").websocket_connect("/ws/transcribe") as websocket:
+                self.assertEqual(self.closed_code(websocket), 4408)
+        upstream.assert_not_called()
+
+    def test_audio_accepted(self):
+        rows = [(4, 460_799_000, 1_000, True), (4, 460_800_000, 2, False), (1, 115_199_999, 2, False)]   # spec example
+        for hours, received, chunk, accepted in rows:
+            with self.subTest(hours=hours, received=received), patch("stream_limits.MAX_STREAM_HOURS", hours):
+                self.assertIs(stream_limits.accepts(received, chunk), accepted)
+
+    def recorded(self, meeting):
+        team_id = self.query("SELECT team_id FROM meetings WHERE id = %s", (meeting,))[0][0]
+        self.wait_for(lambda: self.query("SELECT ended_at IS NOT NULL FROM meetings")[0][0])
+        with wave.open(str(self.output / "teams" / str(team_id) / meeting / "audio.wav")) as w:
+            return w.readframes(w.getnframes())
+
+    @staticmethod
+    def forwarded(upstream):
+        return b"".join(m for m in upstream.sent if isinstance(m, bytes))
+
+    def test_a_stream_reaches_its_length_limit(self):
+        meeting = self.meeting_id()
+        upstream = HoldUpstream()
+        with patch("stream_limits.MAX_STREAM_HOURS", 3200 / stream_limits.BYTES_PER_HOUR), \
+                patch("server.websockets.connect", return_value=upstream), self.signed_in("alice") as client:
+            with client.websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"meeting_id": meeting, "language": "zh"})
+                websocket.send_bytes(b"\x01\x00" * 1600)   # exactly the limit
+                websocket.send_bytes(b"\x02\x00")          # one sample too many
+                self.assertTrue(websocket.receive_json()["msg"].startswith("已達單場上限"))
+                self.assertEqual(self.closed_code(websocket), 4413)
+            self.assertEqual(self.recorded(meeting), b"\x01\x00" * 1600)
+        self.assertEqual(self.forwarded(upstream), b"\x01\x00" * 1600)
+
+    def test_signed_out_in_another_tab(self):
+        meeting = self.meeting_id()
+        upstream = HoldUpstream()
+        with patch("stream_limits.STREAM_RECHECK_MINUTES", 0), patch("server.websockets.connect", return_value=upstream), \
+                self.signed_in("alice") as client:
+            with client.websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"meeting_id": meeting, "language": "zh"})
+                websocket.send_bytes(b"\x01\x00" * 160)
+                self.wait_for(lambda: len(self.forwarded(upstream)) == 320)
+                run_sql("DELETE FROM sessions")
+                websocket.send_bytes(b"\x02\x00" * 160)
+                self.assertEqual(self.closed_code(websocket), 4401)
+            self.assertEqual(self.recorded(meeting), b"\x01\x00" * 160)
+
+    def test_removed_from_the_team(self):
+        meeting = self.meeting_id()
+        upstream = HoldUpstream()
+        with patch("stream_limits.STREAM_RECHECK_MINUTES", 0), patch("server.websockets.connect", return_value=upstream), \
+                self.signed_in("alice") as client:
+            with client.websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"meeting_id": meeting, "language": "zh"})
+                websocket.send_bytes(b"\x01\x00" * 160)
+                self.wait_for(lambda: len(self.forwarded(upstream)) == 320)
+                run_sql("DELETE FROM team_members WHERE username = 'alice'")
+                websocket.send_bytes(b"\x02\x00" * 160)
+                self.assertEqual(websocket.receive_json()["msg"], "你已不是這個團隊的成員，錄音已停止")
+                self.assertEqual(self.closed_code(websocket), 4403)
+            self.assertEqual(self.recorded(meeting), b"\x01\x00" * 160)
+
+    def test_a_database_outage_does_not_end_the_stream(self):
+        class Browser(FakeBrowser):
+            async def receive(self):
+                return {"bytes": b"\x01\x00" * 160}
+        guard = stream_limits.StreamGuard(Browser(), auth.User("alice", "", False, []), "token", None)
+
+        async def unreachable(_token):
+            raise psycopg.OperationalError("database restarting")
+        with patch("stream_limits.STREAM_RECHECK_MINUTES", 0), patch("auth.session_user", unreachable), \
+                self.assertLogs("uvicorn.error", "WARNING"):
+            event = asyncio.run(guard.receive())   # the check fails: the chunk still goes through
+        self.assertEqual(event["bytes"], b"\x01\x00" * 160)
+        self.assertGreater(guard._checked, time.monotonic() - 1)   # …and the check is due again in 30 s, not now
+
+    def test_the_mai_engine_reads_through_the_guard(self):
+        frames = [b"\x02\x00" * 1600, b"\x03\x00" * 1600]
+
+        class Browser(FakeBrowser):
+            def __init__(self):
+                super().__init__()
+                self.events = [{"bytes": f} for f in frames] + [{"text": mai_asr.EOS}]
+
+            async def receive(self):
+                return self.events.pop(0)
+        browser = Browser()
+        guard = stream_limits.StreamGuard(browser, auth.User("alice", "", False, []), None, None)
+        bridge = mai_asr.MaiBridge(guard, "en", TranscriptDisplay("en", ""), None)
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+        bridge.send = send
+        with patch("stream_limits.MAX_STREAM_HOURS", 3200 / stream_limits.BYTES_PER_HOUR):
+            with self.assertRaises(stream_limits.StreamStopped) as stopped:
+                asyncio.run(bridge.browser_to_mai())
+        self.assertEqual(stopped.exception.code, 4413)
+        appended = b"".join(base64.b64decode(m["audio"]) for m in sent if m["type"] == "input_audio_buffer.append")
+        self.assertEqual(appended, frames[0])
+        self.assertTrue(browser.sent[-1]["msg"].startswith("已達單場上限"))
 
 
 class ReviewTestCase(AccountTestCase):
@@ -2141,6 +2306,40 @@ class SignInTests(AccountTestCase):
             return await asyncio.gather(*(attempt() for _ in range(20)))
         self.assertEqual(sum(asyncio.run(burst())), 5)
 
+    # stream-limits: failed sign-ins from one address
+    def from_address(self, address, username, password):
+        return TestClient(app, client=(address, 50000)).post("/api/login", json={"username": username, "password": password})
+
+    def test_one_address_example(self):
+        rows = [(29, None, False), (30, None, True), (30, 6 * 60, False)]   # failures, age of the oldest, blocked (spec example)
+        for failures, oldest_age, blocked in rows:
+            with self.subTest(failures=failures, oldest_age=oldest_age):
+                auth.ip_failures.clear()
+                now = 10_000.0
+                for i in range(failures):
+                    auth.record_ip_failure("10.0.0.9", now - (oldest_age if i == 0 and oldest_age else 1))
+                self.assertIs(auth.ip_blocked("10.0.0.9", now), blocked)
+        auth.ip_failures.clear()
+
+    def test_guessing_many_usernames_from_one_address(self):
+        self.addCleanup(auth.ip_failures.clear)
+        with patch("auth.LOGIN_IP_MAX_FAILURES", 3):
+            for name in ("u1", "u2", "u3"):
+                self.assertEqual(self.from_address("10.0.0.7", name, "x").status_code, 401)
+            binds = self.ldap.binds
+            response = self.from_address("10.0.0.7", "alice", "pw-alice")
+            self.assertEqual((response.status_code, response.json()["detail"]), (429, "嘗試次數過多，請稍後再試"))
+            self.assertEqual(self.ldap.binds, binds)                                       # LDAP not contacted
+            self.assertEqual(self.from_address("10.0.0.8", "alice", "pw-alice").status_code, 200)   # another address
+            auth.ip_failures.clear()
+            self.assertEqual(self.from_address("10.0.0.7", "u1", "x").status_code, 401)
+            self.assertEqual(self.from_address("10.0.0.7", "alice", "pw-alice").status_code, 200)
+            self.assertEqual(len(auth.ip_failures["10.0.0.7"]), 1)                         # success does not clear it
+            self.ldap.unreachable = True
+            for _ in range(3):
+                self.assertEqual(self.from_address("10.0.0.6", "alice", "pw-alice").status_code, 503)
+            self.assertNotIn("10.0.0.6", auth.ip_failures)                                  # LDAP down does not count
+
     def test_starttls_runs_before_every_bind(self):
         with patch("auth.LDAP_TLS", "starttls"):
             self.assertEqual(self.login("alice", "pw-alice").status_code, 200)
@@ -2675,6 +2874,16 @@ class QaAskTests(QaTestCase):
         result = self.ask("報價", '{"answer": "報價維持八五折 [2][9]。", "notFound": false}')
         self.assertEqual((result["answer"], [s["n"] for s in result["sources"]]), ("報價維持八五折 [2]。", [2]))
         self.assertTrue(self.ask("報價", '{"answer": "報價維持八五折。", "notFound": false}')["notFound"])
+        for reply, answer in [  # qa-cited-sentences: every sentence must carry a citation
+            ("報價維持八五折 [2]。下週三回覆對方。", "報價維持八五折 [2]。"),
+            ("結論如下：\n- 八五折 [2]\n- 下週三回覆", "- 八五折 [2]"),
+            ("報價維持八五折。[2]", "報價維持八五折。[2]"),
+            ("客戶說：「先壓八五折。」[2]下週回覆。", "客戶說：「先壓八五折。」[2]"),   # end mark inside the quote
+            ("- 八五折 [2]\n- 下週回覆\n- 先寄報價 [2]", "- 八五折 [2]\n- 先寄報價 [2]"),   # no blank line left behind
+        ]:
+            with self.subTest(reply=reply):
+                result = self.ask("報價", json.dumps({"answer": reply, "notFound": False}, ensure_ascii=False))
+                self.assertEqual((result["answer"], [s["n"] for s in result["sources"]]), (answer, [2]))
         self.assertTrue(self.ask("報價", '{"notFound": true}')["notFound"])
         self.assertIsNone(self.ask("報價", "不是 JSON 也沒有出處")["answer"])
         calls = len(self.calls)
@@ -3149,6 +3358,30 @@ class MinutesMailTests(ReviewTestCase):
         self.assertEqual(self.settings(self.signed_in("admin"), auto=True).status_code, 200)
         self.assertEqual(self.query("SELECT mail_auto FROM teams"), [(True,)])
 
+    # mail-settings-audit: who changed where the minutes go
+    def last_change(self):
+        return self.alice.get(f"/api/meetings/{self.meeting}/minutes").json()["mail"]["lastChange"]
+
+    def test_what_is_recorded(self):
+        self.assertIsNone(self.last_change())
+        # alice, a member: members -> team rd@corp.example
+        self.assertEqual(self.settings(target="team", address="rd@corp.example").status_code, 200)
+        change = self.last_change()
+        self.assertEqual((change["by"], change["member"], change["target"], change["address"], change["auto"]),
+                         ("王愛麗", True, "team", "rd@corp.example", False))
+        self.assertEqual(self.query("SELECT target_before, address_before, auto_before FROM team_mail_changes ORDER BY id LIMIT 1"),
+                         [("members", "", False)])
+        # the same settings again: nothing recorded, the previous line is kept
+        self.settings(target="team", address="rd@corp.example")
+        self.assertEqual(self.query("SELECT count(*) FROM team_mail_changes"), [(1,)])
+        self.assertEqual(self.last_change(), change)
+        # admin, not a member: -> team someone@outside.example, auto on
+        self.assertEqual(self.settings(self.signed_in("admin"), target="team", address="someone@outside.example", auto=True).status_code, 200)
+        change = self.last_change()
+        self.assertEqual((change["by"], change["member"], change["address"], change["auto"]), ("管理員", False, "someone@outside.example", True))
+        self.assertEqual(self.query("SELECT target_before, address_before, auto_before, target_after FROM team_mail_changes ORDER BY id DESC LIMIT 1"),
+                         [("team", "rd@corp.example", False, "team")])
+
     def test_team_target_without_an_address(self):
         for address in ("", "rd@corp"):
             response = self.settings(target="team", address=address)
@@ -3425,7 +3658,7 @@ class ActionReminderTests(ReviewTestCase):
         self.item("未確認", date(2026, 11, 8), state="proposed")
         self.item("決議不是待辦", date(2026, 11, 8), kind="decision")
         result = self.run_on(self.TODAY)
-        self.assertEqual(result, {"owners": 1, "items": 4, "failed": 0})
+        self.assertEqual(result, {"owners": 1, "items": 4, "failed": 0, "pending": 0})
         self.assertEqual(len(self.sent), 1)
         text = self.text(self.sent[0])
         for content in ("報價單 A", "報價單 B", "今天的", "逾期的"):
@@ -3440,7 +3673,7 @@ class ActionReminderTests(ReviewTestCase):
         self.item("逾期的", date(2026, 11, 8))
         self.item("快到期", date(2026, 11, 12))
         self.run_on(self.TODAY)
-        self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 0})
+        self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 0, "pending": 0})
         self.assertEqual(self.sent, [])
 
     def test_overdue_every_day_due_soon_only_once(self):
@@ -3465,10 +3698,121 @@ class ActionReminderTests(ReviewTestCase):
     def test_a_failed_send_is_retried(self):
         self.item("逾期的", date(2026, 11, 8))
         self.refuse = mailer.smtplib.SMTPServerDisconnected("gone")
-        self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 1})
+        self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 1, "pending": 0})
         self.assertEqual(self.query("SELECT count(*) FROM reminder_log"), [(0,)])
         self.refuse = None
-        self.assertEqual(self.run_on(self.TODAY), {"owners": 1, "items": 1, "failed": 0})
+        self.assertEqual(self.run_on(self.TODAY), {"owners": 1, "items": 1, "failed": 0, "pending": 0})
+
+    # reminder-outbox: a claim left by a killed run
+    def killed_run_claims(self, item_id, due, minutes_ago):
+        """What a run killed after claiming, before sending, leaves behind."""
+        item = {"id": item_id, "owner": "bob", "due_date": due}
+
+        async def leave():
+            async with db.connect() as conn:
+                self.assertEqual(await reminders.claim(conn, item, *reminders.reminder_kind(due, self.TODAY)), "claimed")
+        asyncio.run(leave())
+        run_sql("UPDATE reminder_log SET claimed_at = now() - %s * interval '1 minute'", (minutes_ago,))
+
+    def test_claims_seen_by_a_later_run(self):
+        due = date(2026, 11, 8)
+        rows = [  # minutes since the claim, already sent -> what the later run does (spec example)
+            (5, False, {"owners": 0, "items": 0, "failed": 0, "pending": 1}),
+            (35, False, {"owners": 1, "items": 1, "failed": 0, "pending": 0}),
+            (35, True, {"owners": 0, "items": 0, "failed": 0, "pending": 0}),
+        ]
+        for minutes_ago, sent, expected in rows:
+            with self.subTest(minutes_ago=minutes_ago, sent=sent):
+                run_sql("DELETE FROM reminder_log")
+                run_sql("DELETE FROM minute_items")
+                item = self.item("逾期的", due)
+                self.killed_run_claims(item, due, minutes_ago)
+                if sent:
+                    run_sql("UPDATE reminder_log SET sent_at = claimed_at")
+                self.assertEqual(self.run_on(self.TODAY), expected)
+                self.assertEqual(len(self.sent), expected["owners"])
+                self.assertEqual(self.query("SELECT count(*) FROM reminder_log WHERE sent_at IS NOT NULL"),
+                                 [(1 if expected["owners"] or sent else 0,)])
+
+    def test_a_killed_run_is_recovered_by_the_retry(self):
+        due = date(2026, 11, 12)   # due soon: keyed by the due date, so a lost claim would never be sent
+        item = self.item("快到期", due)
+        self.killed_run_claims(item, due, 0)
+        self.assertEqual(self.run_on(self.TODAY)["pending"], 1)
+        run_sql("UPDATE reminder_log SET claimed_at = claimed_at - interval '30 minutes'")   # the 30-minute retry
+        self.assertEqual(self.run_on(self.TODAY)["items"], 1)
+        self.assertIn("快到期", self.text(self.sent[0]))
+
+    def test_a_sent_reminder_records_when(self):
+        self.item("逾期的", date(2026, 11, 8))
+        self.run_on(self.TODAY)
+        self.assertEqual(self.query("SELECT count(*) FROM reminder_log WHERE sent_at IS NOT NULL"), [(1,)])
+
+    def stale(self, today):
+        async def check():
+            async with db.connect() as conn:
+                return await reminders.stale_claims(conn, today)
+        return asyncio.run(check())
+
+    def test_a_killed_manual_run_is_noticed_by_the_schedule(self):
+        due = date(2026, 11, 12)
+        item = self.item("快到期", due)
+        self.killed_run_claims(item, due, 0)
+        self.assertFalse(self.stale(self.TODAY))                 # still being sent, as far as anyone knows
+        run_sql("UPDATE reminder_log SET claimed_at = claimed_at - interval '11 minutes'")
+        self.assertTrue(self.stale(self.TODAY))                  # the worker runs again because of it
+        self.assertEqual(self.run_on(self.TODAY)["items"], 1)
+        self.assertFalse(self.stale(self.TODAY))
+
+    def test_a_left_claim_nobody_takes_over_is_cleared(self):
+        due = date(2026, 11, 12)
+        item = self.item("快到期", due)
+        self.killed_run_claims(item, due, 11)
+        run_sql("UPDATE minute_items SET status = 'done' WHERE id = %s", (item,))   # finished meanwhile: no reminder
+        self.assertEqual(self.run_on(self.TODAY)["items"], 0)
+        self.assertEqual(self.query("SELECT count(*) FROM reminder_log"), [(0,)])   # so the schedule stops seeing it
+        self.assertFalse(self.stale(self.TODAY))
+
+    def test_a_claim_given_back_meanwhile_counts_as_pending(self):
+        due = date(2026, 11, 8)
+        item = {"id": self.item("逾期的", due), "owner": "bob", "due_date": due}
+
+        class Gone:   # the other run gave its claim back between our two queries: the follow-up finds no row
+            async def fetchone(self):
+                return None
+
+        async def race():
+            async with db.connect() as conn:
+                original = conn.execute
+
+                async def execute(sql, params=()):
+                    if sql.startswith("SELECT sent_at FROM reminder_log"):
+                        return Gone()
+                    return await original(sql, params)
+                conn.execute = execute
+                return await reminders.claim(conn, item, "overdue", self.TODAY)
+        self.killed_run_claims(item["id"], due, 0)
+        self.assertEqual(asyncio.run(race()), "pending")
+
+    def test_left_claims_wait_for_the_reminder_time(self):
+        zone = timezone(timedelta(hours=8))
+        rows = [  # now, last run, left claim -> runs
+            (datetime(2026, 11, 10, 8, 30, tzinfo=zone), date(2026, 11, 9), True, False),   # before 09:00: waits
+            (datetime(2026, 11, 10, 9, 0, tzinfo=zone), date(2026, 11, 9), False, True),    # the daily run
+            (datetime(2026, 11, 10, 11, 0, tzinfo=zone), date(2026, 11, 10), True, True),   # after a killed manual run
+            (datetime(2026, 11, 10, 11, 0, tzinfo=zone), date(2026, 11, 10), False, False),
+        ]
+        with patch("reminders.REMIND_AT", reminders.time(9, 0)):
+            for now, ran_on, leftover, runs in rows:
+                with self.subTest(now=now, leftover=leftover):
+                    self.assertIs(reminders.should_run(now, ran_on, None, leftover), runs)
+
+    def test_the_worker_retries_when_reminders_are_pending_or_failed(self):
+        now = datetime(2026, 11, 10, 9, 0)
+        base = {"owners": 0, "items": 0, "failed": 0, "pending": 0}
+        self.assertIsNone(reminders.retry_time(base, now))
+        self.assertEqual(reminders.retry_time(base | {"pending": 2}, now), now + timedelta(minutes=30))
+        self.assertEqual(reminders.retry_time(base | {"failed": 1}, now), now + timedelta(minutes=30))
 
     def test_owners_who_cannot_be_reached(self):
         self.item("沒信箱", date(2026, 11, 8), owner="carol")
@@ -3480,7 +3824,7 @@ class ActionReminderTests(ReviewTestCase):
     def test_without_a_mail_server_nothing_is_sent(self):
         self.item("逾期的", date(2026, 11, 8))
         with patch("mailer.SMTP_HOST", ""):
-            self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 0})
+            self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 0, "pending": 0})
         self.assertEqual(self.query("SELECT count(*) FROM reminder_log"), [(0,)])
 
     def test_one_mail_per_owner(self):
@@ -3559,12 +3903,12 @@ class ActionReminderTests(ReviewTestCase):
         with patch("mailer.deliver", interrupted), self.assertRaises(asyncio.CancelledError):
             asyncio.run(reminders.run(self.TODAY))
         self.assertEqual(self.query("SELECT count(*) FROM reminder_log"), [(0,)])
-        self.assertEqual(self.run_on(self.TODAY), {"owners": 2, "items": 2, "failed": 0})
+        self.assertEqual(self.run_on(self.TODAY), {"owners": 2, "items": 2, "failed": 0, "pending": 0})
 
     def test_a_stored_address_that_no_longer_passes_gets_no_reminder(self):
         self.item("逾期的", date(2026, 11, 8))
         run_sql("UPDATE users SET email = 'bob@corp.example,root' WHERE username = 'bob'")
-        self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 0})
+        self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 0, "pending": 0})
         self.assertEqual(self.sent, [])
 
 
