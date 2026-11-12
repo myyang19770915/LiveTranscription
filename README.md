@@ -452,6 +452,8 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `ASR_MODEL_PATH` | `netease-youdao/Confucius4-R2T2` | ASR Hugging Face repo 或相容模型路徑 |
 | `ASR_HEALTH_URL` | 由 `ASR_WS_URL` 推得（`http://asr:8272/health`） | 服務狀態檢查本機語音辨識用的網址；ASR 健康端點不在預設位置時才需要設定 |
 | `ASR_SECRET_KEY` | 請自行設定 | ASR 容器間的服務密鑰；不要把預設值用於共享或公開服務 |
+| `ASR_LOG_TEXT` | `0` | ASR 每次串流的 log（`logs/requests/`）預設只記字數、耗時與狀態，**不記辨識文字**；除錯時設 `1` 暫時記錄每段新增文字。即時翻譯的串流不論設定都不記文字 |
+| `ASR_LOG_RETENTION_DAYS` | `14` | `logs/requests/` 的 log 保留天數；ASR 啟動時與之後每 24 小時刪除過期檔案，`0` 表示不刪除 |
 | `GPU_MEMORY_UTILIZATION` | `0.40` | ASR vLLM 可配置 GPU 記憶體的比例；Gemma 另外使用 GPU |
 | `ASR_MAX_MODEL_LEN` | `16384` | ASR vLLM 模型最大長度設定 |
 | `CUDA_VISIBLE_DEVICES` | `0` | 容器可見的 GPU device index |

@@ -12,6 +12,9 @@ services:
       CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
       GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-0.88}
       ASR_MAX_MODEL_LEN: ${ASR_MAX_MODEL_LEN:-16384}
+      # Request logs (logs/requests/) never hold recognized text unless ASR_LOG_TEXT=1 (debugging; never for 即時翻譯)
+      ASR_LOG_TEXT: ${ASR_LOG_TEXT:-0}
+      ASR_LOG_RETENTION_DAYS: ${ASR_LOG_RETENTION_DAYS:-14}
     volumes:
       - ./:/workspace
       - model-cache:/models

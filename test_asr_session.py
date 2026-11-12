@@ -42,6 +42,84 @@ class RequestIdTests(unittest.TestCase):
                     asr_session.request_path(base, value, ".log")
 
 
+class LogTextTests(unittest.TestCase):
+    """Request logs without transcript text."""
+
+    def keep_text(self, log_text, header):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"ASR_LOG_TEXT": log_text}):
+            return asr_session.keep_request_text(header)
+
+    def test_what_a_result_line_records(self):
+        rows = [  # the "what a result line records" example of the asr-stream spec
+            ("", {}, "chars=4"),
+            ("1", {}, "chars=4 text='你好世界'"),
+            ("1", {"retain": False}, "chars=4"),
+            ("", {"retain": False}, "chars=4"),
+        ]
+        for log_text, header, expected in rows:
+            with self.subTest(log_text=log_text, header=header):
+                self.assertEqual(asr_session.text_note("你好世界", self.keep_text(log_text, header)), expected)
+        self.assertFalse(self.keep_text("true", {}))  # only "1" turns it on
+        self.assertEqual(asr_session.text_note(None, False), "chars=0")
+
+    def test_reset_logs_only_what_it_adds(self):
+        self.assertEqual(asr_session.new_part("今天天氣很好", "今天天氣"), "很好")  # v0 resends the accumulated text
+        self.assertEqual(asr_session.new_part("很好", "今天天氣"), "很好")          # v1 sends the new part only
+        self.assertEqual(asr_session.new_part("今天", ""), "今天")
+        self.assertEqual(asr_session.new_part(None, "x"), "")
+
+    def test_reason_kind_drops_the_quoted_text(self):
+        self.assertEqual(asr_session.reason_kind("tail_pattern:'嗯'x5+"), "tail_pattern")
+        self.assertEqual(asr_session.reason_kind("tail_pattern_norm:'ab'x5+"), "tail_pattern_norm")
+        self.assertEqual(asr_session.reason_kind(""), "")
+
+
+class RetentionTests(unittest.TestCase):
+    """Request log retention."""
+
+    NOW = 1_800_000_000.0
+
+    def make(self, directory, name, age_days):
+        path = os.path.join(directory, name)
+        with open(path, "w") as handle:
+            handle.write("x")
+        stamp = self.NOW - age_days * 86400
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def test_retention_decisions(self):
+        rows = [  # the "retention decisions" example of the asr-stream spec
+            (None, "a.log", 15, False),
+            (None, "b.log", 13, True),
+            (None, "notes.txt", 30, True),
+            ("0", "a.log", 400, True),
+            ("30", "a.log", 15, True),
+            ("abc", "a.log", 15, False),
+        ]
+        for setting, name, age, kept in rows:
+            with self.subTest(setting=setting, name=name, age=age), tempfile.TemporaryDirectory() as directory:
+                path = self.make(directory, name, age)
+                if setting == "abc":
+                    with self.assertLogs("asr_session", "ERROR"):
+                        days = asr_session.retention_days(setting)
+                else:
+                    days = asr_session.retention_days(setting)
+                asr_session.prune_request_logs(directory, days, now=self.NOW)
+                self.assertEqual(os.path.exists(path), kept)
+
+    def test_subdirectories_are_left_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            os.mkdir(os.path.join(directory, "old.log"))
+            nested = os.path.join(directory, "nested")
+            os.mkdir(nested)
+            inner = self.make(nested, "a.log", 100)
+            removed = asr_session.prune_request_logs(directory, 14, now=self.NOW)
+            self.assertEqual(removed, 0)
+            self.assertTrue(os.path.isdir(os.path.join(directory, "old.log")))
+            self.assertTrue(os.path.exists(inner))
+
+
 def speech_or_synthetic(name, seconds, seed):
     """int16 16 kHz mono: a bench clip when present (bench/data is not in git), otherwise noise bursts and silence."""
     clip = Path(__file__).resolve().parent / "bench" / "data" / name / "clip.wav"
@@ -163,6 +241,53 @@ class StreamHeaderTests(unittest.TestCase):
                 self.assertEqual((code, first), (1008, {"status": "error", "msg": "invalid requestId"}))
                 self.assertEqual(self.files(), before)
                 self.assertFalse((self.ROOT / "outside.log").exists())
+
+    def stream_clip(self, request_id, retain):
+        """Stream 15 s of a bench recording; returns every text the service sent back."""
+        import asyncio
+        import json
+        import websockets
+        audio = speech_or_synthetic("en_sinek", 15, 1)
+        header = {"requestId": request_id, "secret_key": os.environ["ASR_SECRET_KEY"], "language": "zhen", "mode": "slow",
+                  "channels": 1, "sample_rate": 16000, "use_vad": False, "system_prompt": ""}
+        if retain is not None:
+            header["retain"] = retain
+
+        async def run():
+            texts = []
+            async with websockets.connect(f"{ASR_URL}/asr_stream_api_v1", ping_interval=None, max_size=None) as ws:
+                await ws.send(json.dumps(header))
+                pcm = audio.tobytes()
+                for i in range(0, len(pcm), 5120):  # 0.16 s, like the browser, sent as fast as the service takes it
+                    await ws.send(pcm[i:i + 5120])
+                await ws.send("YOUDAO_ONETIME_ASR_STREAM_EOS")
+                try:
+                    while True:
+                        msg = json.loads(await asyncio.wait_for(ws.recv(), 30)).get("msg")
+                        if isinstance(msg, dict) and msg.get("text"):
+                            texts.append(msg["text"])
+                except (websockets.ConnectionClosed, asyncio.TimeoutError):
+                    pass
+            return texts
+        return asyncio.run(run())
+
+    @unittest.skipUnless((Path(__file__).resolve().parent / "bench" / "data" / "en_sinek" / "clip.wav").exists(),
+                         "bench/data/en_sinek/clip.wav is not here (bench/data is not in git)")
+    def test_request_logs_hold_no_recognized_text(self):
+        import uuid
+        for retain in (False, None):  # 即時翻譯, then a meeting
+            with self.subTest(retain=retain):
+                request_id = f"log-text-test-{uuid.uuid4().hex[:8]}"
+                texts = self.stream_clip(request_id, retain)
+                self.assertTrue(texts, "the recording should be recognized")
+                log = (self.ROOT / "logs" / "requests" / f"{request_id}.log").read_text(encoding="utf-8")
+                self.assertIn("chars=", log)
+                self.assertNotIn("text=", log)
+                # Short pieces ("for") also occur in the fixed log wording ("for next"); 8+ characters cannot.
+                long_texts = [text.strip() for text in texts if len(text.strip()) >= 8]
+                self.assertTrue(long_texts)
+                for text in long_texts:
+                    self.assertNotIn(text, log)
 
     def test_wrong_secret_creates_no_log_file(self):
         for endpoint in ("asr_stream_api_v0", "asr_stream_api_v1"):

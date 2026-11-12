@@ -24,7 +24,8 @@ import os,string
 import time
 from r2t2 import R2T2ASRModel
 from fireredvad import FireRedStreamVad, FireRedStreamVadConfig
-from asr_session import is_valid_request_id, new_stream_vad, request_path
+from asr_session import (is_valid_request_id, keep_request_text, new_part, new_stream_vad, prune_request_logs,
+                         reason_kind, request_path, retention_days, text_note)
 import asyncio
 
 import logging
@@ -400,6 +401,26 @@ secret_key_list=[
     if key.strip()
 ] # Configure with ASR_SECRET_KEY; the legacy value is retained for direct use.
 
+REQUEST_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "requests")
+
+
+@app.listener('after_server_start')
+async def start_request_log_pruning(app):
+    """Delete request logs older than ASR_LOG_RETENTION_DAYS (default 14) now and every 24 hours; 0 keeps them."""
+    days = retention_days(os.environ.get("ASR_LOG_RETENTION_DAYS"))
+
+    async def prune_forever():
+        while True:
+            try:
+                removed = await asyncio.to_thread(prune_request_logs, REQUEST_LOG_DIR, days)
+                logger.info(f"request log retention: {days} days, removed {removed} file(s)")
+            except Exception as e:
+                logger.exception(f"request log retention failed: {e}")
+            await asyncio.sleep(24 * 3600)
+
+    app.add_task(prune_forever())
+
+
 @app.get("/health")
 async def health(_request):
     """Only becomes reachable after before_server_start finishes loading the models."""
@@ -548,6 +569,8 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
             # This connection's own VAD state; only the model weights are shared with other connections.
             conn_vad = new_stream_vad(stream_vad)
             _logger.info(f"requestId={requestId}: own VAD state created")
+            # Request logs carry lengths and timings; text only with ASR_LOG_TEXT=1, and never for "retain": false.
+            keep_text = keep_request_text(header)
 
             max_new_tokens = max(1, int((step + lookahead) / 1280))
             max_new_tokens_floor = min(32, max(4,2 * int(step / 1280)))
@@ -589,11 +612,11 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
                             out_msg = {"text": "", "reset": True}
                         out_str = {"status": "success", "requestId": f"{requestId}", "msg": out_msg}
                         await ws.send(json.dumps(out_str, ensure_ascii=False))
-                        _logger.info(f"requestId={requestId}:finish! out_str={out_str}")
+                        _logger.info(f"requestId={requestId}:finish! {text_note(out_msg.get('text', ''), keep_text)}")
                         await ws.close()
                         break
                     else:
-                        _logger.info(f"requestId={requestId}:Received message: {data}")
+                        _logger.info(f"requestId={requestId}: received text message, chars={len(data)}")
                         continue
 
                 if is_first_seg:
@@ -730,7 +753,7 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
                         _logger.warning(f"requestId={requestId}: ws.send failed (connection closed?): {e}")
                         ws_closed = True
                         break
-                    _logger.info(f"requestId={requestId}:out_str={out_str},total_secs={total_secs},lag_ms={lag_ms},avg_cost_ms={avg_cost_ms},infer_mode={infer_mode},max_new_tokens={max_new_tokens} for next,total_text={total_text}")
+                    _logger.info(f"requestId={requestId}:result {text_note(out_msg.get('text', ''), keep_text)},total_chars={len(total_text)},total_secs={total_secs},lag_ms={lag_ms},avg_cost_ms={avg_cost_ms},infer_mode={infer_mode},max_new_tokens={max_new_tokens} for next")
 
                 #-------- End iterating over audio_buf -------#
                 if ws_closed:
@@ -747,7 +770,7 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
                 did_reset = False
                 if is_halluc:
                     _logger.info(
-                        f"requestId={requestId}: hallucination reset, reason={halluc_reason}, "
+                        f"requestId={requestId}: hallucination reset, reason={reason_kind(halluc_reason)}, "
                         f"total_secs={total_secs:.1f}s, discard current state"
                     )                    
                     text = asr_model.finish_streaming_transcribe(
@@ -818,6 +841,8 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
                             did_reset = True
 
                 if did_reset:
+                    # Logged below: what this reset adds, never the accumulated text v0 sends back after a hallucination.
+                    reset_new_text = new_part(out_msg.get('text', ''), last_fixed_asr_text)
                     total_secs = 0.0
                     is_halluc = False
                     halluc_reason = ""
@@ -827,7 +852,7 @@ async def asr_stream_api_v0(request: Request, ws: Websocket):
                     no_new_text_chunks = 0
                     try:
                         await ws.send(json.dumps(out_str, ensure_ascii=False))
-                        _logger.info(f"requestId={requestId}:out_str={out_str},did_reset={did_reset}")
+                        _logger.info(f"requestId={requestId}:reset {text_note(reset_new_text, keep_text)},did_reset={did_reset}")
                     except Exception as e:
                         _logger.info(f"requestId={requestId}: ws.send(reset) failed: {e}")
                         break
@@ -1008,6 +1033,8 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
             # This connection's own VAD state; only the model weights are shared with other connections.
             conn_vad = new_stream_vad(stream_vad)
             _logger.info(f"requestId={requestId}: own VAD state created")
+            # Request logs carry lengths and timings; text only with ASR_LOG_TEXT=1, and never for "retain": false.
+            keep_text = keep_request_text(header)
 
             max_new_tokens = max(1, int((step + lookahead) / 1280))
             max_new_tokens_floor = min(32, max(4,2 * int(step / 1280)))
@@ -1051,11 +1078,11 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                         out_msg["language"] = asr_state.language
                         out_str = {"status": "success", "requestId": f"{requestId}", "msg": out_msg}
                         await ws.send(json.dumps(out_str, ensure_ascii=False))
-                        _logger.info(f"requestId={requestId}:finish! out_str={out_str},total_text={total_text}")
+                        _logger.info(f"requestId={requestId}:finish! {text_note(out_msg.get('text', ''), keep_text)},total_chars={len(total_text)}")
                         await ws.close()
                         break
                     else:
-                        _logger.info(f"requestId={requestId}:Received message: {data}")
+                        _logger.info(f"requestId={requestId}: received text message, chars={len(data)}")
                         continue
 
                 if is_first_seg:
@@ -1205,7 +1232,7 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                         _logger.warning(f"requestId={requestId}: ws.send failed (connection closed?): {e}")
                         ws_closed = True
                         break
-                    _logger.info(f"requestId={requestId}:out_str={out_str},total_secs={total_secs},lag_ms={lag_ms},avg_cost_ms={avg_cost_ms},infer_mode={infer_mode},max_new_tokens={max_new_tokens} for next,total_text={total_text}")
+                    _logger.info(f"requestId={requestId}:result {text_note(out_msg.get('text', ''), keep_text)},total_chars={len(total_text)},total_secs={total_secs},lag_ms={lag_ms},avg_cost_ms={avg_cost_ms},infer_mode={infer_mode},max_new_tokens={max_new_tokens} for next")
 
                 #-------- End iterating over audio_buf -------#
                 if ws_closed:
@@ -1220,7 +1247,7 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                 did_reset = False
                 if is_halluc:
                     _logger.info(
-                        f"requestId={requestId}: hallucination reset, reason={halluc_reason}, "
+                        f"requestId={requestId}: hallucination reset, reason={reason_kind(halluc_reason)}, "
                         f"total_secs={total_secs:.1f}s, discard current state"
                     )                    
                     text = asr_model.finish_streaming_transcribe_no_reset(
@@ -1243,6 +1270,8 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                     did_reset = True
 
                 if did_reset:
+                    # Logged below: what this reset adds, never the accumulated text v0 sends back after a hallucination.
+                    reset_new_text = new_part(out_msg.get('text', ''), last_fixed_asr_text)
                     total_secs = 0.0
                     is_halluc = False
                     halluc_reason = ""
@@ -1252,7 +1281,7 @@ async def asr_stream_api_v1(request: Request, ws: Websocket):
                     no_new_text_chunks = 0
                     try:
                         await ws.send(json.dumps(out_str, ensure_ascii=False))
-                        _logger.info(f"requestId={requestId}:out_str={out_str},did_reset={did_reset}")
+                        _logger.info(f"requestId={requestId}:reset {text_note(reset_new_text, keep_text)},did_reset={did_reset}")
                     except Exception as e:
                         _logger.info(f"requestId={requestId}: ws.send(reset) failed: {e}")
                         break

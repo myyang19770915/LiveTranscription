@@ -605,6 +605,8 @@ async def transcribe(browser: WebSocket):
             "mode": "slow",
             "system_prompt": asr_context(glossary),
         }
+        if translate_only:
+            safe_header["retain"] = False  # 即時翻譯 keeps nothing: the ASR request log never gets its text
         async with websockets.connect(ASR_WS_URL, ping_interval=None, max_size=None) as upstream:
             await upstream.send(json.dumps(safe_header, ensure_ascii=False))
 

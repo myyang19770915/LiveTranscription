@@ -323,6 +323,7 @@ class WebAppTests(AccountTestCase):
             with self.signed_in("alice").websocket_connect("/ws/transcribe") as socket:
                 socket.send_json({"requestId": "../../outside", "meeting_id": self.meeting_id(), "language": "zh"})
                 socket.receive_json()  # the header has reached the ASR side by now
+        self.assertNotIn("retain", json.loads(upstream.sent[0]))   # meetings are kept; only 即時翻譯 says retain: false
         request_id = json.loads(upstream.sent[0])["requestId"]
         self.assertRegex(request_id, r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
         self.assertNotIn("outside", request_id)
@@ -2449,6 +2450,7 @@ class MeetingOwnershipTests(AccountTestCase):
         self.assertNotIn("audioMs", event)
         self.assertEqual(self.query("SELECT count(*) FROM meetings"), [(0,)])
         self.assertEqual(list(self.output.rglob("*")), [])   # no audio.wav, no meeting folder
+        self.assertIs(json.loads(upstream.sent[0])["retain"], False)   # the ASR request log keeps no text either
 
     def test_meeting_list_shows_only_the_users_teams(self):
         mine, theirs = self.team("研發", "alice"), self.team("業務", "bob")
