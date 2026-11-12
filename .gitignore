@@ -55,3 +55,6 @@ output/
 
 # Spectra app data
 .spectra/
+
+# Backups made by scripts/backup.ps1 (meeting database and recordings)
+backups/

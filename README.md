@@ -76,7 +76,7 @@ Docker image 是「執行環境」，模型權重是服務啟動時載入的「�
 | `diarize` | 本機建置：[`docker/diarize/Dockerfile`](docker/diarize/Dockerfile) 以固定版本編譯 [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp)（只複製靜態連結的 `transcribe-cli`），加上 Python 標準函式庫寫的小型 HTTP 服務 | 首次啟動從 Hugging Face 下載 `handy-computer/MOSS-Transcribe-Diarize-gguf` 的 Q8_0（約 1 GB，Apache-2.0）到 `diarize-model-cache` | [`compose.yaml`](compose.yaml) 的 `diarize` |
 | `app` | 不使用預先發佈的專案 image；Compose 由 `build: ./webapp` 本機建置。[`webapp/Dockerfile`](webapp/Dockerfile) 以 `python:3.12-slim` 為基底，安裝 `webapp/requirements.txt` | 不下載或保存 ASR／翻譯模型；執行 FastAPI 與靜態 Web UI | [`compose.yaml`](compose.yaml) 的 `app.build`、[`webapp/Dockerfile`](webapp/Dockerfile) |
 
-模型快取位置也分開：ASR 與 VAD 共用 `model-cache`，掛載到 ASR 容器的 `/models`，Hugging Face 快取目錄是 `/models/huggingface`；Gemma 權重使用 `translation-model-cache`，掛載至翻譯容器的 `/root/.cache`；embedding 權重使用 `embed-model-cache`。因此一般執行 `docker compose down` 後仍會保留模型；只有 `docker compose down -v` 才會刪除這些 named volumes。
+模型快取位置也分開：ASR 與 VAD 共用 `model-cache`，掛載到 ASR 容器的 `/models`，Hugging Face 快取目錄是 `/models/huggingface`；Gemma 權重使用 `translation-model-cache`，掛載至翻譯容器的 `/root/.cache`；embedding 權重使用 `embed-model-cache`。因此一般執行 `docker compose down` 後仍會保留模型。⚠️ `docker compose down -v` 會刪除**所有** named volumes，包括會議資料庫 `meeting-db`（帳號、團隊、會議、校對、紀要、待辦、成員照片），不要用它來清模型快取；做法見[驗證與日常維護](#驗證與日常維護)。
 
 啟動順序由 Compose 管理：`docker compose up --build -d` 先準備／下載 images，啟動 `asr` 與 `translate`，兩者健康檢查成功後才啟動 `app`。ASR、VAD、Gemma 權重會在各自容器第一次啟動時下載或載入，日後重啟會使用快取。可在 [`compose.yaml`](compose.yaml) 查看 image、GPU、命令、環境變數、volume 與健康檢查的完整設定。
 
@@ -667,7 +667,51 @@ docker compose restart app
 docker compose down
 ```
 
-`docker compose down` 會停止並移除容器，但**保留** ASR 與翻譯模型快取。`docker compose down -v` 會刪除 named volumes 中的模型快取，下一次啟動必須重新下載；只有確定要清掉模型時才使用。
+`docker compose down` 會停止並移除容器，**保留**模型快取與會議資料庫。
+
+⚠️ **不要用 `docker compose down -v` 清模型快取**：`-v` 會刪除這個專案所有 named volumes，**包括會議資料庫 `meeting-db`**，所有帳號、團隊、會議、校對、紀要與待辦都會消失，無法復原。只想清某個模型快取時，先備份（`.\scripts\backup.ps1`，見[備份與還原](#備份與還原)），停止服務後指定 volume 刪除，例如：
+
+```powershell
+docker compose down
+docker volume rm asr_confucius4-r2t2_translation-model-cache   # 只刪翻譯模型快取；下次啟動重新下載
+```
+
+用 `docker volume ls` 查看 volume 名稱；名稱是 `<專案資料夾名稱>_<volume>`，**不要刪除 `…_meeting-db`**。
+
+## 備份與還原
+
+會議資料都在 Compose 的 named volume `meeting-db`（帳號、團隊、會議、段落、校對紀錄、紀要、待辦、成員照片），錄音與純文字逐字稿在 `output/`。兩者要一起備份，還原後才會一致。
+
+**備份**（資料庫不需停機；請在**沒有進行中會議**時執行，資料表筆數才會與 dump 一致）：
+
+```powershell
+.\scripts\backup.ps1                                  # 存到 backups\<時間>\（已在 .gitignore）
+.\scripts\backup.ps1 -Destination D:\yuqiao-backups   # 存到其他磁碟
+```
+
+每份備份是一個資料夾：`yuqiao.dump`（`pg_dump -Fc`，已用 `pg_restore --list` 確認可讀）、`output\`（不含 `output\backups`）、`manifest.json`（各資料表筆數、檔案數、git commit、db 映像）。備份請另外複製到這台機器以外的地方；腳本不會自動刪除舊備份。
+
+**確認備份能還原（演練，不碰正式資料）**：
+
+```powershell
+.\scripts\restore.ps1 -Backup .\backups\20261112-210913 -Drill
+```
+
+啟動一個暫時的同版本 Postgres 容器，把備份還原進去，逐表比對筆數與 `manifest.json`，並檢查 `output` 檔案數，最後移除暫時容器。印出「演練成功」並以 0 結束才代表這份備份可用；有差異時列出哪個資料表不同並以 1 結束。
+
+**正式還原**（會覆蓋目前所有會議資料）：
+
+```powershell
+.\scripts\restore.ps1 -Backup .\backups\20261112-210913 -Force
+```
+
+依序：先把目前狀態備份到 `backups\pre-restore-<時間>\` → 停止 app → 刪除並重建資料庫、以 dump 還原 → 把備份的 `output\` 複製回 `output\`（只覆蓋與新增，不刪除之後新增的檔案）→ 比對筆數 → 啟動 app。中途失敗時會印出 pre-restore 備份的位置與回復指令。不加 `-Force`／`-Drill` 時只說明會做什麼，不做任何改動。還原到比目前程式舊的備份時，app 啟動會自動套用之後新增的 migration，比對可能因此出現差異。
+
+**定期備份**（腳本不會自己排程；用 Windows 工作排程器，例如每天凌晨 2 點）：
+
+```powershell
+schtasks /Create /TN "Yuqiao backup" /SC DAILY /ST 02:00 /TR "powershell -NoProfile -ExecutionPolicy Bypass -File D:\code\ASR_Confucius4-R2T2\scripts\backup.ps1 -Destination D:\yuqiao-backups"
+```
 
 ## 疑難排解
 
