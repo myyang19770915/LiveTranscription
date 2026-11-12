@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import tempfile
 import time
 import wave
@@ -19,7 +20,7 @@ import httpx
 import psycopg
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
-from ldap3 import MOCK_SYNC, OFFLINE_AD_2012_R2, Connection, Server
+from ldap3 import MOCK_SYNC, OFFLINE_AD_2012_R2, Connection, Server, Tls
 from ldap3.core.exceptions import LDAPSocketOpenError
 
 import auth
@@ -140,9 +141,13 @@ class FakeLdap:
     """An ldap3 MOCK_SYNC directory with a service account; counts every bind attempt."""
 
     def __init__(self):
-        self.server = Server("fake", get_info=OFFLINE_AD_2012_R2)
+        # A verifying Tls, like auth.ldap_server() gives: secure_bind refuses StartTLS without one.
+        self.server = Server("fake", get_info=OFFLINE_AD_2012_R2, tls=Tls(validate=ssl.CERT_REQUIRED))
         self.binds = 0
         self.unreachable = False
+        self.starttls_ok = True  # what start_tls() answers when LDAP_TLS is starttls
+        self.starttls_calls = 0
+        self.starttls_error = None  # raised by start_tls() instead of answering, like a failed certificate check
         seed = Connection(self.server, user="cn=svc,dc=corp", password="svcpw", client_strategy=MOCK_SYNC)
         seed.strategy.add_entry("cn=svc,dc=corp", {"userPassword": "svcpw", "sAMAccountName": "svc"})
         self.seed = seed
@@ -164,14 +169,84 @@ class FakeLdap:
             def bind(self, *args, **kwargs):
                 fake.binds += 1
                 return super().bind(*args, **kwargs)
+
+            def start_tls(self, read_server_info=True):
+                fake.starttls_calls += 1
+                if fake.starttls_error is not None:
+                    raise fake.starttls_error
+                return fake.starttls_ok
         return Counted(self.server, user=user, password=password, client_strategy=MOCK_SYNC)
 
     def patches(self):
-        return [patch("auth.ldap_connection", self.connection), patch("auth.LDAP_URL", "ldap://fake"),
+        return [patch("auth.ldap_connection", self.connection), patch("auth.LDAP_URL", "ldap://fake"), patch("auth.LDAP_TLS", "none"),
                 patch("auth.LDAP_BIND_DN", "cn=svc,dc=corp"), patch("auth.LDAP_BIND_PASSWORD", "svcpw"),
                 patch("auth.LDAP_BASE_DN", "dc=corp"), patch("auth.LDAP_USER_DN_TEMPLATE", ""),
                 patch("auth.LDAP_USER_FILTER", "(sAMAccountName={username})"), patch("auth.LDAP_DISPLAY_ATTR", "displayName"), patch("auth.LDAP_MAIL_ATTR", "mail"),
                 patch("auth.ADMIN_USERS", frozenset({"admin"}))]
+
+
+class LdapEncryptionTests(unittest.TestCase):
+    """Encrypted LDAP connection: which encryption each setting gives, and that certificates are always checked."""
+
+    def settings(self, url, tls="", ca=""):
+        stack = [patch("auth.LDAP_URL", url), patch("auth.LDAP_TLS", tls), patch("auth.LDAP_CA_FILE", ca)]
+        for fake in stack:
+            fake.start()
+            self.addCleanup(fake.stop)
+
+    def test_encryption_chosen_from_settings(self):
+        with tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as handle:
+            ca_pem = handle.name  # ldap3 only checks that the CA file exists when the Server is built
+        self.addCleanup(os.remove, ca_pem)
+        rows = [  # LDAP_URL, LDAP_TLS, LDAP_CA_FILE -> encryption, CA file (None: system CAs; "-": no TLS)
+            ("ldaps://h", "", "", "LDAPS", None),
+            ("ldaps://h", "none", ca_pem, "LDAPS", ca_pem),
+            ("ldap://h", "", "", "StartTLS", None),
+            ("ldap://h", "starttls", ca_pem, "StartTLS", ca_pem),
+            ("ldap://h", "none", "", "明文", "-"),
+            ("ldap://h", "yes", "", "StartTLS", None),
+        ]
+        for url, tls, ca, encryption, ca_file in rows:
+            with self.subTest(url=url, tls=tls, ca=ca):
+                with patch("auth.LDAP_URL", url), patch("auth.LDAP_TLS", tls), patch("auth.LDAP_CA_FILE", ca):
+                    self.assertEqual(auth.ldap_encryption(), encryption)
+                    server = auth.ldap_server()
+                    self.assertEqual(server.ssl, encryption == "LDAPS")
+                    if ca_file == "-":
+                        self.assertIsNone(server.tls)
+                    else:
+                        self.assertEqual(server.tls.validate, ssl.CERT_REQUIRED)
+                        self.assertEqual(server.tls.ca_certs_file, ca_file)
+
+    def test_unknown_ldap_tls_value_is_logged_as_an_error(self):
+        for url, used in (("ldap://h", "StartTLS"), ("ldaps://h", "LDAPS")):
+            with self.subTest(url=url):
+                self.settings(url, "yes")
+                with self.assertLogs("uvicorn.error", "ERROR") as logs:
+                    auth.log_ldap_tls_setting()
+                self.assertIn("'yes'", logs.output[0])
+                self.assertIn(f"connecting with {used}", logs.output[0])
+
+    def test_plaintext_is_logged_as_a_warning(self):
+        self.settings("ldap://dev-ldap:389", "none")
+        with self.assertLogs("uvicorn.error", "WARNING") as logs:
+            auth.log_ldap_tls_setting()
+        self.assertIn("unencrypted", logs.output[0])
+
+    def test_encrypted_settings_log_nothing(self):
+        self.settings("ldap://h", "starttls")
+        with self.assertNoLogs("uvicorn.error", "WARNING"):
+            auth.log_ldap_tls_setting()
+
+    def test_check_ldap_reports_the_encryption(self):
+        self.settings("ldap://ldap.corp.example", "")
+        profile = auth.Profile("愛麗", "")
+        with patch("auth.getpass.getpass", return_value="pw"), patch("auth.ldap_authenticate", return_value=profile), \
+                patch("sys.stdout", new_callable=io.StringIO) as out:
+            asyncio.run(auth.check_ldap("alice"))
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines[0], "加密方式：StartTLS")
+        self.assertTrue(lines[1].startswith("登入成功：alice"))
 
 
 class AccountTestCase(DatabaseTestCase):
@@ -2054,6 +2129,40 @@ class SignInTests(AccountTestCase):
         async def burst():
             return await asyncio.gather(*(attempt() for _ in range(20)))
         self.assertEqual(sum(asyncio.run(burst())), 5)
+
+    def test_starttls_runs_before_every_bind(self):
+        with patch("auth.LDAP_TLS", "starttls"):
+            self.assertEqual(self.login("alice", "pw-alice").status_code, 200)
+        self.assertEqual((self.ldap.starttls_calls, self.ldap.binds), (2, 2))  # service account, then alice
+
+    def test_starttls_failure_sends_no_bind_and_does_not_count(self):
+        self.ldap.starttls_ok = False
+        with patch("auth.LDAP_TLS", "starttls"):
+            for _ in range(6):
+                response = self.login("alice", "pw-alice")
+                self.assertEqual((response.status_code, response.json()["detail"]), (503, "無法連線登入伺服器"))
+                self.assertNotIn("set-cookie", response.headers)
+        self.assertEqual(self.ldap.binds, 0)
+        self.assertEqual(self.query("SELECT count FROM login_failures WHERE username = 'alice'"), [(0,)])
+
+    def test_certificate_failure_during_starttls_is_503_and_logged(self):
+        self.ldap.starttls_error = ssl.SSLError("CERTIFICATE_VERIFY_FAILED")
+        with patch("auth.LDAP_TLS", "starttls"), self.assertLogs("uvicorn.error", "WARNING") as logs:
+            response = self.login("alice", "pw-alice")
+        self.assertEqual((response.status_code, response.json()["detail"]), (503, "無法連線登入伺服器"))
+        self.assertNotIn("CERTIFICATE", response.text)  # the reason is for the log only
+        self.assertTrue(any("CERTIFICATE_VERIFY_FAILED" in line for line in logs.output))
+        self.assertEqual(self.ldap.binds, 0)
+
+    def test_starttls_without_a_verifying_tls_is_refused(self):
+        self.ldap.server.tls = None
+        with patch("auth.LDAP_TLS", "starttls"):
+            self.assertEqual(self.login("alice", "pw-alice").status_code, 503)
+        self.assertEqual((self.ldap.starttls_calls, self.ldap.binds), (0, 0))
+
+    def test_plaintext_setting_binds_without_starttls(self):
+        self.assertEqual(self.login("alice", "pw-alice").status_code, 200)  # FakeLdap patches LDAP_TLS=none
+        self.assertEqual(self.ldap.starttls_calls, 0)
 
     def test_unreachable_ldap_does_not_count_as_a_failure(self):
         self.ldap.unreachable = True

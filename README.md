@@ -272,7 +272,7 @@ docker compose logs -f asr translate app
 docker compose --profile dev-ldap up -d dev-ldap
 ```
 
-`.env` 對應設定：`LDAP_URL=ldap://dev-ldap:389`、`LDAP_BASE_DN=ou=people,dc=yuqiao,dc=test`、`LDAP_BIND_DN=cn=admin,dc=yuqiao,dc=test`、`LDAP_BIND_PASSWORD` 與 `DEV_LDAP_ADMIN_PASSWORD` 相同、`LDAP_USER_FILTER=(uid={username})`。改接公司 LDAP 時換掉這幾行並 `docker compose up -d app`，再 `docker compose --profile dev-ldap rm -sfv dev-ldap` 移除測試目錄。正式環境不要啟動這個 profile。
+`.env` 對應設定：`LDAP_URL=ldap://dev-ldap:389`、`LDAP_TLS=none`（測試目錄只在 Compose 內網，以明文連線；app 啟動時會記錄警告）、`LDAP_BASE_DN=ou=people,dc=yuqiao,dc=test`、`LDAP_BIND_DN=cn=admin,dc=yuqiao,dc=test`、`LDAP_BIND_PASSWORD` 與 `DEV_LDAP_ADMIN_PASSWORD` 相同、`LDAP_USER_FILTER=(uid={username})`。改接公司 LDAP 時換掉這幾行並 `docker compose up -d app`，再 `docker compose --profile dev-ldap rm -sfv dev-ldap` 移除測試目錄。正式環境不要啟動這個 profile。
 
 **腳本與 benchmark**：重播、冒煙測試等腳本不放密碼，改用容器內發出的 session：
 
@@ -467,7 +467,8 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `LDAP_USER_FILTER` | `(sAMAccountName={username})` | 找使用者的條件（AD 預設）；OpenLDAP 常用 `(uid={username})` |
 | `LDAP_USER_DN_TEMPLATE` | 空 | 沒有服務帳號時改用直接綁定，例如 `uid={username},ou=people,dc=example,dc=com` |
 | `LDAP_DISPLAY_ATTR` | `displayName` | 頁首顯示的名稱欄位 |
-| `LDAP_CA_FILE` | 空 | ldaps 使用自簽 CA 時，容器內可讀到的 CA 憑證路徑 |
+| `LDAP_TLS` | `starttls` | 只對 `ldap://` 有效：`starttls` 在綁定前先加密並驗證伺服器憑證；`none` 以明文送出密碼，只用於 dev-ldap。`ldaps://` 一律加密並驗證憑證。其他值會記錄錯誤並視為 `starttls` |
+| `LDAP_CA_FILE` | 空（系統 CA） | 伺服器憑證由內部 CA 簽發時，容器內可讀到的 CA 憑證路徑；憑證或主機名稱驗證失敗時登入回應「無法連線登入伺服器」，`python -m auth check-ldap <帳號>` 會顯示加密方式與原因 |
 | `LDAP_MAIL_ATTR` | `mail` | 成員 Email 的 LDAP 屬性；沒有值的成員可自行填寫 |
 | `SMTP_HOST` / `SMTP_PORT` | 空（不寄信）/ `587` | 寄送紀要用的公司 SMTP 伺服器 |
 | `SMTP_USER` / `SMTP_PASSWORD` | 空 | SMTP 登入帳密；`SMTP_USER` 空白則不登入 |

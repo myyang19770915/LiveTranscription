@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import getpass
 import hashlib
+import logging
 import os
 import re
 import secrets
@@ -41,6 +42,8 @@ LDAP_DISPLAY_ATTR = os.getenv("LDAP_DISPLAY_ATTR", "") or "displayName"
 # The member's e-mail address (minutes-mail); an empty attribute leaves the member to enter their own.
 LDAP_MAIL_ATTR = os.getenv("LDAP_MAIL_ATTR", "") or "mail"
 LDAP_CA_FILE = os.getenv("LDAP_CA_FILE", "")
+# ldap:// only: starttls (default) encrypts before any bind; none sends passwords in plaintext (dev-ldap only).
+LDAP_TLS = os.getenv("LDAP_TLS", "")
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "") == "1"
 ADMIN_USERS = frozenset(name.strip().lower() for name in os.getenv("ADMIN_USERS", "").split(",") if name.strip())
 
@@ -55,20 +58,66 @@ TOO_MANY_ATTEMPTS = "嘗試次數過多，請稍後再試"
 LDAP_UNREACHABLE = "無法連線登入伺服器"
 
 router = APIRouter()
+logger = logging.getLogger("uvicorn.error")
 
 
 class LdapUnavailable(Exception):
     """The LDAP server could not be reached or the service account was rejected."""
 
 
+LDAPS = "LDAPS"
+STARTTLS = "StartTLS"
+PLAINTEXT = "明文"
+
+
+def ldap_encryption() -> str:
+    """How binds travel: LDAPS for ldaps:// URLs; for ldap:// StartTLS unless LDAP_TLS=none says plaintext."""
+    if LDAP_URL.lower().startswith("ldaps://"):
+        return LDAPS
+    return PLAINTEXT if LDAP_TLS.strip().lower() == "none" else STARTTLS
+
+
+def log_ldap_tls_setting() -> None:
+    """Said once at start-up: a mistyped LDAP_TLS falls back to StartTLS, and plaintext is never silent."""
+    mode = LDAP_TLS.strip().lower()
+    if mode not in ("", "starttls", "none"):
+        logger.error("LDAP_TLS=%r is not starttls or none; connecting with %s", LDAP_TLS, ldap_encryption())
+    if LDAP_URL and ldap_encryption() == PLAINTEXT:
+        logger.warning("LDAP_TLS=none: LDAP passwords travel unencrypted to %s", LDAP_URL)
+
+
 def ldap_server() -> Server:
-    tls = Tls(ca_certs_file=LDAP_CA_FILE, validate=ssl.CERT_REQUIRED) if LDAP_CA_FILE else None
-    return Server(LDAP_URL, use_ssl=LDAP_URL.lower().startswith("ldaps://"), tls=tls, connect_timeout=5)
+    """Any encrypted connection verifies the server certificate and host name, with LDAP_CA_FILE or the system CAs."""
+    encryption = ldap_encryption()
+    tls = None if encryption == PLAINTEXT else Tls(ca_certs_file=LDAP_CA_FILE or None, validate=ssl.CERT_REQUIRED)
+    return Server(LDAP_URL, use_ssl=encryption == LDAPS, tls=tls, connect_timeout=5)
+
+
+log_ldap_tls_setting()
 
 
 def ldap_connection(user: str, password: str) -> Connection:
     """Tests replace this with an ldap3 MOCK_SYNC connection."""
     return Connection(ldap_server(), user=user, password=password, receive_timeout=10, raise_exceptions=False)
+
+
+def secure_bind(connection: Connection) -> bool:
+    """Bind, after StartTLS when that is the configured encryption; False when LDAP rejects the credentials.
+
+    Raises LdapUnavailable when StartTLS cannot be completed, and then no bind (no password) is sent.
+    """
+    if ldap_encryption() == STARTTLS:
+        tls = connection.server.tls
+        # ldap3's start_tls() would otherwise fill in a Tls() that does not verify the certificate.
+        if tls is None or tls.validate != ssl.CERT_REQUIRED:
+            raise LdapUnavailable("StartTLS without certificate verification refused")
+        try:
+            started = connection.start_tls(read_server_info=False)
+        except (LDAPException, ssl.SSLError, OSError) as exc:
+            raise LdapUnavailable(f"StartTLS failed: {exc}") from exc
+        if not started:
+            raise LdapUnavailable(f"StartTLS failed: {connection.result}")
+    return connection.bind()
 
 
 def first_value(entry_attributes: dict, attribute: str) -> str:
@@ -104,14 +153,14 @@ def ldap_authenticate(username: str, password: str) -> Profile | None:
         if LDAP_USER_DN_TEMPLATE:
             user_dn = LDAP_USER_DN_TEMPLATE.format(username=escape_rdn(username))
             user = ldap_connection(user_dn, password)
-            if not user.bind():
+            if not secure_bind(user):
                 return None
             user.search(user_dn, "(objectClass=*)", search_scope="BASE", attributes=[LDAP_DISPLAY_ATTR, LDAP_MAIL_ATTR])
             profile = profile_of(user.entries[0].entry_attributes_as_dict) if user.entries else Profile("", "")
             user.unbind()
             return profile
         service = ldap_connection(LDAP_BIND_DN, LDAP_BIND_PASSWORD)
-        if not service.bind():
+        if not secure_bind(service):
             raise LdapUnavailable("the LDAP service account was rejected")
         service.search(LDAP_BASE_DN, LDAP_USER_FILTER.format(username=escape_filter_chars(username)), attributes=[LDAP_DISPLAY_ATTR, LDAP_MAIL_ATTR])
         entries = list(service.entries)
@@ -119,11 +168,11 @@ def ldap_authenticate(username: str, password: str) -> Profile | None:
         if len(entries) != 1:
             return None
         user = ldap_connection(entries[0].entry_dn, password)
-        if not user.bind():
+        if not secure_bind(user):
             return None
         user.unbind()
         return profile_of(entries[0].entry_attributes_as_dict)
-    except LDAPException as exc:
+    except (LDAPException, ssl.SSLError) as exc:
         raise LdapUnavailable(str(exc)) from exc
 
 
@@ -221,6 +270,7 @@ async def login(body: LoginRequest, request: Request, response: Response):
     try:
         profile = await asyncio.to_thread(ldap_authenticate, username, body.password)
     except LdapUnavailable as exc:
+        logger.warning("LDAP unavailable during sign-in: %s", exc)  # the reason stays in the log, never in the response
         async with db.connect() as conn:
             await release_attempt(conn, username)
         raise HTTPException(status_code=503, detail=LDAP_UNREACHABLE) from exc
@@ -362,6 +412,7 @@ async def issue_session(username: str, hours: float) -> str:
 
 async def check_ldap(username: str) -> None:
     password = getpass.getpass(f"{username} 的密碼（不會顯示）：")
+    print(f"加密方式：{ldap_encryption()}")
     try:
         profile = await asyncio.to_thread(ldap_authenticate, username.strip().lower(), password)
     except LdapUnavailable as exc:

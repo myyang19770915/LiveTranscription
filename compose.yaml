@@ -146,6 +146,7 @@ services:
       LDAP_USER_DN_TEMPLATE: ${LDAP_USER_DN_TEMPLATE:-}
       LDAP_DISPLAY_ATTR: ${LDAP_DISPLAY_ATTR:-displayName}
       LDAP_CA_FILE: ${LDAP_CA_FILE:-}
+      LDAP_TLS: ${LDAP_TLS:-starttls}
       LDAP_MAIL_ATTR: ${LDAP_MAIL_ATTR:-mail}
       # Sending the minutes by e-mail (company SMTP; empty SMTP_HOST = off). PUBLIC_BASE_URL is the link in the mail.
       SMTP_HOST: ${SMTP_HOST:-}
