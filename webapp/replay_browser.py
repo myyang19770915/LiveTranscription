@@ -18,6 +18,9 @@ def record_track(a, tracks):
     # Cloud ASR is another recognizer; with 雲端精修 its Chinese punctuation also comes from the cloud model.
     if a.engine != 'local':
         tag += f'_{a.engine}' + ('p' if a.cloud_refine else '')
+    # 精準模式 adds quality events (for one target language) to the track.
+    if getattr(a, 'quality', False):
+        tag += f'_q{a.target}'
     # Different recordings need their own track even with the same language and window.
     prefix = f'{a.track}_' if a.track else ''
     track = tracks / f'{prefix}{a.language}_{a.start:g}_{a.duration:g}{tag}.json'
@@ -25,7 +28,8 @@ def record_track(a, tracks):
         rows = tracks / (track.stem + '.jsonl')
         subprocess.run([sys.executable, str(HERE / 'replay_asr.py'), a.wav, str(rows), '--start', str(a.start),
                         '--duration', str(a.duration), '--language', a.language, '--context', a.context,
-                        '--engine', a.engine, *(['--refine'] if a.cloud_refine else [])], check=True)
+                        '--engine', a.engine, *(['--refine'] if a.cloud_refine else []),
+                        *(['--quality', '--target', a.target] if getattr(a, 'quality', False) else [])], check=True)
         events = [json.loads(line) for line in rows.read_text(encoding='utf-8').splitlines()]
         track.write_text(json.dumps([{'t': e['t'], 'raw': e['raw']} for e in events], ensure_ascii=False), encoding='utf-8')
     return track
@@ -85,6 +89,7 @@ def main():
     ap.add_argument('--cloud-refine', action='store_true', help='turn 雲端精修 on (needs TRANSLATE_REFINE_* configured)')
     ap.add_argument('--engine', default='local', help='ASR engine for recording the track: local, mai or hybrid')
     ap.add_argument('--save-meeting', action='store_true', help='store the replay as a meeting (segments, no recording) for the review page')
+    ap.add_argument('--quality', action='store_true', help='精準模式 on: record and replay quality events (needs TRANSLATE_QUALITY_* configured)')
     ap.add_argument('--live', action='store_true', help='replay in 即時翻譯 mode (subtitle-sized segments) instead of 開會')
     a = ap.parse_args()
     tracks = OUT / 'tracks'; tracks.mkdir(parents=True, exist_ok=True)
@@ -92,7 +97,7 @@ def main():
     cfg_path, raw = OUT / f'{a.name}.config.json', OUT / f'{a.name}.json'
     cfg_path.write_text(json.dumps({'app': a.app, 'replay': {'track': track, 'duration': a.duration, 'language': a.language,
                                                               'target': a.target, 'context': a.context, 'cloudRefine': a.cloud_refine,
-                                                              'saveMeeting': a.save_meeting, 'live': a.live}},
+                                                              'saveMeeting': a.save_meeting, 'live': a.live, 'quality': a.quality}},
                                     ensure_ascii=False), encoding='utf-8')
     subprocess.run(['node', str(HERE / 'replay_page.mjs'), str(cfg_path), str(raw)], check=True)
     cfg_path.unlink()

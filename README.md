@@ -313,6 +313,20 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 
 系統聲音由 `getDisplayMedia()` 的瀏覽器分享選擇器取得。Chrome 需要讓使用者明確挑選分頁／畫面與音訊；若選擇器沒有分享音訊，應改選可分享分頁音訊的分頁或重新選擇。即使畫面分享 API 同時回傳 video track，本專案只把音訊接入轉錄流程，不會上傳畫面影像。停止會議會關閉音訊串流；本專案不錄製或保留原始音訊。
 
+### 精準模式
+
+選用功能，預設關閉。設定 `TRANSLATE_QUALITY_ASR_MODEL` 與 `TRANSLATE_QUALITY_MODEL` 後，開會頁「進階」會出現「精準模式」核取方塊；勾選的那場會議（或即時翻譯）才會啟用，選擇記在瀏覽器裡。
+
+- **做什麼**：即時逐字稿與暫譯照常立刻出現。同時，閘道器把同一段音訊依停頓切成 5–18 秒的區塊，交給較準的辨識模型重新辨識，再由一個大模型一次完成修正錯字、依語意斷成一句一段、翻譯。結果回到頁面後取代同一時間範圍的即時內容：左欄一句一段，尚未取代的即時文字顏色較淡。
+- **延遲**：精準結果在語句結束後才出現，估計約慢 10–25 秒（區塊長度加上兩次模型呼叫）；實際數字要以 bench 重播量測，尚未量。
+- **資料去向**：勾選後，該場的**音訊與文字會傳送到設定的外部服務**。頁首的標示會改為「精準模式／音訊與文字會傳送到外部服務」。機密會議請勿開啟。
+- **會議紀錄**：存下來的段落是這些修正後的句子（一句一段，時間依字數比例估計）；浮動字幕、畫面＋字幕、匯出用的也是同一份。精準模式下不另外跑「雲端精修」與自動學習詞彙的重譯。
+- **失敗時**：外部服務出錯、逾時或額度用盡時，那一段保留即時結果，會議不中斷；連續 3 段失敗時狀態列顯示「精準模式暫時無法使用，已改用即時結果」。
+- **結束會議**：按下結束後會等最後一句的精準結果（最多約 35 秒）。
+- **費用**：每分鐘音訊約 4–8 次辨識與 4–8 次文字模型呼叫，一小時的會議約 240–480 次各一，請先確認額度。
+
+離線原型（2026-11-13，尚未經真實頁面重播）以 gpt-transcribe＋gpt-5.5 在 10 段評測影片的同輪盲評平均 92.1 分，同一輪的既有最佳組合為 83.0 分；較小的文字模型（gemini-3.5-flash-lite）只有 81.8 分，所以文字模型要選夠強的。
+
 ## 會後校對
 
 會議結束後，從頁首「會議紀錄」（`/meetings`）進入。列表只顯示你所屬團隊的會議，每場標示已校對幾段；按「校對」開啟 `/meetings/<會議 id>`，「返回會議紀錄」會回到原本的列表（篩選條件保留）。
@@ -461,6 +475,10 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `TRANSLATE_MODEL_REPO` | Google QAT Q4_0 GGUF repo | llama.cpp 下載的模型 repo |
 | `TRANSLATE_MODEL_FILE` | `gemma-4-E2B_q4_0-it.gguf` | repo 中指定的 GGUF 權重檔 |
 | `TRANSLATE_REFINE_URL` / `_MODEL` / `_KEY` | 空（關閉） | 選用：OpenAI 相容的雲端模型（例如 litellm `http://host.docker.internal:4001/v1`），用於「雲端精修」；設定後頁面出現開關 |
+| `TRANSLATE_QUALITY_ASR_MODEL` / `TRANSLATE_QUALITY_MODEL` | 空（關閉） | 選用：「精準模式」的第二段辨識模型（`/audio/transcriptions`）與文字模型（`/chat/completions`）。兩個都填才啟用，頁面才出現開關（見[精準模式](#精準模式)） |
+| `TRANSLATE_QUALITY_URL` / `_KEY` | 沿用 `TRANSLATE_REFINE_URL` / `_KEY` | 精準模式的 OpenAI 相容服務位址與金鑰 |
+| `TRANSLATE_QUALITY_EXTRA` | 空 | 併入文字模型請求的 JSON，例如推理型模型用 `{"reasoning_effort":"low"}` |
+| `TRANSLATE_QUALITY_ALT` | 空 | 設 `1` 時把即時辨識文字一併交給文字模型交叉比對；尚未評測，預設關閉 |
 | `AZURE_MAI_ENDPOINT` / `_API_KEY` / `_DEPLOYMENT` | 空（關閉） | 選用：Azure Foundry 的 MAI-Transcribe-2-Streaming；可填入口網站的 https 端點，程式會改用 `wss://<resource>.services.ai.azure.com/mai/v1/realtime`。設定後頁面出現「辨識引擎」選單 |
 | `TRANSLATE_PUNCTUATE_MAI` | 空（關閉） | 實驗：`1` 時 MAI 中文改由雲端模型補標點（benchmark 顯示會切斷句子，預設不開） |
 | `POSTGRES_PASSWORD` | 必填 | 會議資料庫 `db` 的密碼；資料庫只在 Compose 內網，不對外開 port |
@@ -653,6 +671,13 @@ curl.exe -s -D - -o NUL -X POST http://127.0.0.1:18082/api/login -H "Content-Typ
 docker run --rm --network yuqiao-edge curlimages/curl:8.11.1 -s -D - -o /dev/null -X POST http://app:8080/api/login -H "Content-Type: application/json" -H "X-Forwarded-For: 203.0.113.9" -H "X-Forwarded-Proto: https" -d '{\"username\":\"<帳號>\",\"password\":\"<密碼>\"}'
 docker compose logs --tail 5 app
 ```
+
+**對外部署檢查清單**：
+
+- Cloudflare 後台該網域的 SSL/TLS → Edge Certificates 開啟「Always Use HTTPS」，`http://` 才會轉到 `https://`。app 本身不轉址，因為區網直連是 HTTP。
+- `.env` 設 `SESSION_COOKIE_SECURE=1` 後執行 `docker compose up -d app`，登入 cookie 一律加上 Secure。只經區網 HTTP 使用時不要設，否則無法登入。
+- app 已自動在每個回應加上 `X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: same-origin`；HTTPS 請求另外加 `Strict-Transport-Security: max-age=31536000`（不含子網域）。帶版本參數的 `/assets` 資源快取 30 天。
+- 尚未設定 Content-Security-Policy。
 
 補充：
 

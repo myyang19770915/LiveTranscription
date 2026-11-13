@@ -12,8 +12,9 @@ from pathlib import Path
 import httpx
 import websockets
 from opencc import OpenCC
+from fastapi.exception_handlers import http_exception_handler
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketState
@@ -30,7 +31,9 @@ import series
 import stream_limits
 import metrics
 import qa
+import quality_pass
 import reminders
+import response_headers
 import search
 import team_access
 from translation_quality import (TERMS_SCHEMA, apply_aliases, asr_context, consolidate_terms, glossary_entries, learned_replacements,
@@ -121,6 +124,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="語橋 Live — 即時會議翻譯", lifespan=lifespan, dependencies=[Depends(auth.require_signed_in)])
+app.add_middleware(response_headers.ResponseHeaders)
+app.add_exception_handler(Exception, response_headers.server_error)
 app.include_router(auth.router)
 app.include_router(team_access.router)
 app.include_router(review.router)
@@ -134,6 +139,18 @@ app.include_router(search.router)
 app.include_router(qa.router)
 app.include_router(diarize.router)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
+
+
+@app.exception_handler(404)
+async def not_found(request: Request, error):
+    """A person following a broken link gets a page with a way on; API clients and assets keep the JSON
+    (not-found-page). Public on purpose: it shows nothing and calls no API."""
+    page = (request.method == "GET" and "text/html" in request.headers.get("accept", "")
+            and not request.url.path.startswith(("/api/", "/assets/")))
+    if page:
+        # Not FileResponse: it answers a Range header with 206 whatever the status asked for.
+        return HTMLResponse((STATIC_DIR / "not-found.html").read_text(encoding="utf-8"), status_code=404, headers={"Cache-Control": "no-cache"})
+    return await http_exception_handler(request, error)
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -232,7 +249,8 @@ async def health():
 
 @app.get("/api/config")
 async def config():
-    return {"cloudRefine": bool(REFINE_URL and REFINE_MODEL), "mai": mai_asr.configured(), "minutes": minutes.configured()}
+    return {"cloudRefine": bool(REFINE_URL and REFINE_MODEL), "mai": mai_asr.configured(), "minutes": minutes.configured(),
+            "quality": quality_pass.configured()}
 
 
 def asr_health_url(ws_url: str, override: str = "") -> str:
@@ -512,6 +530,7 @@ class TranscriptDisplay:
         self.glossary, self.bilingual, self.audio = glossary, language == "zh_ja", audio
         self.chinese = language in ("auto", "zhen", "zh", "Chinese", "yue", "Cantonese")
         self.raw = self.pair_text = self.detected = ""
+        self.quality = None   # 精準模式: told what the browser is shown, to compare with its own recognition
 
     def render(self, text: str) -> str:
         return apply_aliases(repair_asr(strip_context_echo(text, self.glossary)), self.glossary)
@@ -520,6 +539,9 @@ class TranscriptDisplay:
         # Gateway audio clock when the event went out; the browser times its segments with it.
         if self.audio is not None:
             payload["audioMs"] = self.audio.position_ms
+        elif self.quality is not None:
+            # 即時翻譯 keeps no recording, but the page needs the clock to know which live text a quality event replaces.
+            payload["audioMs"] = self.quality.fed_ms
         msg = payload.get("msg")
         if not isinstance(msg, dict):
             return
@@ -536,6 +558,8 @@ class TranscriptDisplay:
             self.raw += chunk
             if not self.bilingual:
                 payload["displayText"] = self.render(TO_TRADITIONAL.convert(self.raw) if self.chinese else self.raw)
+        if self.quality is not None and isinstance(payload.get("displayText"), str):
+            self.quality.live(payload["displayText"])
 
     def tentative(self, text: str) -> str:
         """MAI's intermediate (not yet confirmed) text as the browser shows it: Traditional script for Chinese."""
@@ -568,7 +592,7 @@ async def transcribe(browser: WebSocket):
         # The reason is what the live page shows (stream-limits).
         await browser.close(code=4429, reason=stream_limits.TOO_MANY.format(n=stream_limits.MAX_STREAMS_PER_USER))
         return
-    audio, meeting = None, None
+    audio, meeting, quality = None, None, None
     try:
         try:
             raw_header = await asyncio.wait_for(browser.receive_text(), stream_limits.STREAM_HEADER_TIMEOUT)
@@ -599,10 +623,21 @@ async def transcribe(browser: WebSocket):
         display = TranscriptDisplay(language, glossary, audio)
         # Both engines read the browser through the guard: audio length, session and membership are checked there.
         guarded = stream_limits.StreamGuard(browser, user, browser.cookies.get(auth.SESSION_COOKIE), meeting)
+        # 精準模式 (quality-pass): only when the browser asked for it and the service is configured. The same
+        # audio the engine gets is re-recognized in chunks; results go back on this connection.
+        if header.get("quality") is True and quality_pass.configured():
+            async def quality_event(payload: dict) -> None:
+                if browser.client_state == WebSocketState.CONNECTED:
+                    await browser.send_text(json.dumps(payload, ensure_ascii=False))
+            quality = quality_pass.QualityPass(quality_event, language, str(header.get("target", "")), glossary, TO_TRADITIONAL.convert)
+            display.quality = quality
+            guarded = quality_pass.TeeReceiver(guarded, quality.feed)
         if asr_engine(str(header.get("engine", "")), language) == "mai":
             # Audio goes to Azure; text goes to the cloud text model only when 雲端精修 is on.
             cloud_marks = PUNCTUATE_MAI and bool(header.get("refine")) and language == "zh" and bool(REFINE_URL and REFINE_MODEL)
             await mai_asr.MaiBridge(guarded, language, display, punctuate_item if cloud_marks else None).run()
+            if quality is not None and browser.client_state == WebSocketState.CONNECTED:
+                await quality.finish()   # the last sentences, then the connection closes
             if browser.client_state == WebSocketState.CONNECTED:
                 await browser.close()
             return
@@ -657,6 +692,8 @@ async def transcribe(browser: WebSocket):
             await asyncio.gather(*pending, return_exceptions=True)
             for task in done:
                 task.result()
+            if quality is not None and browser.client_state == WebSocketState.CONNECTED:
+                await quality.finish()   # the last sentences, then the connection closes
             if browser.client_state == WebSocketState.CONNECTED:
                 await browser.close()
     except stream_limits.StreamStopped as stop:
@@ -670,6 +707,8 @@ async def transcribe(browser: WebSocket):
         except Exception:
             pass
     finally:
+        if quality is not None:
+            quality.cancel()   # no-op after finish(); stops the requests when the browser left
         stream_limits.free_place(user.username)
         if audio is not None:
             await asyncio.shield(finish_recording(audio, meeting["id"]))

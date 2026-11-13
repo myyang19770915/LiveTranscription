@@ -1,12 +1,15 @@
 import asyncio
 import base64
+import contextlib
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shutil
 import ssl
+import struct
 import tempfile
 import time
 import wave
@@ -31,6 +34,7 @@ import mailer
 import meeting_audio
 import minutes
 import qa
+import quality_pass
 import reminders
 import search
 import server
@@ -2409,6 +2413,397 @@ class SignInTests(AccountTestCase):
 
 
 
+class ResponseHeaderTests(AccountTestCase):
+    """response-headers: security headers on every response, HSTS on https, cache lifetime on versioned assets."""
+
+    SECURITY = {"x-frame-options": "DENY", "x-content-type-options": "nosniff", "referrer-policy": "same-origin"}
+
+    def assert_security(self, response):
+        self.assertEqual({name: response.headers.get(name) for name in self.SECURITY}, self.SECURITY)
+
+    def test_security_headers_on_pages_refusals_redirects_and_unknown_paths(self):
+        signed_out = TestClient(app)
+        login = signed_out.get("/login")
+        self.assertEqual(login.status_code, 200)
+        self.assert_security(login)
+        refused = signed_out.get("/api/metrics")
+        self.assertEqual(refused.status_code, 401)
+        self.assert_security(refused)
+        redirect = signed_out.get("/", follow_redirects=False)
+        self.assertEqual(redirect.status_code, 303)
+        self.assert_security(redirect)
+        missing = self.signed_in("alice").get("/no-such-page")
+        self.assertEqual(missing.status_code, 404)
+        self.assert_security(missing)
+
+    def test_strict_transport_security_only_on_https(self):
+        secure = TestClient(app, base_url="https://testserver").get("/login")
+        self.assertEqual(secure.headers.get("strict-transport-security"), "max-age=31536000")
+        self.assert_security(secure)
+        self.assertNotIn("strict-transport-security", TestClient(app).get("/login").headers)
+
+    def test_versioned_assets_get_a_cache_lifetime(self):
+        client = self.signed_in("alice")
+        cached = client.get("/assets/app.js?v=20261113a")
+        self.assertEqual((cached.status_code, cached.headers.get("cache-control")), (200, "public, max-age=2592000"))
+        self.assert_security(cached)
+        for path, status in (("/assets/app.js", 200), ("/assets/app.js?v=", 200), ("/assets/missing.js?v=1", 404)):
+            response = client.get(path)
+            self.assertEqual(response.status_code, status, path)
+            self.assertNotEqual(response.headers.get("cache-control"), "public, max-age=2592000", path)
+        page = client.get("/login")   # a route's own header is kept
+        self.assertEqual((page.status_code, page.headers.get("cache-control")), (200, "no-cache"))
+
+    def test_an_unhandled_error_still_carries_the_headers(self):
+        with patch("auth.session_user", side_effect=RuntimeError("boom")):
+            failed = TestClient(app, raise_server_exceptions=False).get("/api/me")
+            secure = TestClient(app, base_url="https://testserver", raise_server_exceptions=False).get("/api/me")
+        self.assertEqual((failed.status_code, failed.text), (500, "Internal Server Error"))
+        self.assert_security(failed)
+        self.assertNotIn("strict-transport-security", failed.headers)
+        self.assertEqual(secure.headers.get("strict-transport-security"), "max-age=31536000")
+
+
+class NotFoundPageTests(AccountTestCase):
+    """not-found-page: a page request that ends in 404 gets a page; everything else keeps the JSON."""
+
+    HTML = {"accept": "text/html,application/xhtml+xml"}
+
+    def assert_page(self, response):
+        self.assertEqual((response.status_code, response.headers["content-type"].split(";")[0]), (404, "text/html"))
+        for text in ("找不到這個頁面", 'href="/"', 'href="/meetings"'):
+            self.assertIn(text, response.text)
+        self.assertNotIn("account.js", response.text)   # no sign-in needed, no API called
+
+    def assert_json(self, response):
+        self.assertEqual((response.status_code, response.json()), (404, {"detail": "Not Found"}))
+
+    def test_unknown_page_is_the_same_for_everyone(self):
+        self.assert_page(TestClient(app).get("/no-such-page", headers=self.HTML))
+        self.assert_page(self.signed_in("alice").get("/no-such-page", headers=self.HTML))
+
+    def test_a_range_request_is_still_a_404(self):
+        self.assert_page(TestClient(app).get("/no-such-page", headers={**self.HTML, "range": "bytes=0-99"}))
+
+    def test_a_meeting_that_does_not_exist(self):
+        response = self.signed_in("alice").get("/meetings/00000000-0000-0000-0000-000000000000", headers={"accept": "text/html"})
+        self.assert_page(response)
+
+    def test_api_clients_and_other_requests_keep_the_json(self):
+        client = self.signed_in("alice")
+        self.assert_json(client.get("/no-such-page", headers={"accept": "application/json"}))
+        self.assert_json(client.get("/api/no-such-route", headers=self.HTML))
+        self.assert_json(client.post("/no-such-page", headers=self.HTML))
+        asset = client.get("/assets/missing.js", headers=self.HTML)
+        self.assertEqual(asset.status_code, 404)
+        self.assertNotIn("找不到這個頁面", asset.text)
+
+
+def tone(seconds, level=8000):
+    """Speech stand-in: a 440 Hz tone as 16 kHz PCM16."""
+    return struct.pack(f"<{int(seconds * 16000)}h", *(int(level * math.sin(2 * math.pi * 440 * n / 16000)) for n in range(int(seconds * 16000))))
+
+
+def silence(seconds):
+    return bytes(int(seconds * 16000) * 2)
+
+
+class QualityChunkerTest(unittest.TestCase):
+    """quality-pass: "Audio is cut into chunks at pauses"."""
+
+    def test_pause_after_seven_seconds(self):
+        chunks = quality_pass.Chunker().feed(tone(7) + silence(0.5) + tone(2))
+        self.assertEqual(len(chunks), 1)
+        self.assertTrue(7000 < chunks[0].end_ms < 7500, chunks[0].end_ms)   # inside the silence
+        self.assertEqual((chunks[0].start_ms, chunks[0].pause), (0, "short"))
+        self.assertEqual(len(chunks[0].pcm), chunks[0].end_ms * 32)
+        self.assertAlmostEqual(chunks[0].speech, 7.0, delta=0.1)
+
+    def test_a_pause_of_a_second_becomes_long(self):
+        chunker = quality_pass.Chunker()
+        first = chunker.feed(tone(7) + silence(0.5))[0]
+        self.assertEqual(first.pause, "short")
+        chunker.feed(silence(1.0))            # the silence went on: read later, the pause is long
+        self.assertEqual(first.pause, "long")
+        other = quality_pass.Chunker()
+        short = other.feed(tone(7) + silence(0.5))[0]
+        other.feed(tone(1) + silence(2))      # speech resumed first: it stays short
+        self.assertEqual(short.pause, "short")
+
+    def test_no_pause_for_eighteen_seconds(self):
+        chunks = quality_pass.Chunker().feed(tone(19))
+        self.assertEqual(len(chunks), 1)
+        self.assertTrue(12000 <= chunks[0].end_ms <= 18000, chunks[0].end_ms)
+        self.assertEqual(chunks[0].pause, "none")
+
+    def test_the_forced_cut_takes_the_quietest_place(self):
+        chunks = quality_pass.Chunker().feed(tone(15) + tone(0.2, 900) + tone(4))   # a dip, not a pause
+        self.assertTrue(15000 <= chunks[0].end_ms <= 15200, chunks[0].end_ms)
+
+    def test_a_short_utterance_then_silence_is_cut_at_the_pause(self):
+        chunker = quality_pass.Chunker()
+        chunks = chunker.feed(tone(3) + silence(8))
+        self.assertTrue(3000 < chunks[0].end_ms < 3400, chunks[0].end_ms)   # in the silence right after the speech
+        self.assertEqual(chunks[0].pause, "long")
+        self.assertAlmostEqual(chunks[0].speech, 3.0, delta=0.1)
+
+    def test_silence_only_is_not_speech(self):
+        chunker = quality_pass.Chunker()
+        chunks = chunker.feed(silence(11)) + [chunker.flush()]
+        self.assertTrue(chunks)
+        self.assertTrue(all(chunk.speech < 0.3 for chunk in chunks))
+
+    def test_chunks_are_consecutive_and_the_rest_is_flushed(self):
+        chunker = quality_pass.Chunker()
+        audio = tone(6) + silence(0.6) + tone(6) + silence(0.6) + tone(3)
+        chunks = [c for start in range(0, len(audio), 4096) for c in chunker.feed(audio[start:start + 4096])]
+        last = chunker.flush()
+        self.assertEqual((last.last, last.pause), (True, "long"))
+        chunks.append(last)
+        self.assertEqual(len(chunks), 3)
+        self.assertEqual([c.start_ms for c in chunks[1:]], [c.end_ms for c in chunks[:-1]])
+        self.assertEqual(b"".join(c.pcm for c in chunks), audio[:len(audio) - len(audio) % 640])
+
+
+class QualityAllocateTest(unittest.TestCase):
+    """quality-pass: "Sentences carry an estimated time span" (the example table)."""
+
+    def test_example_rows(self):
+        self.assertEqual(quality_pass.allocate(10000, 20000, ["a" * 30, "b" * 50], "c" * 20), ([(10000, 13000), (13000, 18000)], 18000))
+        self.assertEqual(quality_pass.allocate(0, 6000, ["a" * 60], ""), ([(0, 6000)], 6000))
+        self.assertEqual(quality_pass.allocate(4000, 9000, [], "c" * 40), ([], 4000))
+
+
+class FakeQualityService:
+    """The external recognizer and text model as an httpx transport; records every request."""
+
+    def __init__(self, heard, answers, takes_prompt=True):
+        self.heard, self.answers = list(heard), list(answers)   # an answer: dict, str (raw content) or int (HTTP status)
+        self.transcriptions, self.chats, self.takes_prompt = [], [], takes_prompt
+
+    def __call__(self, request):
+        if request.url.path.endswith("/audio/transcriptions"):
+            self.transcriptions.append(request.content)
+            if not self.takes_prompt and b'name="prompt"' in request.content:
+                return httpx.Response(400, json={"error": "prompt is not supported"})
+            return httpx.Response(200, json={"text": self.heard.pop(0) if self.heard else ""})
+        self.chats.append(json.loads(request.content))
+        answer = self.answers.pop(0) if self.answers else {"sentences": [], "carry": ""}
+        if answer == "TIMEOUT":
+            raise httpx.ReadTimeout("timed out", request=request)
+        if isinstance(answer, int):
+            return httpx.Response(answer, json={"error": "no credit"})
+        content = answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    def user(self, index):
+        return self.chats[index]["messages"][1]["content"]
+
+
+class QualityPassTest(unittest.TestCase):
+    """quality-pass: corrected sentences per chunk, failures keep the live result, logs carry no text."""
+
+    def run_pass(self, service, audio, language="zh", target="en", glossary="", before_finish=None):
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service))), \
+                    patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", "text"):
+                quality = quality_pass.QualityPass(send, language, target, glossary, lambda text: text.replace("简", "簡"))
+                if before_finish:
+                    before_finish(quality)
+                for start in range(0, len(audio), 6400):
+                    quality.feed(audio[start:start + 6400])
+                    await quality.idle.wait()   # as in a meeting: results keep up with the audio
+                await quality.finish()
+            return events
+        return asyncio.run(go())
+
+    def test_a_short_pause_carries_the_sentence_and_the_last_chunk_emits_it(self):
+        service = FakeQualityService(["我們下週要上線", "新的系統。"],
+                                     [{"sentences": [{"src": "我們下週要上線。", "tgt": "We go live next week."}], "carry": ""},
+                                      {"sentences": [{"src": "我們下週要上線新的系統。", "tgt": "We launch the new system next week."}], "carry": "ignored"}])
+        events = self.run_pass(service, tone(7) + silence(0.5) + tone(2), glossary="語橋")
+        first, last = (event["quality"] for event in events)
+        self.assertEqual((first["seq"], first["sentences"], first["final"]), (1, [], False))   # whole text carried, nothing emitted
+        self.assertEqual((last["seq"], last["final"]), (2, True))
+        self.assertEqual([(s["source"], s["target"], s["lang"]) for s in last["sentences"]],
+                         [("我們下週要上線新的系統。", "We launch the new system next week.", "zh")])
+        self.assertEqual((last["sentences"][0]["startMs"], last["sentences"][0]["endMs"]), (0, last["throughMs"]))
+        self.assertIn("PAUSE: short", service.user(0))
+        self.assertIn("LAST: false", service.user(0))
+        self.assertIn("CARRY: 我們下週要上線。", service.user(1))     # the model's sentence, forced back
+        self.assertIn("LAST: true", service.user(1))
+        self.assertIn("TERMS: 語橋", service.user(1))
+        self.assertIn("語橋 我們下週要上線".encode(), service.transcriptions[1])   # glossary + earlier text as the prompt
+        self.assertEqual(len(service.transcriptions), 2)
+
+    def test_context_is_the_last_eight_sentences(self):
+        answers = [{"sentences": [{"src": f"句子{n}。", "tgt": f"Sentence {n}."}], "carry": ""} for n in range(11)]
+        service = FakeQualityService([f"句子{n}。" for n in range(11)], answers)
+        audio = b"".join(tone(5.2) + silence(1.4) for _ in range(10)) + tone(2)
+        events = self.run_pass(service, audio)
+        self.assertEqual(sum(len(event["quality"]["sentences"]) for event in events), 11)
+        context = service.user(10).split("CARRY:")[0]
+        self.assertNotIn("句子1。", context)
+        self.assertEqual([n for n in range(11) if f"句子{n}。\n" in context], list(range(2, 10)))
+
+    def test_long_silence_settles_a_carried_sentence(self):
+        service = FakeQualityService(["我們先到這裡"], [{"sentences": [], "carry": "我們先到這裡"},
+                                                  {"sentences": [{"src": "我們先到這裡。", "tgt": "Let us stop here."}], "carry": ""}])
+        events = [event["quality"] for event in self.run_pass(service, tone(6) + silence(20))]
+        settled = next(event for event in events if event.get("sentences"))
+        self.assertEqual((settled["final"], [s["target"] for s in settled["sentences"]]), (False, ["Let us stop here."]))
+        self.assertIn("CARRY: 我們先到這裡\nNEW: \nPAUSE: long", service.user(1))
+        self.assertEqual(len(service.transcriptions), 1)             # the silence itself was never sent
+
+    def test_kanji_only_japanese_keeps_the_language_the_model_heard(self):
+        self.assertEqual(quality_pass.spoken_language("会議終了。", "zh_ja", "ja"), "ja")
+        self.assertEqual(quality_pass.spoken_language("會議結束。", "zh_ja", "zh"), "zh")
+        self.assertEqual(quality_pass.spoken_language("ありがとう", "zh_ja", "zh"), "ja")
+        self.assertEqual(quality_pass.spoken_language("會議結束。", "zh_ja", "??"), "zh")
+
+    def test_two_way_chinese_and_japanese(self):
+        service = FakeQualityService(["今日はありがとうございます"], [{"sentences": [{"src": "今日はありがとうございます。", "tgt": "今天谢谢大家，简单说明。", "lang": "ja"}], "carry": ""}])
+        sentence = self.run_pass(service, tone(3), language="zh_ja")[-1]["quality"]["sentences"][0]
+        self.assertEqual((sentence["lang"], sentence["source"], sentence["target"]), ("ja", "今日はありがとうございます。", "今天谢谢大家，簡单说明。"))
+        self.assertNotIn(b'name="language"', service.transcriptions[0])   # only a single-language stream names it
+
+    def test_a_recognizer_that_takes_no_prompt_is_asked_again_without_one(self):
+        answers = [{"sentences": [{"src": f"第{n}段。", "tgt": f"Part {n}."}], "carry": ""} for n in range(3)]
+        service = FakeQualityService(["第0段", "第1段", "第2段"], answers, takes_prompt=False)
+        with self.assertLogs("uvicorn.error", level="INFO"):
+            events = self.run_pass(service, tone(6) + silence(1.5) + tone(6) + silence(1.5) + tone(3))
+        self.assertEqual([s["target"] for event in events for s in event["quality"].get("sentences", [])], ["Part 0.", "Part 1.", "Part 2."])
+        self.assertFalse(any(event["quality"].get("failed") for event in events))
+        # First chunk: nothing to prompt with. Second: refused once, repeated without. Third: no prompt at all.
+        self.assertEqual([b'name="prompt"' in body for body in service.transcriptions], [False, True, False, False])
+
+    def test_a_failed_chunk_keeps_going(self):
+        service = FakeQualityService(["第一段", "第二段"], ["TIMEOUT", 500, {"sentences": [{"src": "第二段。", "tgt": "Part two."}], "carry": ""}])
+        with self.assertLogs("uvicorn.error", level="WARNING"):
+            events = [event["quality"] for event in self.run_pass(service, tone(6) + silence(1.5) + tone(3))]
+        self.assertEqual((events[0].get("failed"), events[0]["throughMs"] > 6000, events[0]["final"]), (True, True, False))
+        self.assertEqual([s["target"] for s in events[1]["sentences"]], ["Part two."])
+        self.assertEqual(len(service.chats), 3)                      # one retry, then the next chunk
+        self.assertIn("CARRY: \n", service.user(2))                  # the failed range left nothing carried
+
+    def test_an_unusable_answer_fails_the_chunk(self):
+        service = FakeQualityService(["只有一段"], ["not json", "still not json"])
+        with self.assertLogs("uvicorn.error", level="WARNING"):
+            events = self.run_pass(service, tone(3))
+        self.assertEqual((events[-1]["quality"].get("failed"), events[-1]["quality"]["final"]), (True, True))
+
+    def test_a_backlog_gives_up_the_oldest_chunk(self):
+        def backlog(quality):
+            for n in range(5):
+                quality.waiting.append(quality_pass.Chunk(n * 6000, (n + 1) * 6000, tone(0.5), 0.5, "long"))
+        service = FakeQualityService(["a", "b", "c"], [])
+        with self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            events = [event["quality"] for event in self.run_pass(service, b"", before_finish=backlog)]
+        # Five chunks and the closing one wait: the two oldest are given up, three stay waiting.
+        self.assertEqual([bool(event.get("failed")) for event in events], [True, True, False, False, False, False])
+        self.assertEqual(len(service.transcriptions), 3)             # the given-up ones were never sent
+        self.assertIn("result=backlog", "\n".join(logs.output))
+
+    def test_silence_is_never_sent_to_the_recognizer(self):
+        service = FakeQualityService([], [])
+        events = self.run_pass(service, silence(12))
+        self.assertEqual((service.transcriptions, service.chats), ([], []))
+        self.assertTrue(events[-1]["quality"]["final"])
+
+    def test_logs_carry_numbers_only(self):
+        service = FakeQualityService(["機密內容"], [{"sentences": [{"src": "機密內容。", "tgt": "Secret content."}], "carry": ""}])
+        with self.assertLogs("uvicorn.error", level="INFO") as logs:
+            self.run_pass(service, tone(3), glossary="機密詞彙")
+        text = "\n".join(logs.output)
+        for secret in ("機密內容", "Secret content", "機密詞彙"):
+            self.assertNotIn(secret, text)
+        self.assertRegex(text, r"quality chunk seq=1 audio_ms=\d+ chars_in=4 chars_out=\d+ ms=\d+ result=ok")
+
+    def test_finish_times_out_with_a_failed_final_event(self):
+        async def slow(request):
+            await asyncio.sleep(5)
+            return httpx.Response(200, json={"text": "x"})
+
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(slow))), \
+                    patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", "text"), \
+                    patch("quality_pass.FINISH_TIMEOUT", 0.2):
+                quality = quality_pass.QualityPass(send, "zh", "en", "")
+                quality.feed(tone(3))
+                await quality.finish()
+            return events
+        with self.assertLogs("uvicorn.error", level="WARNING"):
+            events = asyncio.run(go())
+        self.assertEqual((events[-1]["quality"].get("failed"), events[-1]["quality"]["final"]), (True, True))
+
+
+class QualityStreamTests(AccountTestCase):
+    """quality-pass in the gateway: opt-in, hidden until configured, final event before the close."""
+
+    def configured(self, service):
+        for name, value in (("URL", "http://quality.test/v1"), ("ASR_MODEL", "asr"), ("MODEL", "text"),
+                            ("new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service)))):
+            fake = patch(f"quality_pass.{name}", value)
+            fake.start()
+            self.addCleanup(fake.stop)
+
+    def stream(self, header):
+        audio = tone(3)
+        messages = []
+        with patch("server.websockets.connect", side_effect=lambda *a, **k: AudioAfter(len(audio))):
+            with self.signed_in("alice").websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"mode": "translate", "language": "zh", **header})
+                websocket.send_bytes(audio)
+                with contextlib.suppress(WebSocketDisconnect):
+                    while True:
+                        messages.append(websocket.receive_json())
+        return messages
+
+    def test_config_reports_quality_only_when_both_models_are_set(self):
+        client = self.signed_in("alice")
+        with patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", ""):
+            self.assertIs(client.get("/api/config").json()["quality"], False)
+        with patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", "text"):
+            self.assertIs(client.get("/api/config").json()["quality"], True)
+
+    def test_not_chosen_means_no_external_request_and_the_same_events(self):
+        service = FakeQualityService(["這個會議"], [])
+        self.configured(service)
+        messages = self.stream({})
+        self.assertEqual((service.transcriptions, service.chats), ([], []))
+        self.assertFalse(any("quality" in message for message in messages))
+        self.assertFalse(any("audioMs" in message for message in messages))   # 即時翻譯 without it: no clock, as before
+        self.assertEqual(messages, self.stream({"quality": "yes"}))   # only a real true turns it on
+
+    def test_not_configured_ignores_the_header(self):
+        with patch("quality_pass.MODEL", ""), patch("quality_pass.new_client") as client:
+            messages = self.stream({"quality": True})
+        client.assert_not_called()
+        self.assertFalse(any("quality" in message for message in messages))
+
+    def test_chosen_gets_quality_events_and_the_last_one_is_final(self):
+        service = FakeQualityService(["這個會議"], [{"sentences": [{"src": "這個會議。", "tgt": "This meeting."}], "carry": ""}])
+        self.configured(service)
+        messages = self.stream({"quality": True, "target": "en"})
+        events = [message["quality"] for message in messages if "quality" in message]
+        self.assertTrue(events)
+        self.assertEqual([event["final"] for event in events], [False] * (len(events) - 1) + [True])
+        self.assertEqual([(s["source"], s["target"]) for s in events[-1]["sentences"]], [("這個會議。", "This meeting.")])
+        self.assertIn("quality", messages[-1])                        # nothing after the final event but the close
+        self.assertTrue(any(message.get("displayText") == "這個會議" for message in messages))   # the live text is unchanged
+        # 即時翻譯 has no recording clock; with the quality pass on, live events carry its audio clock instead.
+        live = [message for message in messages if "quality" not in message and message.get("msg")]
+        self.assertTrue(live and all(message["audioMs"] == 3000 for message in live), live)
+
+
 class SignedOutTests(AccountTestCase):
     def test_translation_api_without_a_session_is_401_and_never_reaches_the_model(self):
         with patch("server.httpx.AsyncClient") as client:
@@ -2429,6 +2824,29 @@ class SignedOutTests(AccountTestCase):
     def test_main_page_redirects_to_sign_in(self):
         response = TestClient(app).get("/", follow_redirects=False)
         self.assertEqual((response.status_code, response.headers["location"]), (303, "/login"))
+
+    def test_page_redirect_carries_the_requested_path(self):
+        response = TestClient(app).get("/meetings/abc/minutes?item=50", follow_redirects=False)
+        self.assertEqual((response.status_code, response.headers["location"]),
+                         (303, "/login?next=%2Fmeetings%2Fabc%2Fminutes%3Fitem%3D50"))
+        self.assertEqual(TestClient(app).get("/?x=1", follow_redirects=False).headers["location"], "/login?next=%2F%3Fx%3D1")
+        fits, too_long = "/meetings?" + "a" * 1990, "/meetings?" + "a" * 1991   # 2000 and 2001 characters
+        self.assertTrue(TestClient(app).get(fits, follow_redirects=False).headers["location"].startswith("/login?next="))
+        self.assertEqual(TestClient(app).get(too_long, follow_redirects=False).headers["location"], "/login")
+        # An encoded ? stays encoded: the page asked for is the page returned to.
+        self.assertEqual(TestClient(app).get("/meetings/a%3Fb?x=1", follow_redirects=False).headers["location"],
+                         "/login?next=%2Fmeetings%2Fa%253Fb%3Fx%3D1")
+
+    def test_no_page_claims_on_device_processing(self):
+        for page in (self.signed_in("alice").get("/").text, TestClient(app).get("/login").text,
+                     TestClient(app).get("/assets/app.js").text):
+            for claim in ("不離開你的設備", "端對端本機處理", "output 資料夾"):
+                self.assertNotIn(claim, page)
+
+    def test_sign_in_page_names_no_real_account(self):
+        page = TestClient(app).get("/login").text
+        self.assertIn('placeholder="公司帳號"', page)
+        self.assertNotIn("myyang", page)
 
     def test_public_paths_stay_open(self):
         client = TestClient(app)

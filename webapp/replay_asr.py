@@ -24,6 +24,8 @@ async def main():
     ap.add_argument('--context', default='')
     ap.add_argument('--engine', default='local', help='local, mai or hybrid (see /api/config)')
     ap.add_argument('--refine', action='store_true', help='雲端精修 on: MAI Chinese is punctuated by the cloud model')
+    ap.add_argument('--quality', action='store_true', help='精準模式 on: quality events are recorded with the ASR events (needs TRANSLATE_QUALITY_*)')
+    ap.add_argument('--target', default='en', help='translation target for --quality')
     a = ap.parse_args()
     with wave.open(a.wav) as w:
         assert w.getframerate() == 16000 and w.getnchannels() == 1 and w.getsampwidth() == 2
@@ -35,7 +37,8 @@ async def main():
     meeting_id = yuqiao_session.create_meeting(a.url, a.language, a.engine)
     async with websockets.connect(a.url, max_size=None, additional_headers=yuqiao_session.headers()) as ws:
         await ws.send(json.dumps({'requestId': str(uuid.uuid4()), 'meeting_id': meeting_id, 'language': a.language, 'use_vad': a.language == 'zh_ja',
-                                  'system_prompt': a.context, 'engine': a.engine, 'refine': a.refine}))
+                                  'system_prompt': a.context, 'engine': a.engine, 'refine': a.refine,
+                                  **({'quality': True, 'target': a.target} if a.quality else {})}))
         began = time.monotonic()
 
         async def send():
@@ -56,7 +59,8 @@ async def main():
                 except websockets.ConnectionClosed:
                     break
                 except asyncio.TimeoutError:
-                    if sender.done() and time.monotonic() - last_rx > 8:
+                    # With --quality the gateway closes only after the final quality event (up to 25 s after EOS).
+                    if sender.done() and time.monotonic() - last_rx > (40 if a.quality else 8):
                         break
                     continue
                 last_rx = time.monotonic()

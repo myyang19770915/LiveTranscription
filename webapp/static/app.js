@@ -17,6 +17,13 @@ const timeMarks=[];
 let fixedTarget='en';
 let translationFailures=0;
 const segmentRecords=new Map();
+// 精準模式 (quality-pass): the gateway's corrected sentences replace live content of the same time range.
+let qualityOn=false,quality=QualityView.create(),qualityDown=false;
+function qualityChosen(){return !$('qualityRow').hidden&&$('quality').checked}
+function qualityShown(){const finals=finalizedRecords();QualityView.promote(quality,finals);return QualityView.view(quality,{transcript,timeMarks,finals})}
+function shownTranslated(){if(!qualityOn)return translated;const shown=qualityShown();return [...shown.targets,...shown.liveTargets].join('\n\n')}
+// What the meeting keeps: the quality pass's sentences when it is on, the live finalized segments otherwise.
+function outputRecords(){return qualityOn?QualityView.promote(quality,finalizedRecords()).records:finalizedRecords()}
 let finalizeRemaining=false,sourceRevision=0;
 const incompleteClause=s=>TranslationSegmentation.unfinished(s);
 const startButtonContent = '<span class="record-icon"><i></i></span><span class="button-copy"><b>開始會議</b><small>即時轉錄與翻譯</small></span>';
@@ -33,7 +40,7 @@ function setLiveMode(mode,persist=true){
   for(const b of document.querySelectorAll('.mode-btn'))b.setAttribute('aria-pressed',String(b.dataset.mode===mode));
   $('modeNote').textContent=translate?'不建立會議紀錄；逐字稿與錄音只留在瀏覽器，可按「匯出」下載':'建立會議紀錄，會後可校對、產生紀要';
   $('start').innerHTML=translate?translateStartContent:startButtonContent;
-  $('storeNote').textContent=translate?'不存到伺服器，可按匯出下載':'錄音與逐字稿存於 output 資料夾';
+  $('storeNote').textContent=translate?'不存到伺服器，可按匯出下載':'錄音與逐字稿存入會議紀錄';
   if(persist){try{localStorage.setItem('liveMode',mode)}catch{}}
 }
 for (let i=0; i<14; i++) $('wave').appendChild(document.createElement('i'));
@@ -61,6 +68,11 @@ function setStatus(text, kind='idle') { $('status').className = `status ${kind}`
 const SUBTITLE_HISTORY=30;
 function subtitleParts(){
   const pending=transcript.slice(translationOffset),last=s=>window.Subtitles?.lastSentences(s,1)||'';
+  if(qualityOn){
+    const all=[...quality.records,...qualityShown().liveFinals];
+    return {done:all.at(-1)?.source||'',pending:quality.done?'':pending+tentative,translation:all.slice(-2).map(s=>s.target).join(' '),draft:quality.done?'':draftText,
+      history:all.slice(-SUBTITLE_HISTORY).map(s=>({source:s.source,target:s.target}))};
+  }
   if(!translateOnly()){   // 開會: sentences, as before; the translation is split once for both the last two and the history
     const sentences=window.Subtitles?.sentences(translated)||[];
     return {done:last(transcript.slice(0,translationOffset)),pending:pending+tentative,translation:window.Subtitles?.joinSentences(sentences.slice(-2))||'',draft:draftText,
@@ -70,12 +82,17 @@ function subtitleParts(){
   return {done:finals.at(-1)?.source||'',pending:pending+tentative,translation:finals.slice(-2).map(s=>s.target).join(' '),draft:draftText,
     history:finals.slice(-SUBTITLE_HISTORY).map(s=>({source:s.source,target:s.target}))};
 }
-function render(id, value) { if(id==='transcript'){const parts=subtitleParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72; el.textContent=value;
+function render(id, value) { if(id==='transcript'){const parts=subtitleParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72;
+  if(id==='transcript'&&qualityOn){   // kept sentences one per paragraph, then the live text not yet replaced
+    const shown=qualityShown(),kept=shown.sources.join('\n\n'),make=(name,text)=>Object.assign(document.createElement('span'),{className:name,textContent:text});
+    el.replaceChildren(...(kept?[make('quality-kept',kept)]:[]),...(shown.liveSource?[make('quality-live',(kept?'\n\n':'')+shown.liveSource)]:[]));
+    value=kept+shown.liveSource;
+  }else el.textContent=value;
   if(id==='transcript'&&tentative){const span=document.createElement('span');span.className='tentative';span.textContent=tentative;el.append(span)}
   el.classList.toggle('empty', !value&&!(id==='transcript'&&tentative)); updateCounts(); if((value||tentative)&&follow) el.scrollTop=el.scrollHeight; }
-function visibleTranslation(){return translated+(translated&&draftText?'\n':'')+draftText}
+function visibleTranslation(){const translated=shownTranslated();return translated+(translated&&draftText?'\n':'')+draftText}
 function renderTranslation(){
-  const parts=subtitleParts();
+  const parts=subtitleParts(),translated=shownTranslated();
   window.Subtitles?.update(parts);   // the floating subtitles (live-translation)
   window.Overlay?.update(parts);   // 畫面＋字幕 (screen-subtitles)
   const el=$('translation'),wasEmpty=el.classList.contains('empty');
@@ -97,7 +114,8 @@ function renderTranslation(){
 }
 function updateCounts(){ $('transcriptCount').textContent=`${transcript.length.toLocaleString()} 字`; $('translationCount').textContent=`${visibleTranslation().length.toLocaleString()} 字`; }
 function toast(message,duration=2200){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),duration)}
-function setControls(active){for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active;const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('asrEngine').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
+const screenAwake=ScreenAwake.create(navigator,document);   // screen-awake: held while a session runs
+function setControls(active){active?screenAwake.hold():screenAwake.release();for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active;const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('asrEngine').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active||qualityChosen();$('quality').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
 function updateTranslationDirection(){
   const pair=$('language').value==='zh_ja';
   if(pair){if($('targetLanguage').value!=='zh_ja')fixedTarget=$('targetLanguage').value;$('targetLanguage').value='zh_ja'}
@@ -110,7 +128,7 @@ function updateTranslationDirection(){
   tags[0].textContent=swapPair?'中':languageTags[direction.source]||direction.source.toUpperCase();tags[1].textContent=swapPair?'日':languageTags[direction.target]||direction.target.toUpperCase();
   $('targetLabel').textContent=pair?'中日雙向翻譯':`翻譯成 ${$('targetLanguage').selectedOptions[0].textContent}`;
   $('targetLabel').closest('.card-title').querySelector('.language-dot').textContent=languageTags[direction.target]||direction.target.toUpperCase();
-  $('translateState').textContent='READY';$('translateState').className='state-chip';
+  $('translateState').textContent='就緒';$('translateState').className='state-chip';
   if(transcript)scheduleTranslation(true);
 }
 function selectedSource(){return $('audioSource').value}
@@ -196,7 +214,8 @@ async function startMeeting() {
     socket = new WebSocket(`${protocol}//${location.host}/ws/transcribe`);
     socket.binaryType = 'arraybuffer';
     await new Promise((resolve, reject) => { socket.onopen=resolve; socket.onerror=()=>reject(new Error('WebSocket 連線失敗')); });
-    socket.send(JSON.stringify({requestId:crypto.randomUUID(),meeting_id:meetingId,mode:translate?'translate':'meeting',language:$('language').value,use_vad:direction.source==='zh_ja',system_prompt:$('context').value,engine:asrEngine(),refine:cloudRefineOn()}));
+    qualityOn=qualityChosen();
+    socket.send(JSON.stringify({requestId:crypto.randomUUID(),meeting_id:meetingId,mode:translate?'translate':'meeting',language:$('language').value,use_vad:direction.source==='zh_ja',system_prompt:$('context').value,engine:asrEngine(),refine:cloudRefineOn(),quality:qualityOn,target:direction.target}));
     socket.onmessage = onMessage;
     socket.onclose = onSocketClose;
 
@@ -221,8 +240,10 @@ async function stopMeeting(sendEos=true) {
   if(workletNode)workletNode.port.onmessage=null;
   if(sendEos && socket?.readyState===WebSocket.OPEN) {
     const closingSocket=socket;
-    await new Promise(resolve=>{const timer=setTimeout(()=>{closingSocket.removeEventListener('close',done);toast('辨識收尾逾時，請核對最後一句',5000);resolve()},20000);function done(){clearTimeout(timer);resolve()}closingSocket.addEventListener('close',done,{once:true});closingSocket.send(EOS)});
+    await new Promise(resolve=>{const timer=setTimeout(()=>{closingSocket.removeEventListener('close',done);toast('辨識收尾逾時，請核對最後一句',5000);resolve()},qualityOn?35000:20000);function done(){clearTimeout(timer);resolve()}closingSocket.addEventListener('close',done,{once:true});closingSocket.send(EOS)});
   }
+  // 精準模式: no final event (the connection dropped, or the wait ran out) means the rest was not replaced; keep it.
+  if(qualityOn&&!quality.done)QualityView.apply(quality,{failed:true,final:true,throughMs:quality.throughMs},finalizedRecords());
   finalizeRemaining=true;
   window.Overlay?.setTrack(null);
   try{socket?.close();}catch{} captureStreams.forEach(media=>media.getTracks().forEach(track=>{track.onended=null;track.stop()}));
@@ -249,24 +270,26 @@ async function stopRecording(){
 function saveFile(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function recordingName(){return `${filePrefix()}-${meetingStamp}.${recording.type.includes('mp4')?'m4a':recording.type.includes('ogg')?'ogg':'webm'}`}
 function saveRecording(){if(!recording)return toast('目前沒有錄音');saveFile(recording,recordingName())}
-// Each meeting's audio and transcript are written to the project's output/ folder for later review;
+// Each meeting's audio and transcript are stored with the meeting record on the server for later review;
 // if the server cannot store them, the browser download keeps them from being lost.
 async function storeMeetingFile(blob,kind,name,id=meetingId){
   if(!id&&translateOnly())return;   // 即時翻譯: the file stays in the browser (download only)
   try{if(!id)throw new Error('沒有會議編號');const response=await fetch(`/api/meetings/${id}/files/${kind}`,{method:'PUT',headers:{'content-type':blob.type||'application/octet-stream'},body:blob});if(!response.ok)throw new Error((await response.json()).detail||response.status);toast(`已儲存 ${(await response.json()).saved}`,3000)}
-  catch(error){toast(`無法存到 output（${error.message}），改為下載`,5000);saveFile(blob,name)}
+  catch(error){toast(`無法存入會議紀錄（${error.message}），改為下載`,5000);saveFile(blob,name)}
 }
 function transcriptFile(){
-  const pairs=[...segmentRecords.values()].filter(s=>s.state==='finalized').map((s,i)=>`[${i+1}] ${s.source}\n→ ${s.target}`).join('\n\n');
+  const kept=qualityOn?outputRecords():[...segmentRecords.values()].filter(s=>s.state==='finalized');
+  const pairs=kept.map((s,i)=>`[${i+1}] ${s.source}\n→ ${s.target}`).join('\n\n');
+  const shown=qualityOn?qualityShown():null,original=shown?[...shown.sources,shown.liveSource].filter(Boolean).join('\n'):transcript;
   const learned=learnedTerms?`\n\n自動學習詞彙\n${learnedTerms}`:'';
-  return new Blob([`原文\n${transcript}\n\n翻譯\n${visibleTranslation()}\n\n逐段對照\n${pairs}${learned}\n`],{type:'text/plain;charset=utf-8'});
+  return new Blob([`原文\n${original}\n\n翻譯\n${visibleTranslation()}\n\n逐段對照\n${pairs}${learned}\n`],{type:'text/plain;charset=utf-8'});
 }
 let transcriptSaveTimer,saveTranscriptNow=null;
 // A new meeting starts empty: the previous one's text, translations and terms belong to its own
 // meeting (maybe another team) and must never be saved into the new meeting's transcript.
 function resetMeetingState(){
   saveTranscriptNow?.();saveSegmentsNow?.();
-  transcript='';tentative='';sourceRevision=0;finalizeRemaining=false;
+  transcript='';tentative='';sourceRevision=0;finalizeRemaining=false;quality=QualityView.create();qualityDown=false;
   segmentRecords.clear();languageSpans.length=0;utteranceBoundaries.clear();timeMarks.length=0;
   updateTranslationDirection();meetingEpoch=translationEpoch;resetLearnedTerms();render('transcript','');
   ownSegments(meetingId);   // after the previous meeting's segments were flushed and cleared
@@ -312,7 +335,7 @@ function unsavedSegments(){return segmentSave.unsaved}
 function leavingLosesData(){return Boolean(recorder||segmentSaveTimer||unsavedSegments())}
 function sendSegments(id){
   if(id!==segmentOwner)return;   // another meeting has started: the page no longer holds this meeting's segments
-  const segments=finalizedRecords().map((s,i)=>({seq:i+1,startMs:s.startMs||0,endMs:s.endMs||0,source:s.source,target:s.target,detected:s.detected||''}));
+  const segments=outputRecords().map((s,i)=>({seq:i+1,startMs:s.startMs||0,endMs:s.endMs||0,source:s.source,target:s.target,detected:s.detected||''}));
   if(!segments.length)return;
   clearTimeout(segmentSave.retry);segmentSave.retry=null;segmentSave.unsaved=true;
   fetch(`/api/meetings/${id}/segments`,{method:'PUT',headers:{'content-type':'application/json'},
@@ -337,7 +360,7 @@ function sendSegments(id){
 // kept for download, then say why; 4401 with no meeting running goes to the sign-in page (stream-limits).
 function onSocketClose(event){
   if(stream&&!stopping)return stopMeeting(false).then(()=>setStatus(closeMessage(event.code,event.reason),'error'));
-  if(event.code===4401)location.replace('/login');
+  if(event.code===4401)location.replace(ReturnPath.loginUrl(location.pathname,location.search));
 }
 // Why the server closed the recognition connection; for stream limits its reason is the message to show (stream-limits).
 function closeMessage(code,reason){
@@ -345,10 +368,21 @@ function closeMessage(code,reason){
   if([4403,4408,4413,4429].includes(code)&&reason)return reason;
   return code===4404?'找不到這場會議，請重新整理後再試':'辨識連線已中斷';
 }
+// A quality event: keep its sentences (or, when the chunk failed, the live segments of its range) and redraw.
+function onQuality(event){
+  if(!qualityOn)return;
+  QualityView.apply(quality,event,finalizedRecords());
+  const down=QualityView.unavailable(quality);
+  if(down&&!qualityDown)setStatus('精準模式暫時無法使用，已改用即時結果','error');
+  else if(!down&&qualityDown)checkServices();   // back to the usual readiness status
+  qualityDown=down;
+  render('transcript',transcript);renderTranslation();storeSegments();
+}
 function updateTimer(){const sec=Math.floor((Date.now()-startedAt)/1000);$('timer').textContent=`${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;}
 function onMessage(event){
   let data; try{data=JSON.parse(event.data)}catch{return}
   if(data.status==='error'){setStatus(typeof data.msg==='string'?data.msg:'辨識服務錯誤','error');return}
+  if(data.quality){onQuality(data.quality);return}
   // The cloud engine's tentative tail: shown and drafted now, replaced when the confirming deltas arrive.
   if(typeof data.tentative==='string'&&data.tentative!==tentative){tentative=data.tentative;sourceRevision++;if(!(data.msg?.text)){render('transcript',transcript);if(pendingSource().trim())scheduleTranslation(false)}}
   const chunk=data.msg?.text||'';
@@ -370,7 +404,7 @@ let termPasses=[],learnedTerms='',termCheckedAt=0,termRequest=null;
 function resetLearnedTerms(){termPasses=[];learnedTerms='';termCheckedAt=transcript.length;correctionQueue=[];correctedForms=new Set();$('learnedTerms').hidden=true}
 function learnTerms(){
   // The model serves one request at a time; learn between translations, once per ~300 new characters.
-  if(termRequest||activeTranslation||transcript.length-termCheckedAt<300)return;
+  if(qualityOn||termRequest||activeTranslation||transcript.length-termCheckedAt<300)return;
   const end=transcript.length,passes=termPasses;termCheckedAt=end;
   termRequest=fetch('/api/terms',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:transcript.slice(Math.max(0,end-1500),end),source:direction.source,previous:passes.slice(-40)})})
     .then(response=>response.ok?response.json():null)
@@ -381,7 +415,7 @@ function learnTerms(){
 // re-translated once, in the background, so the meeting record ends up consistent.
 let correctionQueue=[],correctedForms=new Set(),correcting=false;
 function queueCorrections(forms){
-  const fresh=forms.filter(form=>!correctedForms.has(form));if(!fresh.length)return;
+  const fresh=forms.filter(form=>!correctedForms.has(form));if(qualityOn||!fresh.length)return;
   fresh.forEach(form=>correctedForms.add(form));
   const epoch=`${translationEpoch}:`;
   for(const record of segmentRecords.values())if(record.id.startsWith(epoch)&&record.state==='finalized'&&fresh.some(form=>record.source.includes(form))&&!correctionQueue.includes(record))correctionQueue.push(record);
@@ -390,6 +424,7 @@ function queueCorrections(forms){
 // re-translated in the gaps with both neighbours, so a span cut mid-clause still reads correctly.
 function queueRefinement(){
   const finals=finalizedRecords(),record=finals.at(-2);
+  if(qualityOn)return;   // the quality pass already re-translates with context
   if(record&&!record.refined&&!correctionQueue.includes(record)){record.refined=true;correctionQueue.push(record)}
 }
 function finalizedRecords(){
@@ -397,7 +432,7 @@ function finalizedRecords(){
   return [...segmentRecords.values()].filter(s=>s.id.startsWith(epoch)&&s.state==='finalized').sort((a,b)=>a.start-b.start);
 }
 // 雲端精修: refinements go to the configured cloud model. Off by default; the choice stays in this browser.
-function cloudRefineOn(){return !$('cloudRefineRow').hidden&&$('cloudRefine').checked}
+function cloudRefineOn(){return !$('cloudRefineRow').hidden&&$('cloudRefine').checked&&!qualityChosen()}   // 精準模式 includes it
 // 辨識引擎: local (shown as 本機, never the model name), Azure MAI, or MAI for every language except Chinese. Shown only when MAI is configured.
 function asrEngine(){return $('asrEngineRow').hidden?'local':$('asrEngine').value}
 // 團隊: every meeting belongs to one of the user's teams; the last choice stays in this browser.
@@ -411,7 +446,7 @@ window.accountReady.then(({teams})=>{
 $('team').onchange=()=>{try{localStorage.setItem('team',$('team').value)}catch{}};
 async function createMeeting(teamId){
   const response=await fetch('/api/meetings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({team_id:teamId,language:$('language').value,engine:asrEngine(),title:$('topic').value.trim(),series_id:window.MeetingSeries?.seriesId()??null})});
-  if(response.status===401){location.replace('/login');throw new Error('請先登入')}
+  if(response.status===401){location.replace(ReturnPath.loginUrl(location.pathname,location.search));throw new Error('請先登入')}
   if(!response.ok)throw new Error((await response.json().catch(()=>({}))).detail||'無法建立會議');
   return (await response.json()).id;
 }
@@ -424,7 +459,7 @@ async function checkServices(){
   if(document.hidden)return;
   serviceTimer=setTimeout(checkServices,SERVICE_CHECK_MS);
   let state=null;
-  try{const response=await fetch('/api/services');if(response.status===401)return location.replace('/login');if(response.ok)state=await response.json()}catch{}
+  try{const response=await fetch('/api/services');if(response.status===401)return location.replace(ReturnPath.loginUrl(location.pathname,location.search));if(response.ok)state=await response.json()}catch{}
   if(starting||stream||stopping)return;
   if(!state)return setStatus('無法連線到伺服器','error');
   const down=state.services.filter(service=>!service.ok).map(service=>service.name);
@@ -433,12 +468,22 @@ async function checkServices(){
 }
 document.addEventListener('visibilitychange',()=>document.hidden?clearTimeout(serviceTimer):checkServices());
 checkServices();
-fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine,mai})=>{
-  $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;$('setupAdvanced').hidden=!(cloudRefine||mai);
+fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine,mai,quality:qualityReady})=>{
+  $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;$('qualityRow').hidden=!qualityReady;$('setupAdvanced').hidden=!(cloudRefine||mai||qualityReady);
+  try{$('quality').checked=localStorage.getItem('quality')==='1'}catch{}
+  $('cloudRefine').disabled=qualityChosen();
   try{$('cloudRefine').checked=localStorage.getItem('cloudRefine')==='1';const engine=localStorage.getItem('asrEngine');if([...$('asrEngine').options].some(o=>o.value===engine))$('asrEngine').value=engine}catch{}
+  showPrivacy();
 }).catch(()=>{});
-$('cloudRefine').onchange=()=>{try{localStorage.setItem('cloudRefine',$('cloudRefine').checked?'1':'0')}catch{}};
-$('asrEngine').onchange=()=>{try{localStorage.setItem('asrEngine',$('asrEngine').value)}catch{}};
+// Where audio and text go for the current choices (privacy-notice); the header and the footer say the same.
+function showPrivacy(){
+  const note=PrivacyNote.text(asrEngine(),cloudRefineOn(),qualityChosen());
+  $('privacyNote').replaceChildren(Object.assign(document.createElement('b'),{textContent:note.label}),note.sentence);
+  $('secureLabel').textContent=note.label;
+}
+$('cloudRefine').onchange=()=>{try{localStorage.setItem('cloudRefine',$('cloudRefine').checked?'1':'0')}catch{}showPrivacy()};
+$('quality').onchange=()=>{try{localStorage.setItem('quality',$('quality').checked?'1':'0')}catch{}$('cloudRefine').disabled=qualityChosen();showPrivacy()};
+$('asrEngine').onchange=()=>{try{localStorage.setItem('asrEngine',$('asrEngine').value)}catch{}showPrivacy()};
 let correctionTimer=null;
 async function correctNext(){
   if(correcting||!correctionQueue.length)return;

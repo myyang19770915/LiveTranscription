@@ -15,7 +15,7 @@ function page(){
   const env={
     records:[{source:'第一句',target:'S1',startMs:0,endMs:900}],recorder:null,segmentSaveTimer:null,
     requests:[],answers:[],timers:[],saved:[],
-    finalizedRecords(){return env.records},
+    finalizedRecords(){return env.records},outputRecords(){return env.records},   // what the meeting keeps (quality-pass)
     $:id=>id==='saveState'?element:{value:''},
     direction:{source:'zh',target:'en'},learnedTerms:'',
     window:{MeetingSeries:{saved:(id,n)=>env.saved.push([id,n])}},

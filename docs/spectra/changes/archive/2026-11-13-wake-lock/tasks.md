@@ -1,0 +1,4 @@
+## 1. 螢幕保持喚醒
+
+- [x] 1.1 spec「The screen stays awake during a session」四個情境：新增 `webapp/static/wake-lock.js`，`ScreenAwake.create(navigator, document)` 回傳有 `hold()` 與 `release()` 的物件：`hold()` 要求 `screen` wake lock 並記住「需要」，`release()` 放開並清除「需要」；文件回到可見且仍「需要」而鎖已被收回時重新要求；沒有 API 或要求被拒時靜默略過。驗證：新增 `bench/wakelockcheck.js`，以假的 navigator 與 document 逐一檢查四個情境，`node bench/wakelockcheck.js` 全部印出 ok、exit 0。
+- [x] 1.2 [after: 1.1] `webapp/static/app.js` 在 `setControls(true)` 時 `hold()`、`setControls(false)` 時 `release()`（會議與即時翻譯共用這個進入點），`webapp/static/index.html` 在 `app.js` 之前載入 `wake-lock.js` 並更新 `app.js` 版本號。驗證：以瀏覽器（gstack browse，`http://localhost:18082`）登入後在頁面上執行 `setControls(true)` 再 `setControls(false)`，以包裝過的 `navigator.wakeLock.request` 計數確認要求一次、放開一次，且無 console 錯誤；`node --check webapp/static/app.js` 通過。

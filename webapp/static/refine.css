@@ -97,17 +97,20 @@ body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-
 #topicRow { grid-area: topic; }
 #seriesRow { grid-area: series; }
 #asrEngineRow { grid-area: engine; }
-#cloudRefineRow { grid-area: refine; }
+/* 雲端精修 and 精準模式 share the refine cell (quality-pass). */
+.refine-group { grid-area: refine; display: flex; flex-wrap: wrap; gap: 8px 20px; min-width: 0; }
+.refine-group:not(:has(> :not([hidden]))) { display: none; }
+#transcript .quality-live { opacity: .62; }   /* live text the quality pass has not replaced yet */
 .field-note { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.4; }
 .field-note:empty { display: none; }
 .toggle-field { display: flex; align-items: center; gap: 12px; cursor: pointer; }
 .toggle-field input { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--mint); flex: none; }
 .toggle-text b { display: block; font-size: 13px; }
 .toggle-text small { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
-.controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting h-meeting h-meeting"     "team team topic topic series series"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
+.controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting h-meeting h-meeting"     "team team topic topic series series"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
 /* 即時翻譯 (live-translation): no meeting rows. */
 .controls.translate { grid-template-areas:     "mode mode mode mode mode mode"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "h-adv h-adv h-adv h-adv h-adv h-adv"     "engine engine engine refine refine refine"     "context context context context context start"; }
-.controls.translate:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode mode mode"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
+.controls.translate:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode mode mode"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
 .source-hint {
   grid-area: hint !important;
   padding: 1px 4px 2px;
@@ -192,9 +195,9 @@ button:focus-visible, select:focus-visible, input:focus-visible {
       "engine engine refine refine"
       "context context context context";
   }
-  .controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting"     "team topic topic series"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
+  .controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting"     "team topic topic series"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
   .controls.translate { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "h-adv h-adv h-adv h-adv"     "engine engine refine refine"     "context context context context"; }
-  .controls.translate:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
+  .controls.translate:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
 }
 
 /* Up to 760px mobile.css takes over the controls (one row; the rest moves into the settings dialog); these areas are the

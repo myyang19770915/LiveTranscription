@@ -63,6 +63,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - `catalogcheck.js`：會議預設名稱與「今天／本週／更早」分組（`TZ=Asia/Taipei node bench/catalogcheck.js`）
 - `lagcheck.py`：用人工字幕量測 ASR 文字落後音訊多久，決定校對頁的播放前延
 - `lag_gateway.py`：以指定封包大小把 bench 片段經 `/ws/transcribe`（翻譯模式，不建會議、不寫檔）送給指定引擎，記錄每個事件的到達時間；`--compare` 對另一條軌印出同一段文字晚多少到達（中位數／p10／p90），中日文片段另印文字落後人工字幕多久（`YUQIAO_SESSION=… python bench/lag_gateway.py <片段> <local|mai|hybrid> <封包毫秒> <秒數> <out.jsonl> [--compare 另一條.jsonl]`）
+- 精準模式（quality-pass）：`python bench/run.py quality1 [片段…]` 以 `quality` 開頭的 TAG 錄下含 quality 事件的軌（軌檔名多 `_q<目標語言>`）並在重播時勾選精準模式；評分表的段落是頁面保留的句子。需要先在 `.env` 設定 `TRANSLATE_QUALITY_ASR_MODEL` 與 `TRANSLATE_QUALITY_MODEL`。`bench/qualitycheck.js` 檢查頁面的取代與退回規則。2026-11-13 只以 60 秒片段經暫時閘道器（gemini-3.5-transcribe＋gemini-3.5-flash-lite）驗證過錄軌與重播的流程，尚未跑過完整 10 段的盲評。
 - `replay_browser.py --save-meeting`：重播存成一場會議（只有段落、沒有錄音），可在校對頁查看
 
 ## 2026-11-08 說話者辨識評估（speaker-diarization）

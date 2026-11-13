@@ -35,7 +35,10 @@ try {
   await page.waitForFunction(() => window.__replay.done, null, {timeout: (cfg.replay.duration + 180) * 1000, polling: 1000})
     .catch(() => console.error('WARNING: replay did not settle before the deadline; report is partial'));
   const data = await page.evaluate(() => ({log: __replay.log, requests: __replay.requests, audioEnded: __replay.audioEnded,
-    transcript, learned: learnedTerms, segments: [...segmentRecords.values()]}));
+    transcript, learned: learnedTerms,
+    // 精準模式: what the meeting keeps is the quality pass's sentences, one per segment, in order.
+    quality: qualityOn ? {failures: quality.failures, done: quality.done, throughMs: quality.throughMs, promoted: quality.records.filter(s => s.live).length} : null,
+    segments: qualityOn ? outputRecords().map((s, i) => ({...s, id: `quality:${i}`, state: 'finalized', start: i, end: i + 1, version: 1})) : [...segmentRecords.values()]}));
   writeFileSync(outPath, JSON.stringify(data, null, 1));
 } finally {
   await browser.close();

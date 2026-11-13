@@ -12,6 +12,7 @@
   if (cfg.target && cfg.language !== 'zh_ja') { $('targetLanguage').value = cfg.target; updateTranslationDirection(); }
   if (cfg.context) $('context').value = cfg.context;
   if (cfg.cloudRefine) { $('cloudRefineRow').hidden = false; $('setupAdvanced').hidden = false; $('cloudRefine').checked = true; }
+  if (cfg.quality) { $('qualityRow').hidden = false; $('setupAdvanced').hidden = false; $('quality').checked = true; }   // 精準模式 (quality-pass)
   if (cfg.live) setLiveMode('translate', false);   // 即時翻譯: subtitle-sized segments (live-subtitle-segments)
 
   class TrackSocket {
@@ -42,6 +43,7 @@
   window.startMeeting = async () => {
     // --save-meeting: store the replay as a real meeting (segments only, no recording) for the review page.
     if (cfg.saveMeeting) { meetingId = await createMeeting(Number($('team').value)); resetMeetingState(); }
+    qualityOn = qualityChosen();   // as the real startMeeting does before it sends the header
     socket = new TrackSocket(cfg.track); socket.onmessage = onMessage;
     stream = {replay: true}; captureStreams = [];
     startedAt = Date.now(); timerHandle = setInterval(updateTimer, 1000);

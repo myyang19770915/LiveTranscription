@@ -391,7 +391,12 @@ async def require_signed_in(connection: HTTPConnection) -> None:
         return
     if connection.url.path.startswith("/api/"):
         raise HTTPException(status_code=401, detail="請先登入")
-    raise HTTPException(status_code=303, headers={"Location": "/login"})
+    # The page the user wanted goes along, so signing in returns there (mail links survive an expired session).
+    # The address exactly as the browser sent it: the decoded path would turn an encoded ? or # into a real one.
+    raw, query = connection.scope.get("raw_path") or connection.url.path.encode(), connection.scope.get("query_string", b"")
+    wanted = raw.decode("latin-1") + (f"?{query.decode('latin-1')}" if query else "")
+    location = "/login" if wanted == "/" or len(wanted) > 2000 else f"/login?next={quote(wanted, safe='')}"
+    raise HTTPException(status_code=303, headers={"Location": location})
 
 
 def avatar_url(username: str, updated_at) -> str | None:

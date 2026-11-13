@@ -159,7 +159,7 @@ window.AvatarPhoto=(()=>{
 })();
 
 window.accountReady=fetch('/api/me').then(response=>{
-  if(response.status===401){location.replace('/login');return new Promise(()=>{})}
+  if(response.status===401){location.replace(ReturnPath.loginUrl(location.pathname,location.search));return new Promise(()=>{})}
   return response.json();
 }).then(me=>{
   const slot=document.getElementById('account');

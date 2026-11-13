@@ -59,7 +59,7 @@
       <label class="auth-label" for="username">帳號</label>
       <div class="auth-field">
         <svg class="auth-field-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4.5 20.5a7.5 7.5 0 0 1 15 0"/></svg>
-        <input id="username" class="auth-input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="公司帳號，例如 myyang" required autofocus>
+        <input id="username" class="auth-input" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="公司帳號" required autofocus>
       </div>
 
       <label class="auth-label" for="password">密碼</label>
@@ -80,6 +80,7 @@
     <p class="auth-copy">© 2026 語橋 Live</p>
   </section>
 </main>
+<script src="/assets/return-path.js?v=20261113c"></script>
 <script>
 const $=id=>document.getElementById(id),form=$('loginForm'),error=$('loginError'),button=$('loginButton');
 function busy(on){button.disabled=on;button.classList.toggle('loading',on);button.querySelector('.auth-submit-label').textContent=on?'登入中…':'登入'}
@@ -92,7 +93,7 @@ form.onsubmit=async event=>{
   busy(true);
   try{
     const response=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:form.username.value,password:form.password.value})});
-    if(response.ok){location.replace('/');return}
+    if(response.ok){location.replace(ReturnPath.afterSignIn(location.search,location.hash));return}
     fail((await response.json().catch(()=>({}))).detail||'登入失敗');
   }catch{fail('無法連線到語橋 Live，請確認網路')}
 };

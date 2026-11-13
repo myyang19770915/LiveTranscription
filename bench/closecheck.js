@@ -21,7 +21,8 @@ if(handlerStart<0||handlerEnd<0)throw new Error('onSocketClose() not found in ap
 (async()=>{
   for(const [running,code,wantStop,wantLogin] of [[true,4401,true,false],[false,4401,false,true],[true,4429,true,false],[false,1006,false,false]]){
     const env={stream:running?{}:null,stopping:false,stopped:0,status:null,went:null,closeMessage,
-      stopMeeting:async()=>{env.stopped++},setStatus:(text,kind)=>{env.status=[text,kind]},location:{replace:url=>{env.went=url}}};
+      stopMeeting:async()=>{env.stopped++},setStatus:(text,kind)=>{env.status=[text,kind]},
+      ReturnPath:require('../webapp/static/return-path.js'),location:{pathname:'/',search:'',replace:url=>{env.went=url}}};
     const onSocketClose=new Function('env',`with(env){${src.slice(handlerStart,handlerEnd)}\nreturn onSocketClose;}`)(env);
     await onSocketClose({code,reason:''});
     t(`close ${code} ${running?'during':'without'} a meeting: stops it`,env.stopped===1,wantStop);
