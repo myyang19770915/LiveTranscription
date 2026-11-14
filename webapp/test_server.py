@@ -37,6 +37,7 @@ import qa
 import chunk_asr
 import mai_usage
 import quality_pass
+import revise_pass
 import reminders
 import search
 import server
@@ -140,6 +141,7 @@ server.TRANSLATE_HEALTH_URL = "http://translate:5000/health"
 quality_pass.URL = quality_pass.KEY = quality_pass.ASR_MODEL = quality_pass.MODEL = quality_pass.ASR = ""
 quality_pass.ASR_URL = quality_pass.ASR_KEY = ""
 quality_pass.EXTRA, quality_pass.ASR_EXTRA = {}, {}
+quality_pass.REVISE, quality_pass.REVISE_EXTRA = False, {}
 # Tests never reach the real diarize service; DiarizeApiTests turn it on with a fake service call.
 diarize.DIARIZE_URL = ""
 # Nor a mail server: tests that send replace mailer.send_message (the container may point SMTP_HOST at dev-mail).
@@ -1046,6 +1048,23 @@ class SegmentStorageTests(ReviewTestCase):
             conn.execute("UPDATE segments SET source = '程式設計', target = 'programming', state = 'edited', version = 3")
         self.save(client, meeting, [("城市設計", "city planning")])
         self.assertEqual(self.segment(1), ("城市設計", "程式設計", "urban design", "programming", "edited", 3))
+
+    def test_a_revised_source_is_saved_and_the_recognizer_text_stays(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        self.save(client, meeting, [("一", "One."), ("跟先生的感情變得穩定。", "became stable.")])
+        self.save(client, meeting, [("一", "One."), ("跟先生的感情變得不穩定。", "became unstable.")])
+        self.assertEqual(self.segment(2), ("跟先生的感情變得穩定。", "跟先生的感情變得不穩定。", "became stable.", "became unstable.", "unreviewed", 2))
+        self.save(client, meeting, [("一", "One."), ("跟先生的感情變得不穩定！", "became unstable.")])   # the source alone
+        self.assertEqual(self.segment(2)[1::4], ("跟先生的感情變得不穩定！", 3))
+        self.assertEqual(self.segment(1)[5], 1)
+
+    def test_a_revised_source_never_replaces_a_reviewers_correction(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        self.save(client, meeting, [("城市設計", "urban design")])
+        self.assertEqual(client.post(f"/api/meetings/{meeting}/segments/1/confirm", json={"version": 1}).status_code, 200)
+        before = self.segment(1)
+        self.save(client, meeting, [("程式設計", "programming")])
+        self.assertEqual(self.segment(1), before)
 
     def test_saving_segments_of_another_teams_meeting_is_404(self):
         theirs = self.team("業務", "bob")
@@ -2828,6 +2847,305 @@ class QualityPassTest(unittest.TestCase):
         with self.assertLogs("uvicorn.error", level="WARNING"):
             events = asyncio.run(go())
         self.assertEqual((events[-1]["quality"].get("failed"), events[-1]["quality"]["final"]), (True, True))
+
+
+class FakeReviewer:
+    """The text model as the reviser asks it: answers in order; without one, the window comes back unchanged."""
+
+    def __init__(self, answers=()):
+        self.answers, self.users = list(answers), []
+
+    async def __call__(self, messages, timeout):
+        user = messages[1]["content"]
+        self.users.append(user)
+        window = [{"id": int(number), "src": src, "tgt": tgt} for number, src, tgt in re.findall(r"^(\d+)\. SRC: (.*)\n   TGT: (.*)$", user, re.M)]
+        answer = self.answers.pop(0) if self.answers else None
+        if isinstance(answer, Exception):
+            raise answer
+        if callable(answer):
+            answer = answer(window)
+            if asyncio.iscoroutine(answer):
+                answer = await answer
+        return {"sentences": window, "notes": ""} if answer is None else answer
+
+    def numbers(self, index):
+        """The window of request `index` as the sentence ids it held (from the test sentences' text)."""
+        return [int(n) for n in re.findall(r"SRC: 這是第(\d+)句話。", self.users[index])]
+
+
+def shown(first, last):
+    return [{"id": n, "source": f"這是第{n}句話。", "target": f"This is sentence {n}.", "lang": "zh", "targetLang": "en", "startMs": n * 1000, "endMs": n * 1000 + 900}
+            for n in range(first, last + 1)]
+
+
+def changing(changes, notes=""):
+    """An answer that repeats the window except for `changes`: {number: (src, tgt)}; None for either keeps it."""
+    def answer(window):
+        for item in window:
+            src, tgt = changes.get(item["id"], (None, None))
+            item["src"], item["tgt"] = src or item["src"], tgt or item["tgt"]
+        return {"sentences": window, "notes": notes}
+    return answer
+
+
+class ReviserTest(unittest.TestCase):
+    """quality-revision: shown sentences are revised in windows; anything that goes wrong keeps the first result."""
+
+    def run_reviser(self, reviewer, script, glossary=""):
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            reviser = revise_pass.Reviser(reviewer, send, "English", lambda start, end: f"live text {start}-{end}", lambda text: text.replace("简", "簡"),
+                                          lambda text: quality_pass.units(text, quality_pass.in_words(text)), glossary)
+
+            async def settle():
+                for _ in range(50):
+                    await asyncio.sleep(0)
+            await script(reviser, settle)
+            reviser.cancel()
+            return events
+        return asyncio.run(go())
+
+    def test_a_window_is_revised_when_three_more_sentences_exist(self):
+        reviewer, asked = FakeReviewer(), []
+
+        async def script(reviser, settle):
+            reviser.add(shown(1, 8))
+            await settle()
+            asked.append(len(reviewer.users))
+            reviser.add(shown(9, 9))
+            await settle()
+        events = self.run_reviser(reviewer, script, glossary="語橋")
+        self.assertEqual((asked, len(reviewer.users), reviewer.numbers(0)), ([0], 1, [1, 2, 3, 4, 5, 6]))
+        user = reviewer.users[0]
+        self.assertIn("AFTER: 這是第7句話。 這是第8句話。 這是第9句話。", user)
+        self.assertIn("1. SRC: 這是第1句話。\n   TGT: This is sentence 1.", user)
+        self.assertIn("ALT: live text 1000-6900", user)
+        self.assertIn("TERMS: 語橋", user)
+        self.assertIn("BEFORE:\n(start of meeting)", user)
+        self.assertTrue(user.endswith("TRANSLATE INTO: English"))
+        self.assertEqual(events, [])   # nothing changed: no event
+
+    def test_only_changed_sentences_are_sent(self):
+        reviewer = FakeReviewer([changing({3: ("這是第3句话，简单。", None), 5: (None, "This is the fifth sentence.")})])
+
+        async def script(reviser, settle):
+            reviser.add(shown(1, 9))
+            await settle()
+        with self.assertLogs("uvicorn.error", level="INFO") as logs:
+            events = self.run_reviser(reviewer, script)
+        self.assertEqual(events, [{"revision": {"seq": 1, "sentences": [{"id": 3, "source": "這是第3句话，簡单。", "target": "This is sentence 3."},
+                                                                         {"id": 5, "source": "這是第5句話。", "target": "This is the fifth sentence."}]}}])
+        self.assertIn("quality revision sentences=6 changed=2", logs.output[0])
+        self.assertTrue(logs.output[0].endswith("result=ok"))
+        self.assertNotIn("句", "".join(logs.output))       # no meeting text
+        self.assertNotIn("sentence 3", "".join(logs.output))
+
+    def test_notes_and_revised_text_reach_the_next_window(self):
+        reviewer = FakeReviewer([changing({6: ("這是第6句話！", None)}, notes="Patient: a woman")])
+
+        async def script(reviser, settle):
+            reviser.add(shown(1, 15))
+            await settle()
+        self.run_reviser(reviewer, script)
+        self.assertEqual([reviewer.numbers(0), reviewer.numbers(1)], [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]])
+        self.assertIn("NOTES: (nothing yet)", reviewer.users[0])
+        self.assertIn("NOTES: Patient: a woman", reviewer.users[1])
+        self.assertIn("這是第6句話！\n  => This is sentence 6.\n\nWINDOW:", reviewer.users[1])   # BEFORE holds the revised text
+
+    def test_the_request_and_event_of_the_spec_example(self):
+        window = shown(1, 9)
+        window[1].update(source="跟先生的感情變得穩定。", target="Her relationship with her husband became stable.")
+        reviewer = FakeReviewer([changing({2: ("跟先生的感情變得不穩定。", "Her relationship with her husband became unstable.")})])
+
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            reviser = revise_pass.Reviser(reviewer, send, "English", lambda start, end: "跟先生的感情变得不稳定", lambda text: text,
+                                          lambda text: quality_pass.units(text, quality_pass.in_words(text)))
+            reviser.add(window)
+            for _ in range(50):
+                await asyncio.sleep(0)
+            reviser.cancel()
+            return events
+        events = asyncio.run(go())
+        self.assertIn("2. SRC: 跟先生的感情變得穩定。", reviewer.users[0])
+        self.assertIn("ALT: 跟先生的感情变得不稳定", reviewer.users[0])
+        self.assertEqual(events[0]["revision"]["sentences"],
+                         [{"id": 2, "source": "跟先生的感情變得不穩定。", "target": "Her relationship with her husband became unstable."}])
+
+    def test_usable_follows_the_example_table(self):
+        for given, back, used in ((100, 100, True), (100, 80, True), (100, 79, False), (100, 130, True), (100, 131, False)):
+            self.assertIs(revise_pass.usable(given, back), used, (given, back))
+
+    def test_an_answer_that_does_not_cover_the_window_is_asked_again_then_given_up(self):
+        def drop_one(window):
+            return {"sentences": window[:5], "notes": "wrong"}
+
+        def twice_two(window):
+            window[2]["id"] = 2
+            return {"sentences": window, "notes": "wrong"}
+
+        def shortened(window):
+            for item in window:
+                item["src"] = item["src"][:3]
+            return {"sentences": window, "notes": "wrong"}
+
+        def emptied(window):
+            window[0]["tgt"] = " "
+            return {"sentences": window, "notes": "wrong"}
+        for first, second, reason in ((drop_one, drop_one, "sentences"), (twice_two, twice_two, "sentences"), (shortened, shortened, "coverage"),
+                                      (emptied, "not json", "sentences"), (httpx.ReadTimeout("slow"), emptied, "empty")):
+            reviewer = FakeReviewer([first, second, changing({1: (None, "The seventh.")}, notes="kept")])
+
+            async def script(reviser, settle):
+                reviser.add(shown(1, 15))
+                await settle()
+            with self.assertLogs("uvicorn.error", level="WARNING") as logs:
+                events = self.run_reviser(reviewer, script)
+            self.assertEqual([e["revision"]["sentences"] for e in events], [[{"id": 7, "source": "這是第7句話。", "target": "The seventh."}]], reason)
+            self.assertIn(f"quality revision sentences=6 changed=0", logs.output[0])
+            self.assertTrue(logs.output[0].endswith(f"result=failed:{reason}"), logs.output[0])
+            self.assertEqual(len(reviewer.users), 3)                       # asked twice, then the next window
+            self.assertIn("NOTES: (nothing yet)", reviewer.users[2])      # a refused answer's notes are not kept
+
+    def test_the_second_answer_is_used_when_the_first_request_fails(self):
+        reviewer = FakeReviewer([httpx.ConnectError("down"), changing({1: (None, "The first.")})])
+
+        async def script(reviser, settle):
+            reviser.add(shown(1, 9))
+            await settle()
+        events = self.run_reviser(reviewer, script)
+        self.assertEqual(events[0]["revision"]["sentences"], [{"id": 1, "source": "這是第1句話。", "target": "The first."}])
+
+    def test_far_behind_gives_up_the_oldest_windows(self):
+        reviewer = FakeReviewer()
+
+        async def script(reviser, settle):
+            reviser.add(shown(1, 43))      # 43 waiting: 13 over the limit, three windows are given up
+            await settle()
+        with self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            self.run_reviser(reviewer, script)
+        self.assertEqual([line.split("quality revision ")[1] for line in logs.output], ["sentences=6 changed=0 ms=0 result=skipped"] * 3)
+        self.assertEqual(reviewer.numbers(0), [19, 20, 21, 22, 23, 24])
+
+    def test_a_short_meeting_is_revised_when_it_ends(self):
+        reviewer = FakeReviewer([changing({4: (None, "The last one.")})])
+
+        async def script(reviser, settle):
+            reviser.add(shown(1, 4))
+            await settle()
+            self.assertEqual(reviewer.users, [])
+            await reviser.finish()
+        events = self.run_reviser(reviewer, script)
+        self.assertEqual((reviewer.numbers(0), events[0]["revision"]["sentences"][0]["id"]), ([1, 2, 3, 4], 4))
+        self.assertIn("AFTER: (nothing yet)", reviewer.users[0])
+
+    def test_the_rest_at_the_end_is_one_window_up_to_nine(self):
+        for count, windows in ((9, [9]), (10, [6, 4]), (16, [6, 6, 4])):
+            reviewer = FakeReviewer()
+
+            async def script(reviser, settle):
+                reviser.closing = True           # as when the stream has ended: nothing waits for more sentences
+                reviser.add(shown(1, count))
+                await reviser.finish()
+            self.run_reviser(reviewer, script)
+            self.assertEqual([len(reviewer.numbers(i)) for i in range(len(reviewer.users))], windows, count)
+
+    def test_a_slow_model_at_the_end_leaves_the_last_sentences(self):
+        async def slow(window):
+            await asyncio.sleep(5)
+        reviewer = FakeReviewer([slow, slow])
+
+        async def script(reviser, settle):
+            reviser.add(shown(1, 4))
+            began = time.monotonic()
+            await reviser.finish()
+            self.assertLess(time.monotonic() - began, 2)
+        with patch("revise_pass.FINISH_TIMEOUT", 0.2), self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            events = self.run_reviser(reviewer, script)
+        self.assertEqual(events, [])
+        self.assertIn("4 sentences were not revised before the stream closed", "".join(logs.output))
+
+    def test_cancel_stops_without_sending(self):
+        async def slow(window):
+            await asyncio.sleep(0.05)
+            return changing({1: (None, "Late.")})(window)
+        reviewer = FakeReviewer([slow])
+
+        async def script(reviser, settle):
+            reviser.add(shown(1, 9))
+            await settle()
+            reviser.cancel()
+            await asyncio.sleep(0.1)
+        self.assertEqual(self.run_reviser(reviewer, script), [])
+
+
+class FakeRevisingService(FakeQualityService):
+    """The quality service with the reviser's requests answered apart from the chunk requests."""
+
+    def __init__(self, heard, answers, revisions=()):
+        super().__init__(heard, answers)
+        self.revisions, self.revision_chats = list(revisions), []
+
+    def __call__(self, request):
+        if not request.url.path.endswith("/audio/transcriptions") and b"You are the reviewer" in request.content:
+            body = json.loads(request.content)
+            self.revision_chats.append(body)
+            window = [{"id": int(number), "src": src, "tgt": tgt}
+                      for number, src, tgt in re.findall(r"^(\d+)\. SRC: (.*)\n   TGT: (.*)$", body["messages"][1]["content"], re.M)]
+            answer = self.revisions.pop(0)(window) if self.revisions else {"sentences": window, "notes": ""}
+            return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(answer, ensure_ascii=False)}}]})
+        return super().__call__(request)
+
+
+class QualityRevisionTest(unittest.TestCase):
+    """quality-revision inside the quality pass: ids, the setting, events after the final one."""
+    run_pass = QualityPassTest.run_pass
+
+    @staticmethod
+    def heard_live(quality):
+        """The live engine has shown text by the first second of audio."""
+        quality.fed_ms = 1000
+        quality.live("句子即時文字")
+        quality.fed_ms = 0
+
+    def eleven(self, revisions=()):
+        answers = [{"sentences": [{"src": f"句子{n}。", "tgt": f"Sentence {n}."}], "carry": ""} for n in range(11)]
+        service = FakeRevisingService([f"句子{n}。" for n in range(11)], answers, revisions)
+        audio = b"".join(tone(5.2) + silence(1.4) for _ in range(10)) + tone(2)
+        return service, self.run_pass(service, audio, before_finish=self.heard_live)
+
+    def test_sentences_carry_ids_and_nothing_is_revised_when_the_setting_is_off(self):
+        service, events = self.eleven()
+        self.assertEqual([s["id"] for event in events for s in event["quality"]["sentences"]], list(range(1, 12)))
+        self.assertEqual((service.revision_chats, [e for e in events if "revision" in e]), ([], []))
+        self.assertEqual(len(service.chats), 11)
+
+    def test_two_events_with_two_sentences_and_one(self):
+        service = FakeQualityService(["第一句。第二句。", "第三句。"],
+                                     [{"sentences": [{"src": "第一句。", "tgt": "One."}, {"src": "第二句。", "tgt": "Two."}], "carry": ""},
+                                      {"sentences": [{"src": "第三句。", "tgt": "Three."}], "carry": ""}])
+        events = self.run_pass(service, tone(5.2) + silence(1.4) + tone(2))
+        self.assertEqual([[s["id"] for s in event["quality"]["sentences"]] for event in events if event["quality"]["sentences"]], [[1, 2], [3]])
+
+    def test_revision_events_follow_and_the_last_ones_come_after_the_final_event(self):
+        revisions = [changing({2: (None, "The second sentence.")}), changing({5: ("句子10！", None)})]   # windows: sentences 1-6, then 7-11
+        with patch("quality_pass.REVISE", True), patch("quality_pass.REVISE_EXTRA", {"thinking": {"type": "enabled"}}), patch("quality_pass.EXTRA", {"thinking": {"type": "disabled"}}):
+            service, events = self.eleven(revisions)
+        kinds = ["revision" if "revision" in e else "final" if e["quality"]["final"] else "quality" for e in events]
+        self.assertEqual((kinds.count("revision"), kinds[-1], kinds.index("final") < len(kinds) - 1), (2, "revision", True))
+        first, last = (e for e in events if "revision" in e)
+        self.assertEqual((first["revision"], "audioMs" in first), ({"seq": 1, "sentences": [{"id": 2, "source": "句子1。", "target": "The second sentence."}]}, True))
+        self.assertEqual(last["revision"], {"seq": 2, "sentences": [{"id": 11, "source": "句子10！", "target": "Sentence 10."}]})
+        self.assertEqual([chat["thinking"] for chat in service.revision_chats], [{"type": "enabled"}] * 2)   # its own extra, not the chunks'
+        self.assertEqual({chat["thinking"]["type"] for chat in service.chats}, {"disabled"})
+        self.assertIn("ALT: 句子即時文字", service.revision_chats[0]["messages"][1]["content"])
+        self.assertEqual(len(service.chats), 11)   # chunk requests are not delayed or repeated
 
 
 class QualityTargetLanguageTest(unittest.TestCase):

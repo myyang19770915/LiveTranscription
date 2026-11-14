@@ -82,6 +82,22 @@ const final=(source,target,startMs,endMs)=>({source,target,detected:'',startMs,e
   t('a final success after failures keeps the late live segment',quiet.records.map(s=>s.target),['F']);
 }
 
+// quality-revision "A sentence is revised" / "An unknown id": new text at the same position; unknown ids and malformed items are ignored.
+{
+  const state=Q.apply(Q.create(),{seq:1,throughMs:9000,final:false,sentences:[{id:1,...sentence('一。','One.',0,3000)},{id:2,...sentence('跟先生的感情變得穩定。','became stable.',3000,6000)},{id:3,...sentence('三。','Three.',6000,9000)}]},[]);
+  const before=state.records.map(s=>({...s}));
+  t('one sentence changed',Q.revise(state,{seq:1,sentences:[{id:2,source:'跟先生的感情變得不穩定。',target:'became unstable.'}]}),1);
+  t('segment 2 has the new text, same span and language',state.records[1],{...before[1],source:'跟先生的感情變得不穩定。',target:'became unstable.'});
+  t('segments 1 and 3 are unchanged',[state.records[0],state.records[2]],[before[0],before[2]]);
+  t('both panes show it',[Q.view(state,{transcript:'',timeMarks:[],finals:[]}).sources[1],Q.view(state,{transcript:'',timeMarks:[],finals:[]}).targets[1]],['跟先生的感情變得不穩定。','became unstable.']);
+  const after=JSON.stringify(state.records);
+  t('unknown id: nothing changes',[Q.revise(state,{seq:2,sentences:[{id:9,source:'x',target:'y'}]}),JSON.stringify(state.records)],[0,after]);
+  t('malformed: nothing changes',[Q.revise(state,{sentences:[{id:'2',source:'x',target:'y'},{id:2,source:'',target:'y'},{id:2,source:'x'},null]}),Q.revise(state,null),JSON.stringify(state.records)],[0,0,after]);
+  // A live segment kept after a failed chunk has no id: a revision never touches it.
+  const mixed=Q.apply(Q.create(),{seq:1,failed:true,throughMs:5000,final:false},[final('甲','A',0,4000)]);
+  t('a kept live segment is not revised',[Q.revise(mixed,{sentences:[{id:1,source:'x',target:'y'}]}),mixed.records[0].target],[0,'A']);
+}
+
 // Malformed events change nothing.
 t('ignored: not an object',Q.apply(Q.create(),null,[]).records.length,0);
 t('ignored: sentence without text',Q.apply(Q.create(),{sentences:[{source:1,target:'x'}]},[]).records.length,0);

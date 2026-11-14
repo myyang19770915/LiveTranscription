@@ -1,6 +1,7 @@
 /* 精準模式 on the live page (quality-pass). The gateway sends corrected sentences for a time range; they are
    kept, and live text and live finalized translations of that range stop being shown. A failed range keeps
-   its live finalized segments instead. Kept segments only ever grow at the end, so their saved order is stable. */
+   its live finalized segments instead. Kept segments only ever grow at the end, so their saved order is stable.
+   A revision event (quality-revision) replaces the text of kept sentences by id; their position never changes. */
 (function(root){
   const UNAVAILABLE_AFTER=3;
   const LATE_MS=1500;   // live text reaches the page up to ~1.3 s after its audio, so its segment can end that much past a range
@@ -29,13 +30,24 @@
       promote(state,liveFinals);   // before the new sentences: late segments of an earlier failed range
       for(const s of Array.isArray(event.sentences)?event.sentences:[]){
         if(typeof s?.source!=='string'||typeof s?.target!=='string')continue;
-        state.records.push({source:s.source,target:s.target,detected:s.lang||'',startMs:Number(s.startMs)||0,endMs:Number(s.endMs)||0});
+        state.records.push({source:s.source,target:s.target,detected:s.lang||'',startMs:Number(s.startMs)||0,endMs:Number(s.endMs)||0,...(Number.isInteger(s.id)?{id:s.id}:{})});
       }
       state.throughMs=Math.max(state.throughMs,state.records.at(-1)?.endMs||0);
       state.failures=0;
     }
     if(event.final)state.done=true;
     return state;
+  }
+  // The gateway looked at sentences again with more context: the ones that changed get their new text. Returns how many.
+  function revise(state,event){
+    let changed=0;
+    for(const s of Array.isArray(event?.sentences)?event.sentences:[]){
+      if(!Number.isInteger(s?.id)||typeof s.source!=='string'||typeof s.target!=='string'||!s.source.trim()||!s.target.trim())continue;
+      const record=state.records.find(r=>r.id===s.id);
+      if(!record)continue;
+      record.source=s.source;record.target=s.target;changed++;
+    }
+    return changed;
   }
   // Where the live transcript is still shown from: the end of the last text that arrived by throughMs.
   function liveFrom(state,timeMarks){
@@ -55,6 +67,6 @@
     };
   }
   function unavailable(state){return state.failures>=UNAVAILABLE_AFTER}
-  root.QualityView={create,apply,promote,view,liveFrom,unavailable};
+  root.QualityView={create,apply,revise,promote,view,liveFrom,unavailable};
   if(typeof module!=='undefined')module.exports=root.QualityView;
 })(typeof globalThis!=='undefined'?globalThis:this);

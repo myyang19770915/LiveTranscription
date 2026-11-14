@@ -23,6 +23,7 @@ import httpx
 
 import chunk_asr
 import mai_asr
+import revise_pass
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -41,6 +42,8 @@ MODEL = os.getenv("TRANSLATE_QUALITY_MODEL", "")
 ASR = os.getenv("TRANSLATE_QUALITY_ASR", "").strip().lower()
 # Off by default: the benchmarked configuration (bench/README.md) ran without the live text.
 USE_ALT = os.getenv("TRANSLATE_QUALITY_ALT", "") == "1"
+# Revision (revise_pass.py): the sentences shown are checked again in windows, with more context and reasoning.
+REVISE = os.getenv("TRANSLATE_QUALITY_REVISE", "") == "1"
 
 
 def _extra(name: str = "TRANSLATE_QUALITY_EXTRA") -> dict:
@@ -54,6 +57,8 @@ def _extra(name: str = "TRANSLATE_QUALITY_EXTRA") -> dict:
 
 
 EXTRA = _extra()
+# The same for revision requests, in place of EXTRA (reasoning is worth its seconds there).
+REVISE_EXTRA = _extra("TRANSLATE_QUALITY_REVISE_EXTRA")
 # Form fields added to the transcription request (TRANSLATE_QUALITY_ASR_EXTRA, JSON), e.g. {"max_completion_tokens": 400}
 # for Qwen3-ASR on vLLM: without a limit a repetition loop runs to the model's full length (28 s measured).
 ASR_EXTRA = {key: str(value) for key, value in _extra("TRANSLATE_QUALITY_ASR_EXTRA").items()}
@@ -356,6 +361,9 @@ class QualityPass:
         self.prompt_ok = True           # until the recognizer refuses a prompt (some take none)
         self.closing = self.finished = self.closed = False
         self.client = new_client()
+        self.sentences_sent = 0         # the id of the last sentence sent
+        self.reviser = revise_pass.Reviser(self._ask_revision, self._send_revision, target_name(language, self.target), self.live_text.between,
+                                           convert, lambda text: units(text, in_words(text)), glossary) if REVISE else None
         self.worker = asyncio.create_task(self._run())
 
     # --- input -------------------------------------------------------------------------------------------
@@ -380,7 +388,7 @@ class QualityPass:
 
     def live(self, text: str) -> None:
         """The live transcript as the browser shows it now."""
-        if USE_ALT:   # only kept when it is used
+        if USE_ALT or self.reviser:   # only kept when it is used
             self.live_text.note(text, self.fed_ms)
 
     async def finish(self) -> None:
@@ -403,6 +411,8 @@ class QualityPass:
                 logger.warning("quality pass: final chunk timed out")
                 await self._emit({"failed": True, "throughMs": self.fed_ms, "final": True})
         finally:
+            if self.reviser:
+                await self.reviser.finish()   # the sentences not yet revised, within its own time limit
             self.closed = True
             if self.mai:
                 self.mai.close()
@@ -415,6 +425,8 @@ class QualityPass:
             return
         self.closing = self.closed = True
         self.worker.cancel()
+        if self.reviser:
+            self.reviser.cancel()
         if self.mai:
             self.mai.close()
             self.mai.meter.finish_soon()
@@ -437,6 +449,9 @@ class QualityPass:
                 heard, sentences = await self._process(chunk)
                 shown = sum(len(s["source"]) + len(s["target"]) for s in sentences)
                 await self._emit({"throughMs": chunk.end_ms, "final": chunk.last, "sentences": sentences})
+                if self.reviser:
+                    self.reviser.add([{**s, "targetLang": ("ja" if s["lang"] == "zh" else "zh") if self.language == "zh_ja" else self.target}
+                                      for s in sentences])
             except asyncio.CancelledError:
                 raise
             except Exception as error:   # any failure keeps the live result; the stream goes on
@@ -454,6 +469,16 @@ class QualityPass:
     async def _emit(self, quality: dict) -> None:
         self.seq += 1
         await self.send({"quality": {"seq": self.seq, **quality}, "audioMs": self.fed_ms})
+
+    async def _ask_revision(self, messages: list[dict], timeout: float) -> dict:
+        payload = {"model": MODEL, "max_tokens": 12000, "response_format": {"type": "json_object"}, "messages": messages, **REVISE_EXTRA}
+        response = await self.client.post(f"{URL}/chat/completions", json=payload, timeout=timeout)
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"] or ""
+        return json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip()))
+
+    async def _send_revision(self, payload: dict) -> None:
+        await self.send({**payload, "audioMs": self.fed_ms})
 
     async def _twice(self, request):
         try:
@@ -518,7 +543,8 @@ class QualityPass:
         for item, (start, end) in zip(items, spans):
             lang = spoken_language(item["src"], self.language, item.get("lang", ""))
             target = ("ja" if lang == "zh" else "zh") if self.language == "zh_ja" else self.target
-            sentences.append({"source": self.convert(item["src"]) if lang == "zh" else item["src"],
+            self.sentences_sent += 1
+            sentences.append({"id": self.sentences_sent, "source": self.convert(item["src"]) if lang == "zh" else item["src"],
                               "target": self.convert(item["tgt"]) if target == "zh" else item["tgt"],
                               "lang": lang, "startMs": start, "endMs": end})
         self.context = (self.context + [{"src": s["source"], "tgt": s["target"]} for s in sentences])[-CONTEXT_SENTENCES:]

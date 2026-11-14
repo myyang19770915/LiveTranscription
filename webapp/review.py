@@ -58,7 +58,8 @@ class SegmentsIn(BaseModel):
 @router.put("/api/meetings/{meeting_id}/segments")
 async def save_segments(meeting_id: str, body: SegmentsIn, user: auth.CurrentUser):
     """Upsert by seq from the meeting page. New segments keep their ASR text and live translation for
-    good; later saves only carry refinements, and never touch a segment a reviewer has handled."""
+    good; later saves only carry refinements (a refined translation, a source text the quality pass revised),
+    and never touch a segment a reviewer has handled."""
     async with db.connect() as conn:
         meeting = await team_access.require_member(conn, user, meeting_id)
         await conn.execute("UPDATE meetings SET glossary = %s, learned_terms = %s, source_language = %s, target_language = %s WHERE id = %s",
@@ -67,8 +68,8 @@ async def save_segments(meeting_id: str, body: SegmentsIn, user: auth.CurrentUse
             await cursor.executemany(
                 "INSERT INTO segments (meeting_id, seq, start_ms, end_ms, asr_text, source, live_target, target, detected) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (meeting_id, seq) DO UPDATE SET target = excluded.target, version = segments.version + 1 "
-                "WHERE segments.target <> excluded.target AND segments.state = 'unreviewed' AND NOT EXISTS "
+                "ON CONFLICT (meeting_id, seq) DO UPDATE SET source = excluded.source, target = excluded.target, version = segments.version + 1 "
+                "WHERE (segments.target <> excluded.target OR segments.source <> excluded.source) AND segments.state = 'unreviewed' AND NOT EXISTS "
                 "(SELECT 1 FROM segment_history h WHERE h.meeting_id = segments.meeting_id AND h.seq = segments.seq)",
                 [(meeting["id"], s.seq, s.startMs, max(s.startMs, s.endMs), s.source, s.source, s.target, s.target, s.detected)
                  for s in body.segments])

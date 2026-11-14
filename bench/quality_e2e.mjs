@@ -1,6 +1,6 @@
 // 精準模式 (quality-pass) in a real browser, with a fake microphone and a fake recognition socket: the switch is shown
 // only when configured, the stream header carries quality:true and refine:false, three failed chunks change the status,
-// and stopping waits 35 s for the final event. Nothing is stored (即時翻譯 mode, no server stream).
+// a revision event replaces a kept sentence in both panes, and stopping waits 70 s for the connection to close. Nothing is stored (即時翻譯 mode, no server stream).
 // Usage: YUQIAO_SESSION=… node bench/quality_e2e.mjs [app url]
 import {homedir} from 'node:os';
 import {join} from 'node:path';
@@ -55,17 +55,25 @@ async function open(config) {
   t('the stream header asks for the quality pass and not for refinement', [header.mode, header.quality, header.refine], ['translate', true, false]);
   await page.waitForFunction(() => document.getElementById('start').classList.contains('stop'), null, {timeout: 15000});
   const status = () => page.evaluate(() => document.getElementById('status').textContent.trim());
+  // quality-revision: a kept sentence gets its revised text in both panes; the other one stays.
+  const say = message => page.evaluate(message => window.__sockets[0].onmessage({data: JSON.stringify(message)}), message);
+  await say({quality: {seq: 1, throughMs: 6000, final: false, sentences: [{id: 1, source: '跟先生的感情變得穩定。', target: 'became stable.', lang: 'zh', startMs: 0, endMs: 3000},
+    {id: 2, source: '第二句。', target: 'Second.', lang: 'zh', startMs: 3000, endMs: 6000}]}, audioMs: 6000});
+  const panes = () => page.evaluate(() => [document.getElementById('transcript').textContent, document.getElementById('translation').textContent]);
+  t('two sentences are shown', await panes(), ['跟先生的感情變得穩定。\n\n第二句。', 'became stable.\n\nSecond.']);
+  await say({revision: {seq: 1, sentences: [{id: 1, source: '跟先生的感情變得不穩定。', target: 'became unstable.'}]}, audioMs: 9000});
+  t('the revised sentence replaces the first in both panes', await panes(), ['跟先生的感情變得不穩定。\n\n第二句。', 'became unstable.\n\nSecond.']);
   const fail = seq => page.evaluate(seq => window.__sockets[0].onmessage({data: JSON.stringify({quality: {seq, failed: true, throughMs: seq * 6000, final: false}, audioMs: seq * 6000})}), seq);
-  await fail(1); await fail(2);
+  await fail(2); await fail(3);
   t('two failed chunks: the status is unchanged', (await status()).includes('精準模式暫時無法使用'), false);
-  await fail(3);
+  await fail(4);
   t('three failed chunks in a row', (await status()).includes('精準模式暫時無法使用，已改用即時結果'), true);
-  // Stop: the server never closes, so the page gives up after its 35 s wait for the final quality event.
+  // Stop: the server never closes, so the page gives up after its 70 s wait for the connection to close.
   const began = Date.now();
   await page.evaluate(() => { stopMeeting(); });
-  await page.waitForFunction(() => window.__sockets[0].readyState === 3, null, {timeout: 45000});
+  await page.waitForFunction(() => window.__sockets[0].readyState === 3, null, {timeout: 80000});
   const waited = (Date.now() - began) / 1000;
-  t('stopping waited about 35 s for the final event', waited > 34 && waited < 38, true);
+  t('stopping waited about 70 s for the connection to close', waited > 69 && waited < 73, true);
   await context.close();
 }
 await browser.close();

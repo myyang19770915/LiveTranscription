@@ -240,7 +240,7 @@ async function stopMeeting(sendEos=true) {
   if(workletNode)workletNode.port.onmessage=null;
   if(sendEos && socket?.readyState===WebSocket.OPEN) {
     const closingSocket=socket;
-    await new Promise(resolve=>{const timer=setTimeout(()=>{closingSocket.removeEventListener('close',done);toast('辨識收尾逾時，請核對最後一句',5000);resolve()},qualityOn?35000:20000);function done(){clearTimeout(timer);resolve()}closingSocket.addEventListener('close',done,{once:true});closingSocket.send(EOS)});
+    await new Promise(resolve=>{const timer=setTimeout(()=>{closingSocket.removeEventListener('close',done);toast('辨識收尾逾時，請核對最後一句',5000);resolve()},qualityOn?70000:20000);function done(){clearTimeout(timer);resolve()}closingSocket.addEventListener('close',done,{once:true});closingSocket.send(EOS)});
   }
   // 精準模式: no final event (the connection dropped, or the wait ran out) means the rest was not replaced; keep it.
   if(qualityOn&&!quality.done)QualityView.apply(quality,{failed:true,final:true,throughMs:quality.throughMs},finalizedRecords());
@@ -383,6 +383,8 @@ function onMessage(event){
   let data; try{data=JSON.parse(event.data)}catch{return}
   if(data.status==='error'){setStatus(typeof data.msg==='string'?data.msg:'辨識服務錯誤','error');return}
   if(data.quality){onQuality(data.quality);return}
+  // quality-revision: sentences already kept, corrected with more context; same position, new text.
+  if(data.revision){if(qualityOn&&QualityView.revise(quality,data.revision)){render('transcript',transcript);renderTranslation();storeSegments()}return}
   // The cloud engine's tentative tail: shown and drafted now, replaced when the confirming deltas arrive.
   if(typeof data.tentative==='string'&&data.tentative!==tentative){tentative=data.tentative;sourceRevision++;if(!(data.msg?.text)){render('transcript',transcript);if(pendingSource().trim())scheduleTranslation(false)}}
   const chunk=data.msg?.text||'';
