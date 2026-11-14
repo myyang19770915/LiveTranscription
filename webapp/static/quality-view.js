@@ -1,11 +1,13 @@
 /* 精準模式 on the live page (quality-pass). The gateway sends corrected sentences for a time range; they are
    kept, and live text and live finalized translations of that range stop being shown. A failed range keeps
-   its live finalized segments instead. Kept segments only ever grow at the end, so their saved order is stable.
-   A revision event (quality-revision) replaces the text of kept sentences by id; their position never changes. */
+   its live finalized segments instead. Every kept segment gets its sequence number (seq) when it is kept and
+   keeps it, so what was saved under a number stays that segment.
+   A revision event (quality-revision) replaces the text of kept sentences by id. It can also merge the sentences
+   after one into it (revision-merge): those leave the list, and state.merged remembers which seq went into which. */
 (function(root){
   const UNAVAILABLE_AFTER=3;
   const LATE_MS=1500;   // live text reaches the page up to ~1.3 s after its audio, so its segment can end that much past a range
-  function create(){return {records:[],throughMs:0,failures:0,done:false,gaps:[],taken:new Set()}}
+  function create(){return {records:[],seq:0,merged:[],throughMs:0,failures:0,done:false,gaps:[],taken:new Set()}}
   const key=s=>s.id||`${s.startMs}:${s.endMs}:${s.source}`;
   // Live finalized segments of a failed range become kept segments, also the ones finalized after the failure was
   // reported. Kept at the end of the list, so earlier positions never change.
@@ -13,7 +15,7 @@
     for(const s of liveFinals||[]){
       if(state.taken.has(key(s))||!state.gaps.some(gap=>s.endMs>gap.from&&s.endMs<=gap.to+LATE_MS))continue;
       state.taken.add(key(s));
-      state.records.push({source:s.source,target:s.target,detected:s.detected||'',startMs:s.startMs||0,endMs:s.endMs||0,live:true});
+      state.records.push({seq:++state.seq,source:s.source,target:s.target,detected:s.detected||'',startMs:s.startMs||0,endMs:s.endMs||0,live:true});
     }
     return state;
   }
@@ -30,7 +32,7 @@
       promote(state,liveFinals);   // before the new sentences: late segments of an earlier failed range
       for(const s of Array.isArray(event.sentences)?event.sentences:[]){
         if(typeof s?.source!=='string'||typeof s?.target!=='string')continue;
-        state.records.push({source:s.source,target:s.target,detected:s.lang||'',startMs:Number(s.startMs)||0,endMs:Number(s.endMs)||0,...(Number.isInteger(s.id)?{id:s.id}:{})});
+        state.records.push({seq:++state.seq,source:s.source,target:s.target,detected:s.lang||'',startMs:Number(s.startMs)||0,endMs:Number(s.endMs)||0,...(Number.isInteger(s.id)?{id:s.id}:{})});
       }
       state.throughMs=Math.max(state.throughMs,state.records.at(-1)?.endMs||0);
       state.failures=0;
@@ -38,7 +40,8 @@
     if(event.final)state.done=true;
     return state;
   }
-  // The gateway looked at sentences again with more context: the ones that changed get their new text. Returns how many.
+  // The gateway looked at sentences again with more context: the ones that changed get their new text, and a sentence
+  // that was cut in two becomes one (the later parts leave the list). Returns how many sentences changed.
   function revise(state,event){
     let changed=0;
     for(const s of Array.isArray(event?.sentences)?event.sentences:[]){
@@ -46,6 +49,14 @@
       const record=state.records.find(r=>r.id===s.id);
       if(!record)continue;
       record.source=s.source;record.target=s.target;changed++;
+      if(!Array.isArray(s.merged))continue;
+      for(const id of s.merged){
+        const at=state.records.findIndex(r=>r.id===id);
+        if(!Number.isInteger(id)||at<0||state.records[at]===record)continue;
+        state.merged.push({into:record.seq,from:state.records[at].seq});
+        state.records.splice(at,1);
+      }
+      if(Number(s.endMs)>record.endMs)record.endMs=Number(s.endMs);
     }
     return changed;
   }

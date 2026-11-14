@@ -417,6 +417,20 @@ class WebAppTests(AccountTestCase):
         self.assertTrue(user.endswith("Speech: 它會自動安裝好。"))
         self.assertNotIn("Already translated", translation_payload(TranslationRequest(text="你好", source="zh", target="ja"))["messages"][1]["content"])
 
+    def test_a_draft_continues_the_draft_already_shown(self):
+        # smooth-subtitles: the shown draft goes to the model with a draft request only.
+        body = TranslationRequest(text="So it kind of depends on what your definition of scale is", source="en", target="zh", draft=True, previous_draft="所以這有點取決於")
+        user = translation_payload(body)["messages"][1]["content"]
+        self.assertIn("The reader already sees this draft for the beginning of the speech: 所以這有點取決於\n", user)
+        self.assertIn("keep its wording for the part it covers unless it is wrong", user)
+        without = translation_payload(body.model_copy(update={"previous_draft": ""}))["messages"][1]["content"]
+        self.assertNotIn("already sees", without)
+        self.assertEqual(without, translation_payload(TranslationRequest(text=body.text, source="en", target="zh", draft=True))["messages"][1]["content"])
+        final = translation_payload(body.model_copy(update={"draft": False}))["messages"][1]["content"]
+        self.assertNotIn("所以這有點取決於", final)
+        with self.assertRaises(ValueError):
+            TranslationRequest(text="x", source="en", target="zh", previous_draft="字" * 601)
+
     def test_cloud_refinement_is_opt_in_and_sends_only_openai_options(self):
         body = TranslationRequest(text="它會自動安裝好。", source="zh", target="ja", refine=True)
         payload = translation_payload(body)
@@ -1065,6 +1079,89 @@ class SegmentStorageTests(ReviewTestCase):
         before = self.segment(1)
         self.save(client, meeting, [("程式設計", "programming")])
         self.assertEqual(self.segment(1), before)
+
+    # revision-merge: segments the live page merged become one stored segment.
+    CUT = [(1, 0, 6000, "一", "One."), (2, 6000, 9000, "所以我們決定", "So we decided"), (3, 9000, 12000, "在下個月開始。", "Start next month."),
+           (4, 12000, 15000, "四", "Four.")]
+    JOINED = [(1, 0, 6000, "一", "One."), (2, 6000, 12000, "所以我們決定在下個月開始。", "So we decided to start next month."), (4, 12000, 15000, "四", "Four.")]
+
+    def put(self, client, meeting, segments, merged=(), detected="zh"):
+        body = {"sourceLanguage": "zh", "targetLanguage": "en", "merged": [{"into": into, "from": gone} for into, gone in merged],
+                "segments": [{"seq": seq, "startMs": start, "endMs": end, "source": source, "target": target, "detected": detected}
+                             for seq, start, end, source, target in segments]}
+        return client.put(f"/api/meetings/{meeting}/segments", json=body)
+
+    def stored(self):
+        return self.query("SELECT seq, end_ms, asr_text, source, live_target, target, version FROM segments ORDER BY seq")
+
+    def test_two_stored_segments_are_merged_into_one(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        self.put(client, meeting, self.CUT)
+        self.assertEqual(self.put(client, meeting, self.JOINED, [(2, 3)]).status_code, 200)
+        merged = [(1, 6000, "一", "一", "One.", "One.", 1),
+                  (2, 12000, "所以我們決定在下個月開始。", "所以我們決定在下個月開始。", "So we decided Start next month.", "So we decided to start next month.", 2),
+                  (4, 15000, "四", "四", "Four.", "Four.", 1)]
+        self.assertEqual(self.stored(), merged)
+        self.put(client, meeting, self.JOINED, [(2, 3)])   # the same save again changes nothing
+        self.assertEqual(self.stored(), merged)
+
+    def test_a_merge_with_a_segment_a_reviewer_handled_changes_neither(self):
+        for handle in ("edit", "speaker", "confirm-into"):
+            client, meeting = self.signed_in("alice"), self.meeting_id()
+            self.put(client, meeting, self.CUT)
+            if handle == "edit":
+                self.assertEqual(client.post(f"/api/meetings/{meeting}/segments/3/edit", json={"version": 1, "source": "在下個月開始！"}).status_code, 200)
+            elif handle == "speaker":
+                with psycopg.connect(TEST_DATABASE_URL) as conn:
+                    conn.execute("UPDATE segments SET speaker_manual = true WHERE seq = 3")
+            else:
+                self.assertEqual(client.post(f"/api/meetings/{meeting}/segments/2/confirm", json={"version": 1}).status_code, 200)
+            before = self.stored()
+            self.assertEqual(self.put(client, meeting, self.JOINED, [(2, 3)]).status_code, 200)
+            self.assertEqual(self.stored(), before, handle)
+            with psycopg.connect(TEST_DATABASE_URL) as conn:
+                conn.execute("DELETE FROM segments")
+
+    def test_a_merge_of_a_segment_that_was_never_saved(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        self.put(client, meeting, self.CUT[:2])
+        self.put(client, meeting, self.JOINED[:2], [(2, 3)])
+        self.assertEqual([row[:4] for row in self.stored()], [(1, 6000, "一", "一"), (2, 12000, "所以我們決定", "所以我們決定在下個月開始。")])
+
+    def test_three_segments_merged_and_the_first_saved_texts_joined_by_language(self):
+        for detected, parts, joined in (("ja", ("それで私たちは", "来月から", "始めます。"), "それで私たちは来月から始めます。"),
+                                        ("en", ("So we decided", "to start", "next month."), "So we decided to start next month.")):
+            client, meeting = self.signed_in("alice"), self.meeting_id()
+            self.put(client, meeting, [(n + 1, n * 1000, n * 1000 + 1000, part, f"t{n + 1}") for n, part in enumerate(parts)], detected=detected)
+            self.put(client, meeting, [(1, 0, 3000, joined, "all")], [(1, 2), (1, 3)], detected=detected)
+            self.assertEqual(self.stored(), [(1, 3000, joined, joined, "t1 t2 t3", "all", 2)])
+            with psycopg.connect(TEST_DATABASE_URL) as conn:
+                conn.execute("DELETE FROM segments")
+
+    def test_three_parts_with_one_a_reviewer_handled_all_stay(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        parts = [(1, 0, 1000, "甲", "A"), (2, 1000, 2000, "乙", "B"), (3, 2000, 3000, "丙", "C")]
+        for handled in (2, 3):
+            self.put(client, meeting, parts)
+            self.assertEqual(client.post(f"/api/meetings/{meeting}/segments/{handled}/confirm", json={"version": 1}).status_code, 200)
+            before = self.stored()
+            self.put(client, meeting, [(1, 0, 3000, "甲乙丙", "A B C")], [(1, 2), (1, 3)])
+            self.assertEqual(self.stored(), before, handled)
+            with psycopg.connect(TEST_DATABASE_URL) as conn:
+                conn.execute("DELETE FROM segments")
+
+    def test_a_merge_of_a_part_never_saved_extends_the_stored_segment(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        self.put(client, meeting, self.CUT[:2])
+        self.put(client, meeting, self.JOINED[:2], [(2, 3)])
+        self.assertEqual(self.stored()[1][:2], (2, 12000))
+
+    def test_a_merge_into_a_later_segment_is_refused(self):
+        client, meeting = self.signed_in("alice"), self.meeting_id()
+        self.put(client, meeting, self.CUT)
+        for into, gone in ((3, 2), (2, 2), (0, 1)):
+            self.assertEqual(self.put(client, meeting, self.JOINED, [(into, gone)]).status_code, 422, (into, gone))
+        self.assertEqual(len(self.stored()), 4)
 
     def test_saving_segments_of_another_teams_meeting_is_404(self):
         theirs = self.team("業務", "bob")
@@ -2888,6 +2985,18 @@ def changing(changes, notes=""):
     return answer
 
 
+def merging(groups, texts=None, notes=""):
+    """An answer whose items stand for `groups` of the window's numbers; the parts' texts joined, or `texts[first number]`."""
+    def answer(window):
+        items = []
+        for group in groups:
+            parts = [window[number - 1] for number in group]
+            src, tgt = (texts or {}).get(group[0] if group else 0, ("".join(p["src"] for p in parts), " ".join(p["tgt"] for p in parts)))
+            items.append({"ids": list(group), "src": src, "tgt": tgt})
+        return {"sentences": items, "notes": notes}
+    return answer
+
+
 class ReviserTest(unittest.TestCase):
     """quality-revision: shown sentences are revised in windows; anything that goes wrong keeps the first result."""
 
@@ -2978,6 +3087,100 @@ class ReviserTest(unittest.TestCase):
         self.assertEqual(events[0]["revision"]["sentences"],
                          [{"id": 2, "source": "跟先生的感情變得不穩定。", "target": "Her relationship with her husband became unstable."}])
 
+    def test_a_sentence_cut_in_two_is_merged(self):
+        # revision-merge, the spec example: one item for sentences 2 and 3.
+        window = shown(1, 15)
+        window[1].update(source="所以我們決定", target="So we decided", startMs=6000, endMs=9000)
+        window[2].update(source="在下個月開始。", target="Start next month.", startMs=9000, endMs=12000)
+        reviewer = FakeReviewer([merging([[1], [2, 3], [4], [5], [6]], {2: ("所以我們決定在下個月開始。", "So we decided to start next month.")})])
+
+        async def script(reviser, settle):
+            reviser.add(window)
+            await settle()
+        with self.assertLogs("uvicorn.error", level="INFO") as logs:
+            events = self.run_reviser(reviewer, script)
+        self.assertEqual(events, [{"revision": {"seq": 1, "sentences": [
+            {"id": 2, "source": "所以我們決定在下個月開始。", "target": "So we decided to start next month.", "merged": [3], "endMs": 12000}]}}])
+        self.assertIn("quality revision sentences=6 changed=1 merged=1", logs.output[0])
+        # The next window starts at sentence 7 and has five sentences before it, the merged one once.
+        self.assertEqual(reviewer.numbers(1), [7, 8, 9, 10, 11, 12])
+        before = reviewer.users[1].split("BEFORE:\n")[1].split("\n\nWINDOW:")[0]
+        self.assertEqual(before.count("\n  => "), 5)
+        self.assertEqual(before.count("所以我們決定在下個月開始。\n  => So we decided to start next month."), 1)
+        self.assertNotIn("Start next month.", before)
+
+    def test_merges_follow_the_example_table(self):
+        mixed = lambda: [dict(s, lang="ja") if s["id"] == 3 else s for s in shown(1, 9)]
+        for groups, sentences, used in (([[1], [2, 3], [4], [5], [6]], shown(1, 9), True), ([[1], [2, 3, 4], [5], [6]], shown(1, 9), False),
+                                        ([[1], [2, 3, 4, 5], [6]], shown(1, 9), False), ([[1], [2, 4], [3], [5], [6]], shown(1, 9), False),
+                                        ([[1], [], [2], [3], [4], [5], [6]], shown(1, 9), False), ([[1], [2, 3], [4], [5], [6]], mixed(), False)):
+            reviewer = FakeReviewer([merging(groups), merging(groups)])
+
+            async def script(reviser, settle):
+                reviser.add(sentences)
+                await settle()
+            with self.assertLogs("uvicorn.error", level="INFO") as logs:
+                events = self.run_reviser(reviewer, script)
+            self.assertEqual(len(events), 1 if used else 0, groups)
+            self.assertEqual(len(reviewer.users), 1 if used else 2, groups)   # an unusable answer is asked for once more
+            if used:
+                self.assertEqual(events[0]["revision"]["sentences"][0]["merged"], groups[1][1:])
+            else:
+                self.assertRegex(logs.output[0], r"merged=0 ms=\d+ result=failed:(sentences|merge)$")
+        self.assertTrue(logs.output[0].endswith("result=failed:merge"))   # the last case: two languages
+
+    def test_the_windows_left_at_the_end_are_asked_together(self):
+        asked_at_first_answer = []
+
+        def slow(changes):
+            async def answer(window):
+                await asyncio.sleep(0.05)
+                asked_at_first_answer.append(len(reviewer.users))
+                return changing(changes)(window)
+            return answer
+        reviewer = FakeReviewer([slow({1: (None, "The first.")}), slow({3: (None, "The ninth.")})])
+
+        async def script(reviser, settle):
+            reviser.closing = True           # as when the stream has ended: nothing waits for more sentences
+            reviser.add(shown(1, 15))
+            await reviser.finish()
+        events = self.run_reviser(reviewer, script)
+        self.assertEqual([reviewer.numbers(0), reviewer.numbers(1)], [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12, 13, 14, 15]])
+        self.assertEqual(asked_at_first_answer[0], 2)                # both requests were out before the first answer
+        self.assertEqual(sorted(s["id"] for e in events for s in e["revision"]["sentences"]), [1, 9])
+
+    def test_the_rest_is_asked_for_while_a_window_is_still_being_revised(self):
+        asked_before_the_first_answer = []
+
+        async def slow(window):
+            await asyncio.sleep(0.05)
+            asked_before_the_first_answer.append(len(reviewer.users))
+        reviewer = FakeReviewer([slow, changing({1: (None, "The seventh.")})])
+
+        async def script(reviser, settle):
+            reviser.add(shown(1, 13))        # sentences 1 to 6 are being revised when the stream ends
+            await settle()
+            self.assertEqual(len(reviewer.users), 1)
+            await reviser.finish()
+        events = self.run_reviser(reviewer, script)
+        self.assertEqual([reviewer.numbers(0), reviewer.numbers(1)], [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12, 13]])
+        self.assertEqual(asked_before_the_first_answer, [2])      # sentences 7 to 13 did not wait for the first window
+        self.assertEqual(events[0]["revision"]["sentences"], [{"id": 7, "source": "這是第7句話。", "target": "The seventh."}])
+
+    def test_a_merge_at_the_end_and_what_was_not_done_in_time(self):
+        async def never(window):
+            await asyncio.sleep(5)
+        reviewer = FakeReviewer([merging([[1, 2], [3], [4], [5], [6]]), never])
+
+        async def script(reviser, settle):
+            reviser.closing = True
+            reviser.add(shown(1, 15))
+            await reviser.finish()
+        with patch("revise_pass.FINISH_TIMEOUT", 0.2), self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            events = self.run_reviser(reviewer, script)
+        self.assertEqual(events[0]["revision"]["sentences"][0]["merged"], [2])
+        self.assertIn("9 sentences were not revised before the stream closed", "".join(logs.output))
+
     def test_usable_follows_the_example_table(self):
         for given, back, used in ((100, 100, True), (100, 80, True), (100, 79, False), (100, 130, True), (100, 131, False)):
             self.assertIs(revise_pass.usable(given, back), used, (given, back))
@@ -3030,7 +3233,7 @@ class ReviserTest(unittest.TestCase):
             await settle()
         with self.assertLogs("uvicorn.error", level="WARNING") as logs:
             self.run_reviser(reviewer, script)
-        self.assertEqual([line.split("quality revision ")[1] for line in logs.output], ["sentences=6 changed=0 ms=0 result=skipped"] * 3)
+        self.assertEqual([line.split("quality revision ")[1] for line in logs.output], ["sentences=6 changed=0 merged=0 ms=0 result=skipped"] * 3)
         self.assertEqual(reviewer.numbers(0), [19, 20, 21, 22, 23, 24])
 
     def test_a_short_meeting_is_revised_when_it_ends(self):

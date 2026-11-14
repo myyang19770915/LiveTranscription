@@ -1,6 +1,6 @@
 // 精準模式 (quality-pass) in a real browser, with a fake microphone and a fake recognition socket: the switch is shown
 // only when configured, the stream header carries quality:true and refine:false, three failed chunks change the status,
-// a revision event replaces a kept sentence in both panes, and stopping waits 70 s for the connection to close. Nothing is stored (即時翻譯 mode, no server stream).
+// a revision event replaces a kept sentence in both panes and merges two, and stopping waits 70 s for the connection to close. Nothing is stored (即時翻譯 mode, no server stream).
 // Usage: YUQIAO_SESSION=… node bench/quality_e2e.mjs [app url]
 import {homedir} from 'node:os';
 import {join} from 'node:path';
@@ -63,6 +63,23 @@ async function open(config) {
   t('two sentences are shown', await panes(), ['跟先生的感情變得穩定。\n\n第二句。', 'became stable.\n\nSecond.']);
   await say({revision: {seq: 1, sentences: [{id: 1, source: '跟先生的感情變得不穩定。', target: 'became unstable.'}]}, audioMs: 9000});
   t('the revised sentence replaces the first in both panes', await panes(), ['跟先生的感情變得不穩定。\n\n第二句。', 'became unstable.\n\nSecond.']);
+  // revision-merge: a sentence cut in two becomes one segment in both panes.
+  await say({revision: {seq: 2, sentences: [{id: 1, source: '跟先生的感情變得不穩定，第二句。', target: 'became unstable, second.', merged: [2], endMs: 6000}]}, audioMs: 12000});
+  t('the merged sentence is one segment in both panes', await panes(), ['跟先生的感情變得不穩定，第二句。', 'became unstable, second.']);
+  // smooth-subtitles "The panes follow the newest text smoothly": following at the end, not while reading earlier text.
+  const more = (seq, from) => say({quality: {seq, throughMs: 6000 + seq * 6000, final: false, sentences: Array.from({length: 30}, (_, i) => ({id: from + i, source: `第 ${from + i} 句，用來把原文欄填滿。`, target: `Sentence ${from + i} fills the pane.`, lang: 'zh', startMs: 6000 + seq * 6000, endMs: 12000 + seq * 6000}))}, audioMs: 12000 + seq * 6000});
+  const pane = () => page.evaluate(() => { const el = document.getElementById('transcript'); return {top: Math.round(el.scrollTop), end: el.scrollHeight - el.clientHeight}; });
+  await more(5, 3); await page.waitForTimeout(1200);
+  let at = await pane();
+  t('following: the pane scrolled to its new end', at.end > 300 && at.end - at.top < 3, true);
+  await page.evaluate(() => { const el = document.getElementById('transcript'); el.dispatchEvent(new WheelEvent('wheel', {bubbles: true, deltaY: -120})); el.scrollTo({top: el.scrollHeight - el.clientHeight - 300, behavior: 'instant'}); });
+  const reading = (await pane()).top;
+  await more(6, 33); await page.waitForTimeout(1200);
+  t('reading earlier text: the scroll position stays', (await pane()).top, reading);
+  await page.evaluate(() => { const el = document.getElementById('transcript'); el.scrollTo({top: el.scrollHeight, behavior: 'instant'}); });
+  await more(7, 63); await page.waitForTimeout(1200);
+  at = await pane();
+  t('back at the end: the pane follows again', at.end - at.top < 3, true);
   const fail = seq => page.evaluate(seq => window.__sockets[0].onmessage({data: JSON.stringify({quality: {seq, failed: true, throughMs: seq * 6000, final: false}, audioMs: seq * 6000})}), seq);
   await fail(2); await fail(3);
   t('two failed chunks: the status is unchanged', (await status()).includes('精準模式暫時無法使用'), false);

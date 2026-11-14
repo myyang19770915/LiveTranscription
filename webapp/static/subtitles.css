@@ -13,8 +13,12 @@ body[data-size="4"] { font-size: 40px; }
 .sub-title { margin-left: auto; color: var(--faint); }
 .sub-close { margin-left: 4px; }
 /* The segments hug the bottom: the newest is always in view and the window shows as many earlier ones as fit; when it
-   overflows, the oldest go. Source and translation share one text size and weight; the source is in a muted colour. */
-.sub-body { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; padding: 0 16px 10px; }
+   overflows, the oldest go, fading out at the top edge so no line is cut in half. Segments glide to their new place
+   when text below them gets taller (subtitles.js glide). Source and translation share one text size and weight; the
+   source is in a muted colour. */
+.sub-body { flex: 1; min-height: 0; display: flex; position: relative; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.35em); mask-image: linear-gradient(to bottom, transparent 0, #000 1.35em); }
+.sub-roll { position: absolute; left: 16px; right: 16px; bottom: 10px; }
 .sub-history, .sub-current { display: grid; gap: 10px; }
 .sub-current:has(> :not([hidden])) { margin-top: 10px; }
 .sub-seg { display: grid; gap: 2px; }
@@ -22,5 +26,11 @@ body[data-size="4"] { font-size: 40px; }
 .sub-source, .sub-text, .sub-now, .sub-draft { margin: 0; font-size: 1em; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .sub-source { color: var(--muted); }
 .sub-now, .sub-draft { color: var(--sub-now); }   /* the speech being translated now and its draft: not final yet */
+/* The speech now: whole, in at most two lines, its end in view (the older words leave at the top). It and the draft
+   are frames around their text, so a new line comes in from below without covering what is under it. */
+.sub-now { display: flex; flex-direction: column; justify-content: flex-end; min-height: 1.35em; max-height: calc(1.35em * 2); overflow: hidden; }
+.sub-draft { min-height: 1.35em; overflow: hidden; }
+.sub-now > span, .sub-draft > span { display: block; }
+.unsure { opacity: .55; }   /* the end of a draft: the next draft may still change it */
 .sub-empty { margin: auto; color: var(--faint); font-size: 16px; }
 [hidden] { display: none !important; }

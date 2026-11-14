@@ -13,7 +13,7 @@ from datetime import date
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from starlette.background import BackgroundTask
 
 import auth
@@ -47,34 +47,84 @@ class SegmentIn(BaseModel):
     detected: str = Field(default="", max_length=16)
 
 
+class MergeIn(BaseModel):
+    """Segment `from` was merged into segment `into` on the live page (revision-merge)."""
+    into: int = Field(ge=1)
+    absorbed: int = Field(alias="from", ge=2)
+
+    @model_validator(mode="after")
+    def later(self):
+        if self.absorbed <= self.into:
+            raise ValueError("from must be greater than into")
+        return self
+
+
 class SegmentsIn(BaseModel):
     glossary: str = Field(default="", max_length=4000)
     learned: str = Field(default="", max_length=8000)
     sourceLanguage: str = Field(default="", max_length=16)
     targetLanguage: str = Field(default="", max_length=16)
     segments: list[SegmentIn] = Field(max_length=5000)
+    merged: list[MergeIn] = Field(default=[], max_length=5000)
 
 
 @router.put("/api/meetings/{meeting_id}/segments")
 async def save_segments(meeting_id: str, body: SegmentsIn, user: auth.CurrentUser):
     """Upsert by seq from the meeting page. New segments keep their ASR text and live translation for
     good; later saves only carry refinements (a refined translation, a source text the quality pass revised),
-    and never touch a segment a reviewer has handled."""
+    and never touch a segment a reviewer has handled. Segments the page merged become one stored segment first."""
     async with db.connect() as conn:
         meeting = await team_access.require_member(conn, user, meeting_id)
         await conn.execute("UPDATE meetings SET glossary = %s, learned_terms = %s, source_language = %s, target_language = %s WHERE id = %s",
                            (body.glossary, body.learned, body.sourceLanguage, body.targetLanguage, meeting["id"]))
+        blocked = await merge_segments(conn, meeting["id"], body.merged)
         async with conn.cursor() as cursor:
             await cursor.executemany(
                 "INSERT INTO segments (meeting_id, seq, start_ms, end_ms, asr_text, source, live_target, target, detected) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (meeting_id, seq) DO UPDATE SET source = excluded.source, target = excluded.target, version = segments.version + 1 "
+                "ON CONFLICT (meeting_id, seq) DO UPDATE SET source = excluded.source, target = excluded.target, version = segments.version + 1, "
+                # a segment that took in one never saved ends where that one ended
+                "end_ms = GREATEST(segments.end_ms, excluded.end_ms) "
                 "WHERE (segments.target <> excluded.target OR segments.source <> excluded.source) AND segments.state = 'unreviewed' AND NOT EXISTS "
                 "(SELECT 1 FROM segment_history h WHERE h.meeting_id = segments.meeting_id AND h.seq = segments.seq)",
                 [(meeting["id"], s.seq, s.startMs, max(s.startMs, s.endMs), s.source, s.source, s.target, s.target, s.detected)
-                 for s in body.segments])
+                 for s in body.segments if s.seq not in blocked])
         await diarize.label_new_segments(conn, meeting["id"])
     return {"saved": len(body.segments)}
+
+
+async def merge_segments(conn, meeting_id, merges: list[MergeIn]) -> set[int]:
+    """Make each stored pair one segment: the first keeps its seq and gets the other's first-saved texts and end, the
+    other is deleted. A pair with a segment somebody has handled stays as it is; returns the `into` of those pairs,
+    which this save must not rewrite (the merged text would repeat the segment that stays)."""
+    blocked: set[int] = set()
+    if not merges:
+        return blocked
+    stored = {row["seq"] for row in await (await conn.execute(
+        "SELECT seq FROM segments WHERE meeting_id = %s AND seq = ANY(%s)", (meeting_id, [m.absorbed for m in merges]))).fetchall()}
+    groups: dict[int, list[int]] = {}   # into -> the stored segments merged into it (never saved, or merged before: nothing to do)
+    for merge in merges:
+        if merge.absorbed in stored:
+            groups.setdefault(merge.into, []).append(merge.absorbed)
+    for into, absorbed in groups.items():
+        rows = {row["seq"]: row for row in await (await conn.execute(
+            "SELECT s.seq, s.asr_text, s.live_target, s.end_ms, s.detected, (s.state = 'unreviewed' AND NOT s.speaker_manual AND NOT EXISTS "
+            "(SELECT 1 FROM segment_history h WHERE h.meeting_id = s.meeting_id AND h.seq = s.seq)) AS free "
+            "FROM segments s WHERE s.meeting_id = %s AND s.seq = ANY(%s) FOR UPDATE OF s", (meeting_id, [into, *absorbed]))).fetchall()}
+        kept, gone = rows.get(into), [rows[seq] for seq in sorted(absorbed) if seq in rows]
+        if not gone:
+            continue
+        # All of one sentence's parts or none: a part somebody has handled keeps every part as it is.
+        if kept is None or not kept["free"] or not all(row["free"] for row in gone):
+            blocked.add(into)
+            continue
+        glue = "" if kept["detected"].startswith(("zh", "ja")) else " "
+        await conn.execute("UPDATE segments SET asr_text = %s, live_target = %s, end_ms = %s WHERE meeting_id = %s AND seq = %s",
+                           (glue.join([kept["asr_text"], *(row["asr_text"] for row in gone)]),
+                            " ".join(filter(None, [kept["live_target"], *(row["live_target"] for row in gone)])),
+                            max(kept["end_ms"], *(row["end_ms"] for row in gone)), meeting_id, into))
+        await conn.execute("DELETE FROM segments WHERE meeting_id = %s AND seq = ANY(%s)", (meeting_id, [row["seq"] for row in gone]))
+    return blocked
 
 
 # --- Playback -------------------------------------------------------------------------------------

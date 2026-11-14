@@ -17,7 +17,8 @@ let failed = false;
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` ${JSON.stringify(detail)}` : ''}`); failed ||= !ok; };
 const meetingCount = page => page.evaluate(async () => { const j = await (await fetch('/api/meetings')).json(); return (j.meetings || j).length; });
 try {
-  const context = await browser.newContext({viewport: {width: 1440, height: 900}, permissions: ['microphone'], acceptDownloads: true});
+  // Reduced motion: text is at its place at once, so places can be read right after an update (bench/smooth_e2e.mjs measures the glides).
+  const context = await browser.newContext({viewport: {width: 1440, height: 900}, permissions: ['microphone'], acceptDownloads: true, reducedMotion: 'reduce'});
   await context.addInitScript(() => localStorage.setItem('interpreter-theme', 'light'));
   // Document Picture-in-Picture is not in headless Chromium: a popup window stands in for it (same document API).
   await context.addInitScript(() => { window.documentPictureInPicture = {requestWindow: async () => window.open('', 'subtitles', 'width=760,height=260')}; });
@@ -113,6 +114,16 @@ try {
     await page.evaluate(() => Subtitles.update({done: '第一句。', pending: '第二句還在講', translation: 'First.', draft: 'Second being'}));
     const pipColours = await popup.evaluate(() => { const c = s => getComputedStyle(document.querySelector(s)).color; return {now: c('.sub-now'), draft: c('.sub-draft'), text: c('.sub-text'), nowText: document.querySelector('.sub-now').textContent}; });
     check('the floating window colours the current speech like its draft', pipColours.now === pipColours.draft && pipColours.now !== pipColours.text && pipColours.nowText === '第二句還在講', pipColours);
+    await page.evaluate(() => Subtitles.update({pending: '第一句很長很長很長很長很長很長很長很長很長很長很長很長很長很長很長很長很長很長。第二句也很長很長很長很長很長很長很長很長很長很長很長很長很長很長很長很長很長。第三句的結尾在這裡', draft: 'Second being'}));
+    const nowBox = await popup.evaluate(() => { const now = document.querySelector('.sub-now'), frame = now.getBoundingClientRect(), text = now.firstElementChild.getBoundingClientRect(), line = parseFloat(getComputedStyle(now).fontSize) * 1.35;   // reduced motion: nothing is gliding
+      return {lines: frame.height / line, textLines: text.height / line, endInView: Math.abs(text.bottom - frame.bottom) < 2, masked: getComputedStyle(document.querySelector('.sub-body')).maskImage.includes('gradient') || getComputedStyle(document.querySelector('.sub-body')).webkitMaskImage.includes('gradient')}; });
+    check('long current speech: two lines high, its last words in view, the top edge fades', Math.abs(nowBox.lines - 2) < 0.05 && nowBox.textLines > 2.5 && nowBox.endInView && nowBox.masked, nowBox);
+    // The unsettled end of a draft is lighter: the spec's example table, and the floating window draws it without changing the text.
+    const ends = await page.evaluate(() => [['', '所以這有點取決於'], ['所以這有點取決於', '所以這有點取決於你對大規模的定義是什麼'], ['So we decided to', 'So we decided to start next month with the new plan'], ['Hello there friend', 'Hello there friend']].map(([before, text]) => text.slice(Subtitles.solid(before, text))));
+    check('the lighter end of a draft follows the example table', JSON.stringify(ends) === JSON.stringify(['所以這有點取決於', '你對大規模的定義是什麼', 'month with the new plan', 'there friend']), ends);
+    await page.evaluate(() => Subtitles.update({draft: 'So we decided to start next month', draftSolid: 17}));
+    const unsure = await popup.evaluate(() => { const d = document.querySelector('.sub-draft'), u = d.querySelector('.unsure'); return {text: d.textContent, end: u?.textContent, lighter: u ? Number(getComputedStyle(u).opacity) < 1 : false}; });
+    check('the floating window draws the draft end lighter, the text unchanged', unsure.text === 'So we decided to start next month' && unsure.end === 'start next month' && unsure.lighter, unsure);
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('subtitles') || '{}'));
     check('both settings are remembered', saved.source === true && saved.size === 3, saved);
     await popup.close(); await page.waitForTimeout(300);
@@ -188,10 +199,10 @@ try {
   // Long content stays subtitle-sized: each part at most two of its lines, the current speech and the draft (newest) visible, the box under half the window.
   await page.evaluate(() => Overlay.update({done: '這是一段很長的中文原文，用來確認原文那一行不會把字幕框撐高。', pending: '現在正在講的這一句也很長，長到會換行，最新的字必須看得到才對。', translation: Array.from({length: 8}, (_, i) => `Sentence number ${i + 1} of a long English translation that wraps across the whole subtitle box width.`).join(' '), draft: 'and the draft keeps going with even more words that must remain visible at the bottom'}));
   const sized = await page.evaluate(() => { const b = document.querySelector('#screenView .overlay-subs'), body = b.querySelector('.ov-body'), d = b.querySelector('.ov-draft');
-    const line = parseFloat(getComputedStyle(b).fontSize) * 1.35, br = body.getBoundingClientRect(), dr = d.getBoundingClientRect(), t = b.querySelector('.ov-text').getBoundingClientRect(), src = b.querySelector('.ov-source').getBoundingClientRect(), nr = b.querySelector('.ov-now').getBoundingClientRect();
+    const line = parseFloat(getComputedStyle(b).fontSize) * 1.35, br = body.getBoundingClientRect(), dr = d.getBoundingClientRect(), t = b.querySelector('.ov-lines').getBoundingClientRect(), src = b.querySelector('.ov-source').getBoundingClientRect(), nr = b.querySelector('.ov-now').getBoundingClientRect();
     const inside = (r, o) => r.bottom <= o.bottom + 1 && r.bottom > o.top;
     return {bodyLines: br.height / line, textLines: t.height / line, boxRatio: b.getBoundingClientRect().height / innerHeight, draftVisible: inside(dr, br), nowVisible: inside(nr, src) && inside(src, br)}; });
-  check('long content: translation at most two lines, body under five, the current speech and the draft visible, the box under half the window', sized.textLines <= 2.05 && sized.bodyLines <= 5.2 && sized.boxRatio <= 0.5 && sized.draftVisible && sized.nowVisible, sized);
+  check('long content: the translation area is three lines, body under five, the current speech and the draft visible, the box under half the window', Math.abs(sized.textLines - 3) < 0.05 && sized.bodyLines <= 5.2 && sized.boxRatio <= 0.5 && sized.draftVisible && sized.nowVisible, sized);
   // Fixed height, one text size: the box keeps its height with little content, and source, translation and draft match.
   const fixedBefore = await page.evaluate(() => document.querySelector('#screenView .overlay-subs').getBoundingClientRect().height);
   await page.evaluate(() => Overlay.update({done: '短', pending: '', translation: 'Hi.', draft: ''}));
@@ -210,6 +221,16 @@ try {
   await page.evaluate(() => Overlay.update({done: '上一段原文', pending: '', translation: 'Seg A. Seg B.', draft: ''}));
   const segs = await page.evaluate(() => ({done: document.querySelector('#screenView .ov-done').textContent, text: document.querySelector('#screenView .ov-text').textContent}));
   check('the overlay shows the previous segment source and the last two segments as given', segs.done === '上一段原文' && segs.text === 'Seg A. Seg B.', segs);
+  await page.evaluate(() => Overlay.update({done: '第一句。', pending: '第二句還在講', translation: 'First.', draft: 'Second being'}));
+  // A segment is finalized where its draft was; the finalized segment above stays where it is.
+  const placeOf = () => page.evaluate(() => { const top = el => el ? Math.round(el.getBoundingClientRect().top) : null, segs = [...document.querySelectorAll('#screenView .ov-seg')];
+    return {segs: segs.map(p => [p.textContent, top(p)]), draft: [document.querySelector('#screenView .ov-draft').textContent, top(document.querySelector('#screenView .ov-draft'))]}; });
+  await page.evaluate(() => Overlay.update({done: '第一句。', pending: '第二句還在講', translation: 'First.', draft: 'Second being'}));
+  const beforeFinal = await placeOf();
+  await page.evaluate(() => Overlay.update({done: '第二句還在講', pending: '', draft: '', history: [{source: '第一句。', target: 'First.'}, {source: '第二句還在講', target: 'Second being here.'}]}));
+  const afterFinal = await placeOf();
+  check('a segment is finalized where its draft was and the one above stays', beforeFinal.segs.length === 1 && afterFinal.segs.length === 2 && afterFinal.segs[0][1] === beforeFinal.segs[0][1]
+    && afterFinal.segs[1][0] === 'Second being here.' && afterFinal.segs[1][1] === beforeFinal.draft[1], {beforeFinal, afterFinal});
   await page.evaluate(() => Overlay.update({done: '第一句。', pending: '第二句還在講', translation: 'First.', draft: 'Second being'}));
   const colours = await page.evaluate(() => { const c = s => getComputedStyle(document.querySelector('#screenView ' + s)).color; return {now: c('.ov-now'), draft: c('.ov-draft'), text: c('.ov-text'), done: c('.ov-done'), nowText: document.querySelector('#screenView .ov-now').textContent}; });
   check('the speech being translated and its draft share a colour, distinct from finalized text', colours.now === colours.draft && colours.now !== colours.text && colours.done === colours.text && colours.nowText === '第二句還在講', colours);

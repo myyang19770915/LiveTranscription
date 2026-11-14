@@ -70,33 +70,43 @@ function subtitleParts(){
   const pending=transcript.slice(translationOffset),last=s=>window.Subtitles?.lastSentences(s,1)||'';
   if(qualityOn){
     const all=[...quality.records,...qualityShown().liveFinals];
-    return {done:all.at(-1)?.source||'',pending:quality.done?'':pending+tentative,translation:all.slice(-2).map(s=>s.target).join(' '),draft:quality.done?'':draftText,
+    return {done:all.at(-1)?.source||'',pending:quality.done?'':pending+tentative,translation:all.slice(-2).map(s=>s.target).join(' '),draft:quality.done?'':draftText,draftSolid,
       history:all.slice(-SUBTITLE_HISTORY).map(s=>({source:s.source,target:s.target}))};
   }
   if(!translateOnly()){   // 開會: sentences, as before; the translation is split once for both the last two and the history
     const sentences=window.Subtitles?.sentences(translated)||[];
-    return {done:last(transcript.slice(0,translationOffset)),pending:pending+tentative,translation:window.Subtitles?.joinSentences(sentences.slice(-2))||'',draft:draftText,
+    return {done:last(transcript.slice(0,translationOffset)),pending:pending+tentative,translation:window.Subtitles?.joinSentences(sentences.slice(-2))||'',draft:draftText,draftSolid,
       history:sentences.slice(-SUBTITLE_HISTORY).map(target=>({source:'',target}))};
   }
   const finals=finalizedRecords();
-  return {done:finals.at(-1)?.source||'',pending:pending+tentative,translation:finals.slice(-2).map(s=>s.target).join(' '),draft:draftText,
+  return {done:finals.at(-1)?.source||'',pending:pending+tentative,translation:finals.slice(-2).map(s=>s.target).join(' '),draft:draftText,draftSolid,
     history:finals.slice(-SUBTITLE_HISTORY).map(s=>({source:s.source,target:s.target}))};
 }
-function render(id, value) { if(id==='transcript'){const parts=subtitleParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=el.classList.contains('empty')||el.scrollHeight-el.scrollTop-el.clientHeight<72;
+// A pane follows its newest text with a smooth scroll (smooth-subtitles). It follows from the start; once the user
+// has scrolled it, only while its view is within 72 px of the end, so reading earlier text is never interrupted.
+let draftSolid=0;   // how much of draftText is settled; the rest is drawn lighter (Subtitles.solid)
+const paneFollows=new WeakMap(),lessMotion=window.matchMedia?.('(prefers-reduced-motion: reduce)');
+function follows(el){if(el.classList.contains('empty')||paneFollows.get(el)!==false||el.scrollHeight-el.scrollTop-el.clientHeight<72){paneFollows.set(el,true);return true}return false}
+function toEnd(el){const top=el.scrollHeight-el.clientHeight;if(lessMotion?.matches||!el.scrollTo)el.scrollTop=top;else el.scrollTo({top,behavior:'smooth'})}
+// The user takes over by scrolling up with the wheel, dragging with a finger, or pressing on the scrollbar; a click
+// in the text (selecting, copying) does not stop the pane.
+for(const id of ['transcript','translation'])for(const type of ['wheel','touchmove','mousedown'])$(id).addEventListener(type,event=>{
+  if(type==='wheel'?event.deltaY<0:type==='mousedown'?event.offsetX>=event.currentTarget.clientWidth:true)paneFollows.set(event.currentTarget,false)},{passive:true});
+function render(id, value) { if(id==='transcript'){const parts=subtitleParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=follows(el);
   if(id==='transcript'&&qualityOn){   // kept sentences one per paragraph, then the live text not yet replaced
     const shown=qualityShown(),kept=shown.sources.join('\n\n'),make=(name,text)=>Object.assign(document.createElement('span'),{className:name,textContent:text});
     el.replaceChildren(...(kept?[make('quality-kept',kept)]:[]),...(shown.liveSource?[make('quality-live',(kept?'\n\n':'')+shown.liveSource)]:[]));
     value=kept+shown.liveSource;
   }else el.textContent=value;
   if(id==='transcript'&&tentative){const span=document.createElement('span');span.className='tentative';span.textContent=tentative;el.append(span)}
-  el.classList.toggle('empty', !value&&!(id==='transcript'&&tentative)); updateCounts(); if((value||tentative)&&follow) el.scrollTop=el.scrollHeight; }
+  el.classList.toggle('empty', !value&&!(id==='transcript'&&tentative)); updateCounts(); if((value||tentative)&&follow) toEnd(el); }
 function visibleTranslation(){const translated=shownTranslated();return translated+(translated&&draftText?'\n':'')+draftText}
 function renderTranslation(){
   const parts=subtitleParts(),translated=shownTranslated();
   window.Subtitles?.update(parts);   // the floating subtitles (live-translation)
   window.Overlay?.update(parts);   // 畫面＋字幕 (screen-subtitles)
   const el=$('translation'),wasEmpty=el.classList.contains('empty');
-  const follow=wasEmpty||el.scrollHeight-el.scrollTop-el.clientHeight<72;
+  const follow=follows(el);
   if(!translated&&!draftText){
     el.classList.add('empty');el.innerHTML=translationEmptyMarkup;
     translationFinalNode=translationDraftNode=null;updateCounts();return;
@@ -108,9 +118,9 @@ function renderTranslation(){
   }
   if(draftText){
     if(!translationDraftNode){translationDraftNode=document.createElement('span');translationDraftNode.className='translation-draft';el.appendChild(translationDraftNode)}
-    if(translationDraftNode.textContent!==draftText)translationDraftNode.textContent=draftText;
+    if(window.Subtitles)Subtitles.setDraft(translationDraftNode,draftText,draftSolid);else if(translationDraftNode.textContent!==draftText)translationDraftNode.textContent=draftText;
   }else if(translationDraftNode){translationDraftNode.remove();translationDraftNode=null}
-  updateCounts();if(follow)el.scrollTop=el.scrollHeight;
+  updateCounts();if(follow)toEnd(el);
 }
 function updateCounts(){ $('transcriptCount').textContent=`${transcript.length.toLocaleString()} 字`; $('translationCount').textContent=`${visibleTranslation().length.toLocaleString()} 字`; }
 function toast(message,duration=2200){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),duration)}
@@ -335,11 +345,12 @@ function unsavedSegments(){return segmentSave.unsaved}
 function leavingLosesData(){return Boolean(recorder||segmentSaveTimer||unsavedSegments())}
 function sendSegments(id){
   if(id!==segmentOwner)return;   // another meeting has started: the page no longer holds this meeting's segments
-  const segments=outputRecords().map((s,i)=>({seq:i+1,startMs:s.startMs||0,endMs:s.endMs||0,source:s.source,target:s.target,detected:s.detected||''}));
+  // With the quality pass on every segment has its own fixed seq (merged ones leave gaps); otherwise it is the position.
+  const segments=outputRecords().map((s,i)=>({seq:qualityOn?s.seq:i+1,startMs:s.startMs||0,endMs:s.endMs||0,source:s.source,target:s.target,detected:s.detected||''}));
   if(!segments.length)return;
   clearTimeout(segmentSave.retry);segmentSave.retry=null;segmentSave.unsaved=true;
   fetch(`/api/meetings/${id}/segments`,{method:'PUT',headers:{'content-type':'application/json'},
-    body:JSON.stringify({glossary:$('context').value.trim(),learned:learnedTerms,sourceLanguage:direction.source,targetLanguage:direction.target,segments})})
+    body:JSON.stringify({glossary:$('context').value.trim(),learned:learnedTerms,sourceLanguage:direction.source,targetLanguage:direction.target,segments,merged:qualityOn?quality.merged:[]})})
     .then(response=>{
       if(response.ok)window.MeetingSeries?.saved(id,segments.length);
       if(id!==segmentOwner)return;   // a late answer for the previous meeting must not change the new one's state
@@ -545,6 +556,8 @@ async function runTranslation(){
   // Each draft rewrites the visible line; only refresh once a meaningful chunk was added.
   const minGrowth=/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(segment)?12:24;
   if(!final&&lastDraftSource&&segment.startsWith(lastDraftSource)&&segment.length-lastDraftSource.length<minGrowth)return;
+  // The same speech, longer: the draft on screen goes along so the next one keeps its wording (smooth-subtitles).
+  const shownDraft=!final&&direction.source!=='zh_ja'&&lastDraftSource&&segment.startsWith(lastDraftSource)?draftText:'';
   const epoch=translationEpoch,controller=new AbortController();controller.kind=final?'final':'draft';activeTranslation=controller;
   const requestRevision=sourceRevision;
   if(final)flushRequested=false;else lastDraftSource=segment;
@@ -561,7 +574,7 @@ async function runTranslation(){
     const context=translationHistory.slice(-2).filter(prior=>!pair||!detected||prior.sourceLanguage===detected);
     // A span cut at a comma is read wrongly without the words that follow it ("它沒有兩歲孩子的，｜物理知識").
     const following=final?transcript.slice(segmentEnd,segmentEnd+120).trim():'';
-    const result=await streamTranslation({text:segment,source:direction.source,target:pair?'zh':direction.target,detected_language:detected,history:context.map(p=>p.source).join('\n'),history_translation:context.map(p=>p.target).join('\n'),following,glossary:$('context').value.trim(),learned:learnedTerms,draft:!final},controller.signal);
+    const result=await streamTranslation({text:segment,source:direction.source,target:pair?'zh':direction.target,detected_language:detected,history:context.map(p=>p.source).join('\n'),history_translation:context.map(p=>p.target).join('\n'),following,glossary:$('context').value.trim(),learned:learnedTerms,draft:!final,...(shownDraft?{previous_draft:shownDraft.slice(-600)}:{})},controller.signal);
     if(epoch!==translationEpoch||activeTranslation!==controller)return;
     if(!final&&requestRevision!==sourceRevision&&sentenceBoundary()){mayContinue=true;lastDraftSource='';return}
     translationFailures=0;
@@ -571,7 +584,7 @@ async function runTranslation(){
     const startMs=finalizedRecords().at(-1)?.endMs||0,endMs=Math.max(startMs,MeetingTimeline.endMsAt(timeMarks,segmentEnd,startMs));
     segmentRecords.set(id,{id,start:translationOffset,end:segmentEnd,source:segment,target:next,detected,startMs,endMs,version:(previous?.version||0)+1,state:final?'finalized':'tentative'});
     if(final){translated=[...segmentRecords.values()].filter(s=>s.id.startsWith(`${epoch}:`)&&s.state==='finalized').map(s=>s.target).join('\n\n');translationOffset=segmentEnd;translationHistory.push({source:segment,target:result.text,sourceLanguage:result.source});draftText='';lastDraftSource='';clearTimeout(pauseTimer);renderTranslation();$('translateState').textContent='LIVE';if(!stream&&translationOffset>=transcript.trim().length)storeTranscript();storeSegments();queueRefinement();queueMicrotask(()=>{learnTerms();correctNext()})}
-    else{draftText=next.replace(/\s*(?:\.{2,}|…+|～)\s*$/u,'');renderTranslation();$('translateState').textContent='暫譯'}
+    else{draftText=next.replace(/\s*(?:\.{2,}|…+|～)\s*$/u,'');draftSolid=window.Subtitles?.solid(shownDraft,draftText)??draftText.length;renderTranslation();$('translateState').textContent='暫譯'}
     mayContinue=true;
   }catch(error){
     mayContinue=error.name==='AbortError'&&!controller.timedOut;

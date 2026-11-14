@@ -201,6 +201,8 @@ class TranslationRequest(BaseModel):
     # Background refinement of a finalized span; uses the cloud model when one is configured.
     refine: bool = False
     draft: bool = False
+    # The draft the page shows for the beginning of this speech (smooth-subtitles); only used for drafts.
+    previous_draft: str = Field(default="", max_length=600)
     detected_language: str = Field(default="", pattern="^(|zh|ja)$")
 
 
@@ -476,6 +478,11 @@ def translation_payload(body: TranslationRequest) -> dict:
     if body.draft:
         context += ("This is live, unfinished speech; translate what is present without inventing "
                     "an ending or placeholder symbols.\n")
+        # The reader already sees a draft of the beginning: rewording it makes the subtitle flicker.
+        if body.previous_draft.strip():
+            context += ("The reader already sees this draft for the beginning of the speech: "
+                        f"{body.previous_draft.strip()}\n"
+                        "Continue it: keep its wording for the part it covers unless it is wrong, and add the translation of the rest.\n")
     return {
         "model": TRANSLATE_MODEL,
         "temperature": 0,

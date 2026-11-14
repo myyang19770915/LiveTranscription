@@ -1,12 +1,14 @@
 // 畫面＋字幕 (screen-subtitles): the shared tab's picture shown full-window on this page with a translucent subtitle box
 // over it. Document Picture-in-Picture windows cannot be transparent, so the picture comes here instead: the video
-// track getDisplayMedia already gave us. The box is subtitle-sized with fixed lines (原文 2, 譯文 2, 暫譯 1: the previous
-// segment's source and the speech now, the last two finalized translations, the draft; app.js subtitleParts()) and shares
-// the floating window's text size; the 原文 toggle (on by default here), background opacity and position live in
-// localStorage.overlay.
+// track getDisplayMedia already gave us. The box is subtitle-sized with two areas of fixed height (smooth-subtitles):
+// 原文 2 lines (the previous segment's source, then the speech now) and 譯文 3 lines (the last finalized segments, one
+// to a line, then the draft as the last of them, so a segment is finalized where its draft was). Each area is a list
+// that hugs the bottom; its lines glide up when text is added (Subtitles.glide). It shares the floating window's text size;
+// the 原文 toggle (on by default here), background opacity and position live in localStorage.overlay.
 window.Overlay=(()=>{
   const KEY='overlay',DEFAULTS={opacity:55,x:50,y:88,source:true},NO_TRACK='需要分頁／系統聲音來源',READY='把分享的畫面放大顯示，字幕半透明疊在上面';
-  let track=null,latest={done:'',pending:'',translation:'',draft:''},settings=load(),drag=null;
+  const SEGMENTS=3;   // finalized segments kept in the translation area: what three lines can show
+  let track=null,latest={done:'',pending:'',translation:'',draft:'',history:[]},settings=load(),drag=null;
   const $=id=>document.getElementById(id);
   const view=()=>$('screenView'),box=()=>view()?.querySelector('.overlay-subs'),button=()=>$('overlay');
   function load(){
@@ -31,15 +33,19 @@ window.Overlay=(()=>{
     const b=box();if(!b||!isOpen())return;
     const shared=window.Subtitles?.getSettings?.()||{size:2};
     b.dataset.size=String(shared.size);b.style.setProperty('--ov-alpha',String(settings.opacity/100));
-    const source=b.querySelector('.ov-source'),text=b.querySelector('.ov-text'),draft=b.querySelector('.ov-draft');
-    source.querySelector('.ov-done').textContent=(latest.done||'').trim();source.querySelector('.ov-now').textContent=window.Subtitles?.lastSentences(latest.pending,2)||'';
+    const source=b.querySelector('.ov-source'),text=b.querySelector('.ov-text'),draft=b.querySelector('.ov-draft'),S=window.Subtitles;
+    const now=source.querySelector('.ov-now'),done=source.querySelector('.ov-done'),was=[...text.children],said=[...done.children],settle=S?.glide([...done.children,now,...text.children,draft]);
+    // The sources of the last finalized segments (without any, the one source given), then the speech now: when it is
+    // finalized its source stays where it was said and the older one leaves at the top.
+    const recent=(latest.history||[]).slice(-2).map(segment=>(segment.source||'').trim()).filter(Boolean),sources=recent.length?recent:[(latest.done||'').trim()].filter(Boolean);
+    S?.fill(done,sources,text=>text,()=>document.createElement('p'),(p,text)=>S.setText(p,text));S?.setText(now.firstElementChild,(latest.pending||'').trim());
     source.hidden=!settings.source;   // an empty source keeps its lines: the box height does not change
-    text.textContent=(latest.translation||'').trim();   // app.js already sends the last two finalized segments
-    draft.textContent=latest.draft||'';
+    S?.fill(text,(latest.history||[]).slice(-SEGMENTS),segment=>`${segment.source||''}\n${segment.target}`,()=>Object.assign(document.createElement('p'),{className:'ov-seg'}),(p,segment)=>S.setText(p,(segment.target||'').trim()));
+    S?.setDraft(draft.firstElementChild,latest.draft||'',latest.draftSolid);
     b.querySelector('.ov-toggle-source').setAttribute('aria-pressed',String(settings.source));
     b.querySelector('.ov-opacity input').value=String(settings.opacity);
     b.querySelector('.ov-empty').hidden=Boolean(text.textContent||draft.textContent);
-    for(const part of [source,text,draft])part.scrollTop=part.scrollHeight;   // the newest words of each part stay in view
+    settle?.(b.querySelector('.ov-lines').clientHeight,[...S.heirs(was,text,draft),...S.heirs(said,done,now)]);   // the newest words of each area stay in view; what was shown glides up
     place();
   }
   function open(){
@@ -59,7 +65,12 @@ window.Overlay=(()=>{
     if(!track){close();if(b){b.disabled=true;b.title=NO_TRACK}}
     else if(b){b.disabled=false;b.title=READY}
   }
-  function update(next){latest={...latest,...next};render()}
+  // Without a history (a caller that sends only the latest translation), that translation is the one segment shown.
+  function update(next){
+    latest={...latest,...next};
+    if(next.history===undefined&&next.translation!==undefined)latest.history=next.translation?[{source:latest.done||'',target:next.translation}]:[];
+    render();
+  }
   function startDrag(event){
     if(event.target.closest('button, input, label'))return;
     const b=box(),v=view(),rect=b.getBoundingClientRect();

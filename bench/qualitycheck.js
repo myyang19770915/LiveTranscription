@@ -99,5 +99,20 @@ const final=(source,target,startMs,endMs)=>({source,target,detected:'',startMs,e
 }
 
 // Malformed events change nothing.
+// revision-merge "Two sentences are merged" / "Save after a merge": the merged-in segment leaves, the numbers stay.
+{
+  const five=[['一。','One.'],['所以我們決定','So we decided'],['在下個月開始。','Start next month.'],['四。','Four.'],['五。','Five.']];
+  const state=Q.apply(Q.create(),{seq:1,throughMs:15000,final:false,sentences:five.map(([source,target],i)=>({id:i+1,...sentence(source,target,i*3000,i*3000+3000)}))},[]);
+  t('five kept segments are numbered 1 to 5',state.records.map(s=>s.seq),[1,2,3,4,5]);
+  t('one sentence changed',Q.revise(state,{seq:1,sentences:[{id:2,source:'所以我們決定在下個月開始。',target:'So we decided to start next month.',merged:[3],endMs:9000}]}),1);
+  t('four segments are left, the merged one ends where the second part ended',state.records.map(s=>[s.seq,s.source,s.endMs]),
+    [[1,'一。',3000],[2,'所以我們決定在下個月開始。',9000],[4,'四。',12000],[5,'五。',15000]]);
+  t('the merge is remembered for the save',state.merged,[{into:2,from:3}]);
+  t('both panes show four',[Q.view(state,{transcript:'',timeMarks:[],finals:[]}).sources.length,Q.view(state,{transcript:'',timeMarks:[],finals:[]}).targets[1]],[4,'So we decided to start next month.']);
+  t('an unknown merged id, the sentence itself and a non-number are ignored',[Q.revise(state,{sentences:[{id:4,source:'四！',target:'Four!',merged:[9,4,'5'],endMs:1}]}),state.records.length,state.merged.length,state.records[2].endMs],[1,4,1,12000]);
+  Q.apply(state,{seq:2,throughMs:18000,final:false,sentences:[{id:6,...sentence('六。','Six.',15000,18000)}]},[]);
+  t('the next kept segment continues the numbers',state.records.at(-1).seq,6);
+  t('three in one',[Q.revise(state,{sentences:[{id:4,source:'四五六。',target:'Four five six.',merged:[5,6],endMs:18000}]}),state.records.map(s=>s.seq),state.merged],[1,[1,2,4],[{into:2,from:3},{into:4,from:5},{into:4,from:6}]]);
+}
 t('ignored: not an object',Q.apply(Q.create(),null,[]).records.length,0);
 t('ignored: sentence without text',Q.apply(Q.create(),{sentences:[{source:1,target:'x'}]},[]).records.length,0);

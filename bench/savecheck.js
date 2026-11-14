@@ -15,7 +15,7 @@ function page(){
   const env={
     records:[{source:'第一句',target:'S1',startMs:0,endMs:900}],recorder:null,segmentSaveTimer:null,
     requests:[],answers:[],timers:[],saved:[],
-    finalizedRecords(){return env.records},outputRecords(){return env.records},   // what the meeting keeps (quality-pass)
+    finalizedRecords(){return env.records},outputRecords(){return env.records},qualityOn:false,quality:{merged:[]},   // what the meeting keeps (quality-pass)
     $:id=>id==='saveState'?element:{value:''},
     direction:{source:'zh',target:'en'},learnedTerms:'',
     window:{MeetingSeries:{saved:(id,n)=>env.saved.push([id,n])}},
@@ -35,6 +35,15 @@ const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
 const nextRetry=env=>{const timer=env.timers.filter(x=>!x.cleared).at(-1);timer.cleared=true;return timer};
 
 (async()=>{
+  // revision-merge "Save after a merge": with the quality pass on every segment is saved under its own number, with the merges.
+  {const {env,api}=page();
+    env.qualityOn=true;env.quality={merged:[{into:2,from:3}]};
+    env.records=[1,2,4,5].map(seq=>({seq,source:`第${seq}句`,target:`S${seq}`,startMs:seq*1000,endMs:seq*1000+900}));
+    api.sendSegments('m1');await settle();
+    t('the numbers kept when kept, and the merge',[env.requests[0].body.segments.map(s=>s.seq),env.requests[0].body.merged],[[1,2,4,5],[{into:2,from:3}]]);
+    env.qualityOn=false;env.requests=[];api.sendSegments('m1');await settle();
+    t('without the quality pass: positions and no merges',[env.requests[0].body.segments.map(s=>s.seq),env.requests[0].body.merged],[[1,2,3,4],[]]);
+  }
   // Spec example "retry schedule": 1-4 failures in a row, then success.
   {const {env,element,api}=page();
     env.answers=['down',503,'down','down','ok'];

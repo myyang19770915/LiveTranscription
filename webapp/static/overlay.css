@@ -20,15 +20,24 @@
 .ov-bar button[aria-pressed="true"] { background: var(--accent); border-color: transparent; color: var(--accent-ink, #fff); }
 .ov-opacity { display: flex; align-items: center; gap: 6px; margin-left: auto; color: rgba(255, 255, 255, .85); cursor: default; }
 .ov-opacity input { width: 100px; accent-color: var(--accent); }
-/* A fixed-height box: source and translation lines are the same size, and every part has a fixed number of lines
-   (原文 2, 譯文 2, 暫譯 1) whether it is empty or full, so the box never grows or shrinks while people talk. Short text
-   starts at the top of its part; longer text is scrolled to its end (overlay.js) so the newest words stay in view. */
+/* A fixed-height box: source and translation lines are the same size, and both areas have a fixed number of lines
+   (原文 2, 譯文 3) whether empty or full, so the box never grows or shrinks while people talk. Each area holds a list
+   (.ov-roll) that starts at the top while it is short and hugs the bottom once it is longer, so the newest words stay
+   in view; overlay.js lets its lines glide up when text is added instead of jumping (smooth-subtitles). The speech
+   now and the draft are frames around their text: a new line comes in from below. */
 .overlay-subs { --sub-now: #ffd86b; }   /* the box is black in both themes */
 .ov-body { position: relative; display: grid; gap: 2px; overflow: hidden; }
-.ov-source, .ov-text, .ov-draft { margin: 0; font-size: 1em; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; overflow: hidden; }
+.ov-source, .ov-lines { position: relative; overflow: hidden; font-size: 1em; font-weight: 600; line-height: 1.35; }
 .ov-source { height: calc(1.35em * 2); }
-.ov-text { height: calc(1.35em * 2); }
-.ov-draft { height: 1.35em; color: var(--sub-now); }   /* the draft: not final yet */
+.ov-lines { height: calc(1.35em * 3); }
+.ov-roll { position: absolute; left: 0; right: 0; bottom: 0; min-height: 100%; display: flex; flex-direction: column; justify-content: flex-start; }
+.ov-roll p { margin: 0; flex: none; font: inherit; overflow-wrap: anywhere; }
+.ov-roll p:empty { display: none; }
+/* The speech now and the draft keep a line while they are empty: the lines above move only when a segment is finalized. */
+.ov-now, .ov-draft { min-height: 1.35em; overflow: hidden; }
+.ov-now > span, .ov-draft > span { display: block; }
+.ov-draft .unsure { opacity: .55; }   /* the end of a draft: the next draft may still change it */
+.ov-draft { color: var(--sub-now); }   /* the draft: not final yet; the last line of the translation */
 .ov-done { opacity: .75; }
 .ov-now { color: var(--sub-now); }   /* the speech being translated now: same colour as its draft */
 .ov-empty { position: absolute; left: 0; bottom: 0; margin: 0; font-size: 16px; opacity: .7; }   /* takes no room */
