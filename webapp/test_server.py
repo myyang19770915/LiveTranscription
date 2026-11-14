@@ -131,6 +131,13 @@ def setUpModule():
         print(f"yuqiao_test unavailable: {exc}")
 
 
+# Nor do tests depend on how this container is deployed: the translation model is the local one and 精準模式 is
+# unconfigured unless a test says otherwise (cloud-translation, quality-pass).
+server.TRANSLATE_URL, server.TRANSLATE_KEY, server.TRANSLATE_EXTRA = "http://translate:5000", "", {}
+server.TRANSLATE_HEALTH_URL = "http://translate:5000/health"
+quality_pass.URL = quality_pass.KEY = quality_pass.ASR_MODEL = quality_pass.MODEL = quality_pass.ASR = ""
+quality_pass.ASR_URL = quality_pass.ASR_KEY = ""
+quality_pass.EXTRA, quality_pass.ASR_EXTRA = {}, {}
 # Tests never reach the real diarize service; DiarizeApiTests turn it on with a fake service call.
 diarize.DIARIZE_URL = ""
 # Nor a mail server: tests that send replace mailer.send_message (the container may point SMTP_HOST at dev-mail).
@@ -421,6 +428,82 @@ class WebAppTests(AccountTestCase):
             # Live drafts and finals never leave the machine.
             self.assertIn("translate", translation_backend(body.model_copy(update={"refine": False}), payload)[0])
             self.assertTrue(self.signed_in("alice").get("/api/config").json()["cloudRefine"])
+
+    def test_a_keyed_translation_service_gets_the_key_and_only_openai_options(self):
+        """cloud-translation: drafts, finals, single sentences and term discovery go to the keyed external service."""
+        body = TranslationRequest(text="它會自動安裝好。", source="zh", target="ja", draft=True)
+        payload = translation_payload(body)
+        url, headers, sent = translation_backend(body, payload)   # no key: local llama.cpp, unchanged
+        self.assertEqual((headers, sent), ({}, payload))
+        self.assertIn("chat_template_kwargs", sent)
+        self.assertIs(self.signed_in("alice").get("/api/config").json()["cloudTranslate"], False)
+        with patch.multiple("server", TRANSLATE_URL="http://gateway:4001", TRANSLATE_KEY="k", TRANSLATE_EXTRA={"thinking": {"type": "disabled"}}):
+            url, headers, sent = translation_backend(body, payload)
+            self.assertEqual((url, headers), ("http://gateway:4001/v1/chat/completions", {"Authorization": "Bearer k"}))
+            self.assertEqual(sent["thinking"], {"type": "disabled"})
+            self.assertFalse({"repeat_penalty", "chat_template_kwargs", "top_p"} & set(sent))
+            self.assertEqual(sent["messages"], payload["messages"])
+            self.assertIs(self.signed_in("alice").get("/api/config").json()["cloudTranslate"], True)
+            # 雲端精修 keeps its own service and key.
+            with patch.multiple("server", REFINE_URL="https://cloud.example/v1", REFINE_MODEL="big", REFINE_KEY="r"):
+                url, headers, sent = translation_backend(body.model_copy(update={"refine": True}), payload)
+                self.assertEqual((url, headers["Authorization"]), ("https://cloud.example/v1/chat/completions", "Bearer r"))
+
+    def test_term_discovery_asks_a_keyed_service_for_a_json_object(self):
+        seen = {}
+
+        class Client(FakeTranslationClient):
+            async def post(self, url, json, headers=None):
+                seen.update(url=url, json=json, headers=headers)
+                return type("R", (), {"raise_for_status": lambda self: None, "json": lambda self: {"choices": [{"message": {"content": __import__("json").dumps(
+                    {"terms": [{"said": "アナザージャパン", "heard": ["サンザジャパン"]}]}, ensure_ascii=False)}}]}})()
+        text = "こちらのサンザジャパンの袋です。アナザージャパンは店の名前です。アナザージャパンで買いました。"
+        with patch.multiple("server", TRANSLATE_URL="http://gateway:4001", TRANSLATE_KEY="k", TRANSLATE_EXTRA={}), patch("server.httpx.AsyncClient", Client):
+            found = self.signed_in("alice").post("/api/terms", json={"text": text, "source": "ja"}).json()["found"]
+        self.assertEqual(seen["headers"], {"Authorization": "Bearer k"})
+        self.assertEqual(seen["json"]["response_format"], {"type": "json_object"})
+        self.assertNotIn("chat_template_kwargs", seen["json"])
+        self.assertIn("JSON object of this schema: " + json.dumps(server.TERMS_SCHEMA), seen["json"]["messages"][0]["content"])
+        self.assertIn("アナザージャパン", found)
+
+    def test_single_sentence_translation_and_repair_use_the_keyed_service(self):
+        sent = []
+
+        class Client(FakeStreamingClient):
+            async def post(self, url, json, headers=None):
+                sent.append((url, json, headers))
+                return FakeTranslationResponse()
+        with patch.multiple("server", TRANSLATE_URL="http://gateway:4001", TRANSLATE_KEY="k", TRANSLATE_EXTRA={"thinking": {"type": "disabled"}}), \
+                patch("server.httpx.AsyncClient", Client), patch("server.violations", side_effect=[["Output is not Japanese."], []]):
+            client = self.signed_in("alice")
+            self.assertEqual(client.post("/api/translate", json={"text": "Good morning.", "source": "en", "target": "zh"}).status_code, 200)
+            # A final whose first attempt fails a check is repaired with one more request.
+            client.post("/api/translate/stream", json={"text": "它會自動安裝好。", "source": "zh", "target": "ja"})
+        self.assertEqual(len(sent), 2)   # the single sentence and the repair
+        for url, body, headers in sent:
+            self.assertEqual((url, headers), ("http://gateway:4001/v1/chat/completions", {"Authorization": "Bearer k"}))
+            self.assertEqual(body["thinking"], {"type": "disabled"})
+            self.assertFalse({"repeat_penalty", "chat_template_kwargs", "top_p"} & set(body))
+
+    def test_translate_extra_must_be_a_json_object(self):
+        self.assertEqual(server.translate_extra('{"thinking": {"type": "disabled"}}'), {"thinking": {"type": "disabled"}})
+        self.assertEqual(server.translate_extra(""), {})
+        for bad in ("{bad", "[1]", "3"):
+            with self.assertLogs("uvicorn.error", level="WARNING"):
+                self.assertEqual(server.translate_extra(bad), {})
+
+    def test_the_translation_health_url_can_be_set(self):
+        """service-status: the Translation health URL example table."""
+        self.assertEqual(server.translation_health_url("http://translate:5000"), "http://translate:5000/health")
+        self.assertEqual(server.translation_health_url("http://gateway:4001", "http://gateway:4001/health/liveliness"), "http://gateway:4001/health/liveliness")
+        asked = []
+
+        async def ok(url):
+            asked.append(url)
+            return True
+        with patch("server.service_ok", ok), patch("server.TRANSLATE_HEALTH_URL", "http://gateway:4001/health/liveliness"):
+            self.assertTrue(self.signed_in("alice").get("/api/services").json()["ready"])
+        self.assertIn("http://gateway:4001/health/liveliness", asked)
 
     def test_following_speech_is_context_after_the_speech_and_never_the_speech(self):
         body = TranslationRequest(text="它沒有兩歲孩子的，", source="zh", target="ja", following="物理知識的擁有，比如說斜坡會滾")
@@ -2743,6 +2826,180 @@ class QualityPassTest(unittest.TestCase):
         with self.assertLogs("uvicorn.error", level="WARNING"):
             events = asyncio.run(go())
         self.assertEqual((events[-1]["quality"].get("failed"), events[-1]["quality"]["final"]), (True, True))
+
+
+class QualityTargetLanguageTest(unittest.TestCase):
+    """quality-pass: the translation language is named next to the text, not only in the instructions."""
+
+    def test_each_request_names_the_translation_language(self):
+        for language, target, named in (("en", "ja", "Japanese"), ("ja", "zh", "Chinese (Traditional, Taiwan)"), ("zh", "", "English"),
+                                        ("zh_ja", "", "Japanese for a Chinese sentence, Chinese (Traditional, Taiwan) for a Japanese one")):
+            service = FakeQualityService(["hello there."], [])
+
+            async def go():
+                async def send(payload):
+                    pass
+                with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service))), \
+                    patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", "text"):
+                    quality = quality_pass.QualityPass(send, language, target, "")
+                    quality.feed(tone(3))
+                    await quality.finish()
+            asyncio.run(go())
+            self.assertTrue(service.user(0).endswith("TRANSLATE INTO: " + named), service.user(0)[-80:])
+            self.assertIn(f'Every "tgt" is written in ', service.chats[0]["messages"][0]["content"])
+
+
+class QualityLoopTest(unittest.TestCase):
+    """quality-pass: a recognizer's repetition loop at the end of a chunk is kept once."""
+
+    def test_a_loop_at_the_end_is_reduced_to_one_unit(self):
+        said = "分かってきたんですね。"
+        self.assertEqual(quality_pass.without_loop(said + "はい。" * 40 + "はい"), said + "はい。")   # cut off mid-unit
+        self.assertEqual(quality_pass.without_loop(said + "はい。" * 5), said + "はい。")
+        self.assertEqual(quality_pass.without_loop("thank you " * 9), "thank you ")
+
+    def test_ordinary_text_is_untouched(self):
+        for text in ("はい。はい。はい。そうですね。", "預算是 1000000 元，哈哈哈哈哈。", "no no no no, not that one", "對對對對對，就是這樣", ""):
+            self.assertEqual(quality_pass.without_loop(text), text)
+        self.assertEqual(quality_pass.without_loop("はい。" * 6 + "では次に進みます。"), "はい。" * 6 + "では次に進みます。")   # not at the end
+        # One character repeated is speech however long the run, also at the very end of a chunk.
+        for text in ("總共 10000000000", "大家笑了哈哈哈哈哈哈哈哈哈哈", "對對對對對對對對對對對", "aaaaaaaaaaaaaaaaaaaaaaaa"):
+            self.assertEqual(quality_pass.without_loop(text), text)
+
+    def test_extra_fields_go_into_the_transcription_request(self):
+        service = FakeQualityService(["好。"], [])
+
+        async def go():
+            async def send(payload):
+                pass
+            with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service))), patch("quality_pass.URL", "http://quality.test/v1"), \
+                    patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", "text"), patch("quality_pass.ASR_EXTRA", {"max_completion_tokens": "400"}):
+                quality = quality_pass.QualityPass(send, "zh", "en", "")
+                quality.feed(tone(3))
+                await quality.finish()
+        asyncio.run(go())
+        self.assertIn(b'name="max_completion_tokens"\r\n\r\n400', service.transcriptions[0])
+
+
+class QualityRecognizerElsewhereTest(unittest.TestCase):
+    """quality-pass: a recognizer at its own address gets its own key, never the text service's."""
+
+    def test_the_recognizer_address_and_key_are_its_own(self):
+        seen = []
+
+        def service(request):
+            seen.append((str(request.url), request.headers.get("authorization")))
+            if request.url.path.endswith("/audio/transcriptions"):
+                return httpx.Response(200, json={"text": "language Chinese<asr_text>新的系統。"})
+            chats.append(json.loads(request.content)["messages"][1]["content"])
+            return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps({"sentences": [], "carry": ""})}}]})
+
+        chats = []
+
+        async def go(key):
+            async def send(payload):
+                pass
+            with patch("quality_pass.KEY", "text-key"), patch("quality_pass.URL", "http://text.test/v1"), patch("quality_pass.ASR_MODEL", "asr"), \
+                    patch("quality_pass.MODEL", "text"), patch("quality_pass.ASR_URL", "http://asr.test/v1"), patch("quality_pass.ASR_KEY", key), \
+                    patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service), headers={"Authorization": "Bearer text-key"})):
+                quality = quality_pass.QualityPass(send, "zh", "en", "")
+                quality.feed(tone(3))
+                await quality.finish()
+        asyncio.run(go(""))
+        asyncio.run(go("asr-key"))
+        self.assertIn("NEW: 新的系統。" + chr(10), chats[0])   # the recognizer's language tag is not text
+        self.assertEqual(seen, [("http://asr.test/v1/audio/transcriptions", None), ("http://text.test/v1/chat/completions", "Bearer text-key"),
+                                ("http://asr.test/v1/audio/transcriptions", "Bearer asr-key"), ("http://text.test/v1/chat/completions", "Bearer text-key")])
+
+
+class FakeMai:
+    """One MAI realtime session that answers the commit with a transcript."""
+
+    def __init__(self, transcript):
+        self.sent, self.transcript = [], transcript
+        self.opening = ["session.created", "session.updated"]
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+    async def send(self, message):
+        self.sent.append(json.loads(message))
+
+    async def recv(self):
+        return json.dumps({"type": self.opening.pop(0)})
+
+    async def __aiter__(self):
+        yield json.dumps({"type": "conversation.item.input_audio_transcription.delta", "delta": self.transcript})
+        yield json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": self.transcript})
+
+
+class QualityEngineTest(unittest.TestCase):
+    """quality-pass: the second recognition by the app's own engines (TRANSLATE_QUALITY_ASR)."""
+
+    def run_pass(self, engine, connection, language="zh"):
+        service = FakeQualityService([], [{"sentences": [{"src": "新的系統。", "tgt": "The new system."}], "carry": ""}])
+
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service))), \
+                    patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", ""), patch("quality_pass.MODEL", "text"), \
+                    patch("quality_pass.ASR", engine), patch("chunk_asr.websockets.connect", return_value=connection), \
+                    patch("mai_asr.MAI_ENDPOINT", "https://res.example.com/x"), patch("mai_asr.MAI_KEY", "k"):
+                quality = quality_pass.QualityPass(send, language, "en", "語橋", lambda text: text, "Chinese")
+                quality.feed(tone(3))
+                await quality.finish()
+            return events
+        return service, asyncio.run(go())
+
+    def test_the_local_engine_hears_the_chunk_and_no_transcription_request_is_made(self):
+        upstream = FakeUpstream(["新的", "系统。"])
+        service, events = self.run_pass("local", upstream)
+        self.assertEqual(service.transcriptions, [])
+        header = json.loads(upstream.sent[0])
+        self.assertEqual((header["retain"], header["language"], header["use_vad"]), (False, "Chinese", False))
+        self.assertEqual(b"".join(m for m in upstream.sent if isinstance(m, bytes)), tone(3))   # the whole chunk
+        self.assertEqual(upstream.sent[-1], "YOUDAO_ONETIME_ASR_STREAM_EOS")
+        self.assertIn("NEW: 新的系统。", service.user(0))
+        self.assertEqual([s["target"] for s in events[-1]["quality"]["sentences"]], ["The new system."])
+
+    def test_mai_hears_the_chunk_after_one_commit(self):
+        session = FakeMai("新的系統")
+        service, events = self.run_pass("mai", session)
+        self.assertEqual(service.transcriptions, [])
+        kinds = [m["type"] for m in session.sent]
+        self.assertEqual((kinds[0], kinds[-1], kinds.count("input_audio_buffer.commit")), ("session.update", "input_audio_buffer.commit", 1))
+        sent = b"".join(base64.b64decode(m["audio"]) for m in session.sent if m["type"] == "input_audio_buffer.append")
+        self.assertEqual(sent, tone(3))
+        self.assertEqual(session.sent[0]["session"]["audio"]["input"]["transcription"]["language"], "zh")
+        self.assertIn("NEW: 新的系統", service.user(0))
+        self.assertIs(events[-1]["quality"].get("failed"), None)
+
+    def test_a_loop_from_the_apps_own_engine_is_kept_once(self):
+        service, events = self.run_pass("local", FakeUpstream(["新的系统。"] + ["好的。"] * 30))
+        self.assertIn("NEW: 新的系统。好的。\n", service.user(0))
+
+    def test_an_engine_error_fails_the_chunk(self):
+        service, events = self.run_pass("local", FakeUpstream([{"status": "error", "msg": "busy"}]))
+        self.assertEqual((events[-1]["quality"].get("failed"), service.chats), (True, []))
+
+    def test_configured_follows_the_engine(self):
+        with patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", ""), patch("quality_pass.MODEL", "text"):
+            with patch("quality_pass.ASR", "local"):
+                self.assertTrue(quality_pass.configured())
+            with patch("quality_pass.ASR", "mai"), patch("mai_asr.MAI_KEY", ""):
+                self.assertFalse(quality_pass.configured())
+            with patch("quality_pass.ASR", "mai"), patch("mai_asr.MAI_ENDPOINT", "https://res.example.com/x"), patch("mai_asr.MAI_KEY", "k"):
+                self.assertTrue(quality_pass.configured())
+            with patch("quality_pass.ASR", "whisper"), patch("quality_pass.ASR_MODEL", "asr"):
+                self.assertFalse(quality_pass.configured())
+            with patch("quality_pass.ASR", "local"), patch("quality_pass.MODEL", ""):
+                self.assertFalse(quality_pass.configured())
 
 
 class QualityStreamTests(AccountTestCase):

@@ -7,7 +7,7 @@
 ```powershell
 Copy-Item .env.example .env
 # 編輯 .env，把 ASR_SECRET_KEY 換成隨機長字串
-docker compose up --build -d
+docker compose --profile local-translate up --build -d   # 翻譯模型放本機；改用外部服務見 README「翻譯模型放哪裡」
 docker compose logs -f asr
 ```
 

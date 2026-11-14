@@ -28,7 +28,34 @@ services:
       retries: 40
       start_period: 10m
 
+  # 精準模式's recognizer on this machine (quality-pass): Qwen3-ASR 1.7B behind vLLM's OpenAI-compatible API
+  # (TRANSLATE_QUALITY_ASR_URL=http://qwen-asr:8000/v1). About 10 GB of GPU memory at 0.3: on a 32 GB card it does not
+  # fit next to the local translation model, so use one profile or the other. The first start downloads the weights.
+  qwen-asr:
+    profiles: ["qwen-asr"]
+    image: qwenllm/qwen3-asr:latest@sha256:fb75b775f089e06e5a1aaebffd421e37505cc630d50c86d889d95ffa45a7e16a   # the asr service's image
+    gpus: all
+    command: ["qwen-asr-serve", "Qwen/Qwen3-ASR-1.7B", "--gpu-memory-utilization", "${QWEN_GPU_MEMORY_UTILIZATION:-0.3}",
+              "--max-model-len", "8192", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      HF_HOME: /models/huggingface
+    volumes:
+      - model-cache:/models
+      - ./docker/qwen-asr/healthcheck.py:/healthcheck.py:ro
+    shm_size: 4gb
+    restart: unless-stopped
+    healthcheck:
+      # A real three-second transcription: the first one in a new container takes ~30 s (warm-up), and 精準模式 must not meet it.
+      test: ["CMD", "python3", "/healthcheck.py", "Qwen/Qwen3-ASR-1.7B", "50"]
+      interval: 30s
+      timeout: 60s
+      retries: 20
+      start_period: 15m
+
+  # The local translation model. Optional since cloud-translation: start it with --profile local-translate, or set
+  # TRANSLATE_URL/TRANSLATE_MODEL/TRANSLATE_KEY to an external service and leave it stopped.
   translate:
+    profiles: ["local-translate"]
     image: ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:bfb3264fc2166e01e2b4f9b537e45d7006d87c75021b911f132ef607f5bbced3   # pinned (app-image-reproducible); see README 固定版本
     gpus: all
     command:
@@ -129,8 +156,13 @@ services:
     environment:
       ASR_WS_URL: ws://asr:8272/asr_stream_api_v1
       ASR_SECRET_KEY: ${ASR_SECRET_KEY:-change-me-local-only}
-      TRANSLATE_URL: http://translate:5000
-      TRANSLATE_MODEL: ${TRANSLATE_MODEL_FILE:-gemma-4-E2B_q4_0-it.gguf}
+      # The translation model: the local llama.cpp service (profile local-translate), or with TRANSLATE_KEY an
+      # OpenAI-compatible service outside this machine (cloud-translation). See README 翻譯模型放哪裡.
+      TRANSLATE_URL: ${TRANSLATE_URL:-http://translate:5000}
+      TRANSLATE_MODEL: ${TRANSLATE_MODEL:-${TRANSLATE_MODEL_FILE:-gemma-4-E2B_q4_0-it.gguf}}
+      TRANSLATE_KEY: ${TRANSLATE_KEY:-}
+      TRANSLATE_EXTRA: ${TRANSLATE_EXTRA:-}
+      TRANSLATE_HEALTH_URL: ${TRANSLATE_HEALTH_URL:-}
       # Optional cloud model for 雲端精修 (OpenAI-compatible base URL, e.g. https://api.openai.com/v1).
       TRANSLATE_REFINE_URL: ${TRANSLATE_REFINE_URL:-}
       TRANSLATE_REFINE_MODEL: ${TRANSLATE_REFINE_MODEL:-}
@@ -139,6 +171,10 @@ services:
       TRANSLATE_QUALITY_URL: ${TRANSLATE_QUALITY_URL:-}
       TRANSLATE_QUALITY_KEY: ${TRANSLATE_QUALITY_KEY:-}
       TRANSLATE_QUALITY_ASR_MODEL: ${TRANSLATE_QUALITY_ASR_MODEL:-}
+      TRANSLATE_QUALITY_ASR: ${TRANSLATE_QUALITY_ASR:-}
+      TRANSLATE_QUALITY_ASR_URL: ${TRANSLATE_QUALITY_ASR_URL:-}
+      TRANSLATE_QUALITY_ASR_KEY: ${TRANSLATE_QUALITY_ASR_KEY:-}
+      TRANSLATE_QUALITY_ASR_EXTRA: ${TRANSLATE_QUALITY_ASR_EXTRA:-}
       TRANSLATE_QUALITY_MODEL: ${TRANSLATE_QUALITY_MODEL:-}
       TRANSLATE_QUALITY_EXTRA: ${TRANSLATE_QUALITY_EXTRA:-}
       TRANSLATE_QUALITY_ALT: ${TRANSLATE_QUALITY_ALT:-}
@@ -204,8 +240,6 @@ services:
       start_period: 30s
     depends_on:
       asr:
-        condition: service_healthy
-      translate:
         condition: service_healthy
       db:
         condition: service_healthy

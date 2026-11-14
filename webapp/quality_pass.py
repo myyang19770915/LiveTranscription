@@ -20,27 +20,56 @@ from dataclasses import dataclass, field
 
 import httpx
 
+import chunk_asr
+
 logger = logging.getLogger("uvicorn.error")
 
 URL = (os.getenv("TRANSLATE_QUALITY_URL", "") or os.getenv("TRANSLATE_REFINE_URL", "")).rstrip("/")
 KEY = os.getenv("TRANSLATE_QUALITY_KEY", "") or os.getenv("TRANSLATE_REFINE_KEY", "")
 ASR_MODEL = os.getenv("TRANSLATE_QUALITY_ASR_MODEL", "")
+# The recognizer may live elsewhere than the text model (a recognizer on this machine): its own address, and its own
+# key so the text service's key is never sent there.
+ASR_URL = os.getenv("TRANSLATE_QUALITY_ASR_URL", "").rstrip("/")
+ASR_KEY = os.getenv("TRANSLATE_QUALITY_ASR_KEY", "")
 MODEL = os.getenv("TRANSLATE_QUALITY_MODEL", "")
+# Who hears each chunk again: empty = the transcriptions API of URL (ASR_MODEL); "local" or "mai" = the app's own
+# engine (chunk_asr.py), so with "local" no audio leaves the machine. Any other value leaves the quality pass off.
+ASR = os.getenv("TRANSLATE_QUALITY_ASR", "").strip().lower()
 # Off by default: the benchmarked configuration (bench/README.md) ran without the live text.
 USE_ALT = os.getenv("TRANSLATE_QUALITY_ALT", "") == "1"
 
 
-def _extra() -> dict:
+def _extra(name: str = "TRANSLATE_QUALITY_EXTRA") -> dict:
     """TRANSLATE_QUALITY_EXTRA: JSON merged into the text-model request (reasoning settings differ by model)."""
     try:
-        value = json.loads(os.getenv("TRANSLATE_QUALITY_EXTRA", "") or "{}")
+        value = json.loads(os.getenv(name, "") or "{}")
     except ValueError:
-        logger.warning("TRANSLATE_QUALITY_EXTRA is not valid JSON; ignored")
+        logger.warning("%s is not valid JSON; ignored", name)
         return {}
     return value if isinstance(value, dict) else {}
 
 
 EXTRA = _extra()
+# Form fields added to the transcription request (TRANSLATE_QUALITY_ASR_EXTRA, JSON), e.g. {"max_completion_tokens": 400}
+# for Qwen3-ASR on vLLM: without a limit a repetition loop runs to the model's full length (28 s measured).
+ASR_EXTRA = {key: str(value) for key, value in _extra("TRANSLATE_QUALITY_ASR_EXTRA").items()}
+# A recognizer stuck in a loop repeats a short unit until it is cut off ("はい。はい。はい。…").
+LOOP = re.compile(r"(.{2,12}?)\1{4,}", re.S)
+
+
+def without_loop(text: str) -> str:
+    """`text` with a repetition loop at its end (a unit of 2-12 characters, five times or more) reduced to one unit."""
+    for match in LOOP.finditer(text):
+        unit, rest = match.group(1), text[match.end():]
+        if len(set(unit)) == 1:   # one character repeated ("哈哈哈…", the zeros of a number) is speech, not a loop
+            continue
+        if len(rest) < len(unit) and unit.startswith(rest):   # the loop runs to the end; the last unit may be cut short
+            # Keep the unit as it was said: the one ending in a sentence mark ("はい。", not "。はい").
+            loop = text[match.start():]
+            shift = next((k for k in range(len(unit)) if loop[k + len(unit) - 1] in "。！？.!?"), 0)
+            return text[:match.start() + shift] + loop[shift:shift + len(unit)]
+    return text
+
 
 FRAME = 640                 # 20 ms of 16 kHz PCM16
 BYTES_PER_MS = 32
@@ -57,7 +86,7 @@ NAMES = {"zh": "Chinese (Traditional, Taiwan)", "en": "English", "ja": "Japanese
 
 
 def configured() -> bool:
-    return bool(URL and ASR_MODEL and MODEL)
+    return bool(URL and MODEL and (chunk_asr.available(ASR) if ASR else ASR_MODEL))
 
 
 def new_client() -> httpx.AsyncClient:
@@ -182,6 +211,8 @@ Do this:
 4. Translate each item into {tgt}, as a skilled conference interpreter would say it: accurate first, then natural and concise. Keep who does what, negation, numbers, units, tense, hedging, hypotheticals (would have ≠ did) and questions exactly. Keep names and terms consistent with CONTEXT and TERMS. Translate idioms and fixed expressions by their meaning, and avoid calques of source wording (やっぱり is not 果然, 発信 is not 發信, 曖昧な言葉 is 模糊的用語; "unsupervised" driving is 無人監督). Approximate quantities stay exactly as vague as spoken (八千多 is "over eight thousand", not "eight thousand several hundred"). Do not add subjects, "more than", politeness or explanations that are not in the speech; when the subject is generic or third-person, do not turn it into "I". Quoted speech stays marked as a quote.
 5. Names: keep Latin-script brand and product names as written (WeWork, FSD); render other names in the target language's usual form. Never leave source-language script in the translation, and for Chinese always use Traditional characters with Taiwan usage.
 
+Every "tgt" is written in {tgt}, whatever language CONTEXT or these instructions happen to use; "src" stays in the language that was spoken.
+
 Return JSON only: {{"sentences": [{{"src": "...", "tgt": "...", "lang": "{lang}"}}], "carry": "..."}}"""
 
 KANA = re.compile(r"[぀-ヿ]")
@@ -196,6 +227,14 @@ def spoken_language(text: str, stream_language: str, said: str = "") -> str:
         # Kana settles it; a sentence of kanji only is whatever the model heard it as.
         return "ja" if KANA.search(text) else said if said in ("zh", "ja") else "zh"
     return "zh" if len(CJK.findall(text)) * 2 >= len(re.sub(r"\s", "", text)) else "en"
+
+
+def target_name(language: str, target: str) -> str:
+    """The translation language as the text model is told, next to the text as well: without reasoning, a small model
+    answered English speech in Chinese when only the instructions named Japanese (measured 2026-11-14)."""
+    if language == "zh_ja":
+        return "Japanese for a Chinese sentence, Chinese (Traditional, Taiwan) for a Japanese one"
+    return NAMES.get(target, "English")
 
 
 def system_prompt(language: str, target: str) -> str:
@@ -245,8 +284,9 @@ class _Live:
 class QualityPass:
     """One stream's quality pass. `send` is an async callable taking the event dict for the browser."""
 
-    def __init__(self, send, language: str, target: str, glossary: str, convert=lambda text: text):
+    def __init__(self, send, language: str, target: str, glossary: str, convert=lambda text: text, engine_language: str = "zhen"):
         self.send, self.language, self.glossary, self.convert = send, language, glossary.strip(), convert
+        self.engine_language = engine_language   # the local engine's name for the language (TRANSLATE_QUALITY_ASR=local)
         self.target = target if target in NAMES else "en"
         self.chunker, self.live_text = Chunker(), _Live()
         self.waiting: deque[Chunk] = deque()
@@ -401,7 +441,10 @@ class QualityPass:
         return len(new), sentences
 
     async def _transcribe(self, chunk: Chunk) -> str:
-        data = {"model": ASR_MODEL, "response_format": "json"}
+        if ASR:
+            return without_loop(await asyncio.wait_for(
+                chunk_asr.recognize(ASR, chunk.pcm, self.language, self.engine_language, self.glossary), ASR_TIMEOUT))
+        data = {"model": ASR_MODEL, "response_format": "json", **ASR_EXTRA}
         prompt = " ".join(part for part in (self.glossary, self.heard[-PROMPT_TAIL:].strip()) if part)
         if prompt and self.prompt_ok:
             data["prompt"] = prompt
@@ -410,8 +453,13 @@ class QualityPass:
         audio = wav_bytes(chunk.pcm)
 
         async def ask():
-            return await self.client.post(f"{URL}/audio/transcriptions", data=data, timeout=ASR_TIMEOUT,
-                                          files={"file": ("chunk.wav", audio, "audio/wav")})
+            request = self.client.build_request("POST", f"{ASR_URL or URL}/audio/transcriptions", data=data, timeout=ASR_TIMEOUT,
+                                                files={"file": ("chunk.wav", audio, "audio/wav")})
+            if ASR_URL:   # its own key or none: never the text service's
+                request.headers.pop("Authorization", None)
+                if ASR_KEY:
+                    request.headers["Authorization"] = f"Bearer {ASR_KEY}"
+            return await self.client.send(request)
         response = await ask()
         if response.status_code == 400 and "prompt" in data:
             # Refused as a bad request with a prompt: this recognizer takes none. Ask again without it,
@@ -424,12 +472,13 @@ class QualityPass:
         text = response.json().get("text")
         if not isinstance(text, str):
             raise Unusable("transcription")
-        return text
+        # Qwen3-ASR served by vLLM answers "language Chinese<asr_text>…": the text is what follows the tag.
+        return without_loop(text.rsplit("<asr_text>", 1)[-1])
 
     async def _refine(self, new: str, pause: str, alt: str, last: bool) -> dict:
         context = "\n".join(f"{s['src']}\n  => {s['tgt']}" for s in self.context) or "(start of meeting)"
         user = ((f"TERMS: {self.glossary}\n\n" if self.glossary else "") + f"CONTEXT:\n{context}\n\nCARRY: {self.carry}\nNEW: {new}\nPAUSE: {pause}\n"
-                + (f"ALT: {alt}\n" if alt else "") + f"LAST: {'true' if last else 'false'}")
+                + (f"ALT: {alt}\n" if alt else "") + f"LAST: {'true' if last else 'false'}\nTRANSLATE INTO: {target_name(self.language, self.target)}")
         payload = {"model": MODEL, "max_tokens": 6000, "response_format": {"type": "json_object"},
                    "messages": [{"role": "system", "content": system_prompt(self.language, self.target)}, {"role": "user", "content": user}],
                    **EXTRA}

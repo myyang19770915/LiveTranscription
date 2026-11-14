@@ -10,7 +10,7 @@ rng, mapping = random.Random(sys.argv[2]), {}
 for sheet in sorted((HERE / 'results' / runs[0]).glob('*.md')):
     case, order = sheet.stem, runs[:]
     rng.shuffle(order)
-    mapping[case] = dict(zip('XYZW', order))
+    mapping[case] = dict(zip('XYZWVU', order))
     for label, run in mapping[case].items():
         text = (HERE / 'results' / run / f'{case}.md').read_text(encoding='utf-8')
         text = re.sub(r'^# .*$', f'# {case} version {label}', text, count=1, flags=re.M)

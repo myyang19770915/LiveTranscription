@@ -6,7 +6,7 @@ Quality pass is an opt-in mode of the live page in which the gateway re-recogniz
 
 ### Requirement: Quality pass is opt-in and hidden until configured
 
-`GET /api/config` SHALL include `quality`, true only when both `TRANSLATE_QUALITY_ASR_MODEL` and `TRANSLATE_QUALITY_MODEL` are set and a service URL is available from `TRANSLATE_QUALITY_URL` or, when that is empty, `TRANSLATE_REFINE_URL`. The live page SHALL show the 精準模式 checkbox only when `quality` is true, unchecked by default, with the note 音訊與文字會傳送到外部服務, remembered in the browser, and disabled while a session is running. The gateway SHALL run the quality pass for a stream only when the stream header has `quality: true` and the service is configured; otherwise it SHALL NOT call the external services and the events sent to the browser SHALL be the same as without this capability.
+`GET /api/config` SHALL include `quality`, true only when both a recognizer (`TRANSLATE_QUALITY_ASR_MODEL`, or one of the app's own engines chosen with `TRANSLATE_QUALITY_ASR` as the requirement below states) and `TRANSLATE_QUALITY_MODEL` are set and a service URL is available from `TRANSLATE_QUALITY_URL` or, when that is empty, `TRANSLATE_REFINE_URL`. The live page SHALL show the 精準模式 checkbox only when `quality` is true, unchecked by default, with the note 音訊與文字會傳送到外部服務, remembered in the browser, and disabled while a session is running. The gateway SHALL run the quality pass for a stream only when the stream header has `quality: true` and the service is configured; otherwise it SHALL NOT call the external services and the events sent to the browser SHALL be the same as without this capability.
 
 #### Scenario: Not configured
 
@@ -17,6 +17,65 @@ Quality pass is an opt-in mode of the live page in which the gateway re-recogniz
 
 - **WHEN** the service is configured and a stream header has no `quality` field
 - **THEN** no request is sent to the external recognizer or text model for that stream
+
+### Requirement: The second recognition can use the app's own engines
+
+When `TRANSLATE_QUALITY_ASR` is `local` or `mai`, the gateway SHALL recognize each chunk with the local ASR engine or with Azure MAI instead of the transcriptions API, and SHALL NOT require `TRANSLATE_QUALITY_ASR_MODEL`. With `local`, chunk audio SHALL NOT be sent to any external service. With `mai`, the quality pass SHALL be configured only when MAI is configured. Any other non-empty value SHALL leave the quality pass not configured.
+
+#### Scenario: Local engine
+
+- **WHEN** `TRANSLATE_QUALITY_ASR` is `local`, `TRANSLATE_QUALITY_MODEL` is set and a chunk is ready
+- **THEN** the chunk audio goes to the local ASR engine on a connection of its own with `retain` false
+- **AND** no request is made to `/audio/transcriptions`
+- **AND** the recognized text goes to the text model as NEW
+
+#### Scenario: MAI not configured
+
+- **WHEN** `TRANSLATE_QUALITY_ASR` is `mai` and MAI is not configured
+- **THEN** `/api/config` reports `quality` false
+
+#### Scenario: Unknown engine name
+
+- **WHEN** `TRANSLATE_QUALITY_ASR` is `whisper`
+- **THEN** `/api/config` reports `quality` false
+
+### Requirement: The recognizer can be a separate service
+
+When `TRANSLATE_QUALITY_ASR_URL` is set, the gateway SHALL send transcription requests to that address and SHALL authorize them with `TRANSLATE_QUALITY_ASR_KEY` only, sending no Authorization header when that key is empty. The key of the text-model service SHALL NOT be sent to the recognizer address.
+
+#### Scenario: Recognizer on this machine without a key
+
+- **WHEN** `TRANSLATE_QUALITY_ASR_URL` is `http://asr.test/v1`, `TRANSLATE_QUALITY_ASR_KEY` is empty and the text service key is `text-key`
+- **THEN** the transcription request goes to `http://asr.test/v1/audio/transcriptions` with no Authorization header
+- **AND** the text request goes to the text service with `Bearer text-key`
+
+### Requirement: A recognizer's repetition loop is kept once
+
+The gateway SHALL add the fields of the JSON object in `TRANSLATE_QUALITY_ASR_EXTRA` to every transcription request. When the recognized text of a chunk ends in a unit of 2 to 12 characters repeated five or more times in a row (the last repetition may be cut short), the gateway SHALL keep that unit once and drop the repetitions before the text goes to the text model. Repetitions that are not at the end of the text, and single characters repeated, SHALL be left as they are.
+
+#### Scenario: Loop at the end of a chunk
+
+- **WHEN** the recognizer answers `分かってきたんですね。` followed by `はい。` forty times and a cut-off `はい`
+- **THEN** the text given to the text model is `分かってきたんですね。はい。`
+
+#### Scenario: Repetition inside the text
+
+- **WHEN** the recognizer answers `はい。` six times followed by `では次に進みます。`
+- **THEN** the text is unchanged
+
+#### Scenario: Output limit for the recognizer
+
+- **WHEN** `TRANSLATE_QUALITY_ASR_EXTRA` is `{"max_completion_tokens": 400}`
+- **THEN** every transcription request carries the form field `max_completion_tokens` with the value `400`
+
+### Requirement: The translation language is named with every chunk
+
+Every text-model request SHALL name the language to translate into both in its instructions and in the user message, as a last line `TRANSLATE INTO: <language>`: the stream's target language (Chinese (Traditional, Taiwan), English or Japanese; English when none was given), or for the two-way Chinese and Japanese mode the rule that each sentence goes into the other of the two.
+
+#### Scenario: English speech translated into Japanese
+
+- **WHEN** the stream language is `en` and the target is `ja`
+- **THEN** the user message of every text-model request ends with `TRANSLATE INTO: Japanese`
 
 ### Requirement: Audio is cut into chunks at pauses
 

@@ -63,7 +63,7 @@ A Docker image is the **runtime environment**; model weights are **model files**
 
 Model caches are separate too: ASR and VAD share `model-cache`, mounted at `/models` in the ASR container; its Hugging Face cache directory is `/models/huggingface`. Gemma uses `translation-model-cache`, mounted at `/root/.cache` in the translation container. A normal `docker compose down` preserves model weights. `docker compose down -v` removes these named volumes.
 
-Compose controls startup: `docker compose up --build -d` prepares or pulls the images, starts `asr` and `translate`, then starts `app` after both model services pass their health checks. ASR, VAD, and Gemma weights are downloaded or loaded on their first container startup; later restarts reuse the cache. See [`compose.yaml`](compose.yaml) for the full image, GPU, command, environment, volume, and health-check configuration.
+Compose controls startup: `docker compose --profile local-translate up --build -d` prepares or pulls the images, starts `asr` and `translate` (the local translation model is an optional profile since 2026-11; see "翻譯模型放哪裡" in README.md for using an external model instead), then starts `app` after `asr` passes its health check. ASR, VAD, and Gemma weights are downloaded or loaded on their first container startup; later restarts reuse the cache. See [`compose.yaml`](compose.yaml) for the full image, GPU, command, environment, volume, and health-check configuration.
 
 ### Model serving and code connections
 
@@ -224,7 +224,7 @@ Copy-Item .env.example .env
 Set `ASR_SECRET_KEY` in `.env` to a long, randomly generated value, then start the services:
 
 ```powershell
-docker compose up --build -d
+docker compose --profile local-translate up --build -d
 docker compose ps
 docker compose logs -f asr translate app
 ```

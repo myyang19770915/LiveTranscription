@@ -8,7 +8,7 @@ Tells people on the meeting page, before they start, whether the local services 
 
 ### Requirement: Service readiness endpoint
 
-`GET /api/services` SHALL require a signed-in session and SHALL check, concurrently and with a 2-second limit each, the local speech recognition service (its `/health` URL, derived from `ASR_WS_URL` by changing `ws` to `http` and the path to `/health`, or `ASR_HEALTH_URL` when set), the translation service (`TRANSLATE_URL` + `/health`) and the database (`SELECT 1`). A service SHALL count as ready only on HTTP 200 (or a successful query); connection errors, timeouts and other status codes SHALL count as not ready. The response SHALL be HTTP 200 with `ready` (true only when every service is ready) and `services`, a list in the fixed order asr, translate, database, each with `key`, `name` (語音辨識, 翻譯, 資料庫) and `ok`. The response SHALL NOT contain model names, URLs or error details. `/api/health` SHALL stay unchanged.
+`GET /api/services` SHALL require a signed-in session and SHALL check, concurrently and with a 2-second limit each, the local speech recognition service (its `/health` URL, derived from `ASR_WS_URL` by changing `ws` to `http` and the path to `/health`, or `ASR_HEALTH_URL` when set), the translation service (`TRANSLATE_HEALTH_URL` when set, otherwise `TRANSLATE_URL` + `/health`) and the database (`SELECT 1`). A service SHALL count as ready only on HTTP 200 (or a successful query); connection errors, timeouts and other status codes SHALL count as not ready. The response SHALL be HTTP 200 with `ready` (true only when every service is ready) and `services`, a list in the fixed order asr, translate, database, each with `key`, `name` (語音辨識, 翻譯, 資料庫) and `ok`. The response SHALL NOT contain model names, URLs or error details. `/api/health` SHALL stay unchanged.
 
 #### Scenario: All services ready
 
@@ -37,20 +37,34 @@ Tells people on the meeting page, before they start, whether the local services 
 | `wss://asr.example:443/stream` | (unset) | `https://asr.example:443/health` |
 | `ws://asr:8272/asr_stream_api_v1` | `http://asr:9000/ready` | `http://asr:9000/ready` |
 
+##### Example: Translation health URL
+
+| `TRANSLATE_URL` | `TRANSLATE_HEALTH_URL` | Checked URL |
+| --------------- | ---------------------- | ----------- |
+| `http://translate:5000` | (unset) | `http://translate:5000/health` |
+| `http://gateway:4001` | `http://gateway:4001/health/liveliness` | `http://gateway:4001/health/liveliness` |
+
 
 <!-- @trace
-source: service-status
-updated: 2026-11-08
+source: cloud-translation
+updated: 2026-11-14
 code:
+  - bench/privacy_e2e.mjs
+  - bench/privacycheck.js
   - README.md
+  - webapp/quality_pass.py
   - webapp/server.py
-  - webapp/static/refine.css
-  - meeting-2026-11-01T00-16-53.txt
+  - webapp/static/privacy-note.js
   - webapp/static/app.js
-  - 20261029_185428.mp4
+  - webapp/chunk_asr.py
+  - bench/blindn.py
+  - bench/README.md
+  - compose.yaml
+  - .env.example
+  - docker/qwen-asr/healthcheck.py
   - webapp/static/index.html
-  - bench/translate_e2e.mjs
-  - 20261108_143903.mp4
+  - README.en.md
+  - README.deploy.md
 tests:
   - webapp/test_server.py
 -->

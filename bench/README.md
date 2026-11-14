@@ -63,7 +63,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - `catalogcheck.js`：會議預設名稱與「今天／本週／更早」分組（`TZ=Asia/Taipei node bench/catalogcheck.js`）
 - `lagcheck.py`：用人工字幕量測 ASR 文字落後音訊多久，決定校對頁的播放前延
 - `lag_gateway.py`：以指定封包大小把 bench 片段經 `/ws/transcribe`（翻譯模式，不建會議、不寫檔）送給指定引擎，記錄每個事件的到達時間；`--compare` 對另一條軌印出同一段文字晚多少到達（中位數／p10／p90），中日文片段另印文字落後人工字幕多久（`YUQIAO_SESSION=… python bench/lag_gateway.py <片段> <local|mai|hybrid> <封包毫秒> <秒數> <out.jsonl> [--compare 另一條.jsonl]`）
-- 精準模式（quality-pass）：`python bench/run.py quality1 [片段…]` 以 `quality` 開頭的 TAG 錄下含 quality 事件的軌（軌檔名多 `_q<目標語言>`）並在重播時勾選精準模式；評分表的段落是頁面保留的句子。需要先在 `.env` 設定 `TRANSLATE_QUALITY_ASR_MODEL` 與 `TRANSLATE_QUALITY_MODEL`。`bench/qualitycheck.js` 檢查頁面的取代與退回規則。2026-11-13 只以 60 秒片段經暫時閘道器（gemini-3.5-transcribe＋gemini-3.5-flash-lite）驗證過錄軌與重播的流程，尚未跑過完整 10 段的盲評。
+- 精準模式（quality-pass）：`python bench/run.py quality1 [片段…]` 以 `quality` 開頭的 TAG 錄下含 quality 事件的軌（軌檔名多 `_q<目標語言>`）並在重播時勾選精準模式；評分表的段落是頁面保留的句子。需要先在 `.env` 設定 `TRANSLATE_QUALITY_ASR_MODEL` 與 `TRANSLATE_QUALITY_MODEL`。`bench/qualitycheck.js` 檢查頁面的取代與退回規則。2026-11-13 只以 60 秒片段經暫時閘道器（gemini-3.5-transcribe＋gemini-3.5-flash-lite）驗證過錄軌與重播的流程，完整 10 段的盲評見文末「2026-11-14 精準模式 10 段盲評」。
 - `replay_browser.py --save-meeting`：重播存成一場會議（只有段落、沒有錄音），可在校對頁查看
 
 ## 2026-11-08 說話者辨識評估（speaker-diarization）
@@ -157,3 +157,51 @@ docker run --rm -v "$PWD/..:/bench" -w /bench/work diar-eval python ../score.py
 | 本機 v6（Confucius + Gemma） | 78.3 | 82.3 | 74.8 | 79.0 |
 | Confucius + 雲端精修 | 82.0 | 84.0 | 77.8 | 85.7 |
 | MAI + 雲端精修 | 85.9 | 88.7 | 88.0 | 80.3 |
+
+## 2026-11-14 精準模式的第二次辨識用哪個引擎（盲評 `blind_q1`，只有 `zh_fire` 一段）
+
+同一段 4 分鐘中文演講（zh→ja），六個版本同一位評審同一輪依 `rubric.md` 評分。精準模式四版的即時引擎都是本機 Confucius，文字模型都是 `deepseek-v4-flash`（`TRANSLATE_QUALITY_EXTRA={"thinking":{"type":"disabled"}}`；開著推理時單塊約 20 秒，收尾會逾時），以即時翻譯模式經暫時閘道器錄製後重播；兩個基準版是開會模式加雲端精修。
+
+| 版本 | 設定 | 盲評 | 留下的原文 CER | `audioMs − throughMs` 中位數 | 段數 |
+|---|---|---|---|---|---|
+| `quality_q` | 第二次辨識：本機 Qwen3-ASR 1.7B（`TRANSLATE_QUALITY_ASR_URL`，`qwen-asr-serve`） | **92** | 3.4% | 1.8 秒 | 36 |
+| `quality_m` | 第二次辨識：Azure MAI（`TRANSLATE_QUALITY_ASR=mai`） | 90 | **3.3%** | 4.8 秒 | 41 |
+| `cloudm` | 基準：MAI 即時（`mai_record.py` 的軌）＋雲端精修 | 83 | 4.2% | — | 28 |
+| `cloudc` | 基準：Confucius 即時＋雲端精修 | 82 | 4.2% | — | 14 |
+| `quality_l` | 第二次辨識：本機 Confucius（`TRANSLATE_QUALITY_ASR=local`） | 82 | 6.6% | 3.8 秒 | 36 |
+| `quality_g` | 第二次辨識：`gemini-3.5-transcribe` | 77 | 5.9% | 6.4 秒 | 43 |
+
+- 六版各 36 個 quality 事件，沒有失敗的區塊。CER 以頁面最後留下的段落原文對 `sub.zh-TW.vtt` 計算（`evaluate.py` 表頭的 CER 取自即時逐字稿，精準模式各版都一樣，不能用來比較）。
+- 評審意見（`bench/results/blind_q1/judge.md`）：Qwen 與 MAI 兩版內容齊全、每段是完整句子；兩個基準版失分在句中切段與大塊文字；Confucius 當第二次辨識時有兩段在句中截斷並漏字（留下 899 字，其他版約 930 字）；Gemini 版有辨識錯字變成無意義譯文並漏一句。
+- 82、83、82 三版差距在 1 分內，視為同級。只有一段影片，不能當成平均，也不能和其他輪次的分數比。
+- 花費：litellm 以 UTC 分日，與前一天混計，上限為 DeepSeek 0.33 美元、Gemini 辨識 0.045 美元；MAI 另由 Azure 計費（約 6 分鐘音訊）；Qwen3-ASR 與 Confucius 在本機。
+- Qwen3-ASR 佔用約 10 GB 顯示卡記憶體（`--gpu-memory-utilization 0.3`），錄製時先停了本機翻譯模型才放得下。
+
+## 2026-11-14 精準模式 10 段盲評（`blind_q10`，三版）
+
+每段影片一位評審同一輪依 `rubric.md` 評三個版本。精準模式兩版的即時引擎是本機 Confucius、文字模型是關掉推理的 `deepseek-v4-flash`，以即時翻譯模式錄製後重播；基準版是 `mai_record.py` 的 MAI 軌以開會模式加雲端精修重播。當時翻譯草稿與定稿都已改走雲端（cloud-translation）。
+
+| 片段 | 精準模式＋MAI（`quality_m10`） | 基準：MAI 即時＋雲端精修（`cloudb`） | 精準模式＋Qwen3-ASR 1.7B（`quality_q10`） |
+|---|---|---|---|
+| en_tesla | 90 | 84 | 82 |
+| en_torres | 84 | 86 | 75 |
+| zh_fire | 87 | 80 | 91 |
+| ja_bluu | 86 | 83 | 80 |
+| en_sinek | 88 | 79 | 84 |
+| zh_chen | 86 | 79 | 87 |
+| zh_jian | 78 | 72 | 76 |
+| ja_taguchi | 93 | 86 | 71 |
+| ja_komuro | 70 | 84 | 81 |
+| ja_pivot | 85 | 81 | 79 |
+| **平均** | **84.7** | 81.4 | 80.6 |
+| 英文 3 段 | 87.3 | 83.0 | 80.3 |
+| 日文 4 段 | 83.5 | 83.5 | 77.8 |
+| 中文 3 段 | 83.7 | 77.0 | 84.7 |
+
+- 精準模式＋MAI 在 10 段中有 8 段高於基準，平均高 3.3 分；精準模式＋Qwen3-ASR 只有 4 段高於基準，平均與基準相當：中文高 7.7 分，日文低 5.7 分（`ja_taguchi` 的「葉巻たばこ」「仲買人」「事業」等詞辨識錯誤）。同日早上只有 `zh_fire` 一段的結果（Qwen 92、MAI 90）不能代表平均。
+- 主要失分是內容遺漏：`ja_komuro` 的 MAI 版掉了四整段（70 分），`en_torres` 的 Qwen 版掉了一整個案例（75 分）。頁面留下的原文對字幕的錯字率（CER，英文為 WER）10 段平均：基準 9.1%、MAI 版 11.6%、Qwen 版 11.5%；精準模式兩版都比基準高，與遺漏一致。遺漏發生在第二次辨識還是文字模型，尚未查明。
+- `audioMs − throughMs` 中位數：Qwen 版各段 1.8–2.2 秒，MAI 版 4.4–6.0 秒。20 條軌、約 660 塊中沒有失敗的區塊（修正後）。
+- 評測中發現並修正的問題：Qwen3-ASR 新容器的第一段語音要暖機約 30 秒（健康檢查改為實際辨識）；`ja_pivot` 一塊 17.9 秒的日文重複輸出到上限而逾時（`TRANSLATE_QUALITY_ASR_EXTRA` 限制輸出長度，結尾的重複收成一次）；英文→日文被譯成中文（每次請求加 `TRANSLATE INTO`）。`en_sinek` 因最後一項在修正後重錄並單獨重評（`bench/results/blind_sinek/`），表中是重評的分數；其餘 9 段是修正前錄的，方向不受該問題影響。
+- 單支分數在不同輪次會浮動約 ±5，82 與 81 這種差距不具鑑別力；評審全文在 `bench/results/blind_q10/judge_<片段>.md`。
+- `python bench/run.py quality1 zh_fire` 與 `python bench/evaluate.py quality1` 已實跑：軌中 36 個 quality 事件、沒有失敗，評分表每段是一句且來自 quality 事件。
+- 另有兩個瀏覽器檢查：`bench/quality_e2e.mjs`（開關、連線標頭、連續失敗的狀態、停止時的等待）與 `bench/privacy_e2e.mjs`（隱私標示）。

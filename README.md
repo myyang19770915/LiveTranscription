@@ -61,7 +61,7 @@ flowchart LR
   diarizeCache --- diarize
 ```
 
-Compose 定義 `app`、`asr`、`translate`、`db`、`embed`、`diarize` 六個服務（另有開發用的 `dev-ldap`、本機測試信箱 `dev-mail`，以及對外用的 Cloudflare Tunnel `tunnel`，皆以 profile 啟用）。除了 `app` 的主機連接埠 `18082`，其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`translate`、`db` 的健康檢查通過；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料；`diarize` 也不是必要服務，沒啟動時段落不標說話者。
+Compose 定義 `app`、`asr`、`db`、`embed`、`diarize` 五個預設啟動的服務，另有以 profile 啟用的服務：本機翻譯模型 `translate`（`local-translate`）、精準模式用的 `qwen-asr`、開發用的 `dev-ldap`、本機測試信箱 `dev-mail`，以及對外用的 Cloudflare Tunnel `tunnel`。翻譯模型放本機或外部服務見[翻譯模型放哪裡](#翻譯模型放哪裡)。除了 `app` 的主機連接埠 `18082`，其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`db` 的健康檢查通過（翻譯模型是否就緒顯示在開會頁的服務狀態）；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料；`diarize` 也不是必要服務，沒啟動時段落不標說話者。
 
 ### Docker image 與模型權重分別下載在哪裡
 
@@ -78,7 +78,7 @@ Docker image 是「執行環境」，模型權重是服務啟動時載入的「�
 
 模型快取位置也分開：ASR 與 VAD 共用 `model-cache`，掛載到 ASR 容器的 `/models`，Hugging Face 快取目錄是 `/models/huggingface`；Gemma 權重使用 `translation-model-cache`，掛載至翻譯容器的 `/root/.cache`；embedding 權重使用 `embed-model-cache`。因此一般執行 `docker compose down` 後仍會保留模型。⚠️ `docker compose down -v` 會刪除**所有** named volumes，包括會議資料庫 `meeting-db`（帳號、團隊、會議、校對、紀要、待辦、成員照片），不要用它來清模型快取；做法見[驗證與日常維護](#驗證與日常維護)。
 
-啟動順序由 Compose 管理：`docker compose up --build -d` 先準備／下載 images，啟動 `asr` 與 `translate`，兩者健康檢查成功後才啟動 `app`。ASR、VAD、Gemma 權重會在各自容器第一次啟動時下載或載入，日後重啟會使用快取。可在 [`compose.yaml`](compose.yaml) 查看 image、GPU、命令、環境變數、volume 與健康檢查的完整設定。
+啟動順序由 Compose 管理：`docker compose --profile local-translate up --build -d` 先準備／下載 images，啟動 `asr` 與 `translate`，`asr` 健康檢查成功後才啟動 `app`。ASR、VAD、Gemma 權重會在各自容器第一次啟動時下載或載入，日後重啟會使用快取。可在 [`compose.yaml`](compose.yaml) 查看 image、GPU、命令、環境變數、volume 與健康檢查的完整設定。
 
 ### 模型 serve 與程式串接位置
 
@@ -239,7 +239,7 @@ Copy-Item .env.example .env
 先將 `.env` 中的 `ASR_SECRET_KEY` 改成自行產生的長隨機字串，再啟動服務：
 
 ```powershell
-docker compose up --build -d
+docker compose --profile local-translate up --build -d   # 翻譯模型放本機；改用外部服務見「翻譯模型放哪裡」
 docker compose ps
 docker compose logs -f asr translate app
 ```
@@ -313,6 +313,17 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 
 系統聲音由 `getDisplayMedia()` 的瀏覽器分享選擇器取得。Chrome 需要讓使用者明確挑選分頁／畫面與音訊；若選擇器沒有分享音訊，應改選可分享分頁音訊的分頁或重新選擇。即使畫面分享 API 同時回傳 video track，本專案只把音訊接入轉錄流程，不會上傳畫面影像。停止會議會關閉音訊串流；本專案不錄製或保留原始音訊。
 
+### 翻譯模型放哪裡
+
+翻譯草稿、定稿與詞彙學習用同一個文字模型，有兩種放法：
+
+| 放法 | 設定 | 啟動 | 文字去向 |
+|---|---|---|---|
+| 本機（預設） | 不填 `TRANSLATE_KEY` | `docker compose --profile local-translate up -d` | 只在語橋主機 |
+| 外部服務 | `.env` 填 `TRANSLATE_URL`、`TRANSLATE_MODEL`、`TRANSLATE_KEY`（必要時加 `TRANSLATE_EXTRA`、`TRANSLATE_HEALTH_URL`） | `docker compose up -d`（不要加 `local-translate`） | 每場會議的譯文文字都會送到該服務，開會頁顯示「雲端翻譯」 |
+
+改用外部服務可以把顯示卡記憶體讓給精準模式的本機辨識模型：`docker compose --profile qwen-asr up -d qwen-asr` 會啟動 Qwen3-ASR 1.7B（約 10 GB，第一次啟動會下載權重），再把 `TRANSLATE_QUALITY_ASR_URL` 設為 `http://qwen-asr:8000/v1`、`TRANSLATE_QUALITY_ASR_MODEL` 設為 `Qwen/Qwen3-ASR-1.7B`。32 GB 的顯示卡放不下「即時辨識＋本機翻譯模型＋Qwen3-ASR」三者，`local-translate` 與 `qwen-asr` 只能擇一。改完 `.env` 後執行 `docker compose up -d app`。
+
 ### 精準模式
 
 選用功能，預設關閉。設定 `TRANSLATE_QUALITY_ASR_MODEL` 與 `TRANSLATE_QUALITY_MODEL` 後，開會頁「進階」會出現「精準模式」核取方塊；勾選的那場會議（或即時翻譯）才會啟用，選擇記在瀏覽器裡。
@@ -326,6 +337,8 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - **費用**：每分鐘音訊約 4–8 次辨識與 4–8 次文字模型呼叫，一小時的會議約 240–480 次各一，請先確認額度。
 
 離線原型（2026-11-13，尚未經真實頁面重播）以 gpt-transcribe＋gpt-5.5 在 10 段評測影片的同輪盲評平均 92.1 分，同一輪的既有最佳組合為 83.0 分；較小的文字模型（gemini-3.5-flash-lite）只有 81.8 分，所以文字模型要選夠強的。
+
+**評測結果（2026-11-14，10 段各 4 分鐘，同輪盲評，滿分 100）**：第二次辨識用 Azure MAI 平均 84.7，不開精準模式的基準（MAI 即時＋雲端精修）81.4，第二次辨識用本機 Qwen3-ASR 1.7B 80.6。Qwen3-ASR 在中文高於基準（84.7 對 77.0），在日文低於基準（77.8 對 83.5）；兩種設定的主要失分都是整句內容遺漏。精準模式因此仍是每場會議自行勾選的選項，細節見 [bench/README.md](bench/README.md)。
 
 ## 會後校對
 
@@ -475,7 +488,15 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `TRANSLATE_MODEL_REPO` | Google QAT Q4_0 GGUF repo | llama.cpp 下載的模型 repo |
 | `TRANSLATE_MODEL_FILE` | `gemma-4-E2B_q4_0-it.gguf` | repo 中指定的 GGUF 權重檔 |
 | `TRANSLATE_REFINE_URL` / `_MODEL` / `_KEY` | 空（關閉） | 選用：OpenAI 相容的雲端模型（例如 litellm `http://host.docker.internal:4001/v1`），用於「雲端精修」；設定後頁面出現開關 |
+| `TRANSLATE_URL` / `TRANSLATE_MODEL` | 本機 `http://translate:5000` 與 `TRANSLATE_MODEL_FILE` | 翻譯模型的位址（不含 `/v1`）與模型名稱。預設是本機 llama.cpp（要以 `--profile local-translate` 啟動） |
+| `TRANSLATE_KEY` | 空（本機模型） | 有值時表示翻譯模型是外部的 OpenAI 相容服務：草稿、定稿、單句翻譯與詞彙學習都帶這把金鑰送過去，開會頁隱私標示改為「雲端翻譯」 |
+| `TRANSLATE_EXTRA` | 空 | 併入外部翻譯請求的 JSON；推理型模型要關掉推理草稿才夠快，例如 `{"thinking":{"type":"disabled"}}` |
+| `TRANSLATE_HEALTH_URL` | `TRANSLATE_URL` + `/health` | 開會頁「服務狀態」檢查翻譯服務用的網址；litellm 用 `/health/liveliness` |
+| `QWEN_GPU_MEMORY_UTILIZATION` | `0.3` | 內建 Qwen3-ASR 服務（profile `qwen-asr`）可用的顯示卡記憶體比例 |
 | `TRANSLATE_QUALITY_ASR_MODEL` / `TRANSLATE_QUALITY_MODEL` | 空（關閉） | 選用：「精準模式」的第二段辨識模型（`/audio/transcriptions`）與文字模型（`/chat/completions`）。兩個都填才啟用，頁面才出現開關（見[精準模式](#精準模式)） |
+| `TRANSLATE_QUALITY_ASR` | 空 | 精準模式的第二次辨識改用本系統的引擎：`local`（本機 Confucius，音訊不離開這台機器）或 `mai`（Azure MAI，需已設定 `AZURE_MAI_*`）。填了就不需要 `TRANSLATE_QUALITY_ASR_MODEL`；文字仍會送到文字模型。其他值視為未設定 |
+| `TRANSLATE_QUALITY_ASR_URL` / `_ASR_KEY` | 空（與文字模型同一個服務） | 辨識模型在另一個 OpenAI 相容服務時（例如架在本機的 Qwen3-ASR 或 Whisper），填它的位址與金鑰；文字模型服務的金鑰不會送到這裡 |
+| `TRANSLATE_QUALITY_ASR_EXTRA` | 空 | 併入辨識請求的欄位（JSON）。內建 Qwen3-ASR 建議設 `{"max_completion_tokens":400}`：實測一塊日文音訊會重複輸出到上限（28 秒）而逾時，設了之後 1.2 秒回來，重複的部分由閘道器收成一次 |
 | `TRANSLATE_QUALITY_URL` / `_KEY` | 沿用 `TRANSLATE_REFINE_URL` / `_KEY` | 精準模式的 OpenAI 相容服務位址與金鑰 |
 | `TRANSLATE_QUALITY_EXTRA` | 空 | 併入文字模型請求的 JSON，例如推理型模型用 `{"reasoning_effort":"low"}` |
 | `TRANSLATE_QUALITY_ALT` | 空 | 設 `1` 時把即時辨識文字一併交給文字模型交叉比對；尚未評測，預設關閉 |

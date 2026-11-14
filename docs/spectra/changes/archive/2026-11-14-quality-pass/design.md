@@ -74,6 +74,24 @@
 
 `TRANSLATE_QUALITY_ASR_MODEL`（第二段辨識模型）與 `TRANSLATE_QUALITY_MODEL`（文字模型）兩者都有值才啟用；`TRANSLATE_QUALITY_URL`／`TRANSLATE_QUALITY_KEY` 預設沿用 `TRANSLATE_REFINE_URL`／`TRANSLATE_REFINE_KEY`；`TRANSLATE_QUALITY_EXTRA`（JSON，預設 `{}`）併入文字模型請求，用來設定各家模型的推理參數。`/api/config` 多回 `quality: true|false`。瀏覽器送的標頭帶 `quality: true` 且伺服器已設定時才執行。
 
+### 第二次辨識可以改用本系統自己的引擎
+
+`TRANSLATE_QUALITY_ASR=local|mai` 時，每個區塊不走 `/audio/transcriptions`，改由 `webapp/chunk_asr.py` 開一條獨立連線，把整塊音訊一次送給本機 Confucius（`ASR_WS_URL`，標頭帶 `retain: false`）或 Azure MAI（realtime，送完後 commit 一次），讀回整塊文字。此時不需要 `TRANSLATE_QUALITY_ASR_MODEL`；`mai` 另需 `AZURE_MAI_*` 已設定；其他值一律視為未設定。逾時沿用 15 秒，失敗與重試規則不變。兩個引擎都不收前文提示（本機引擎只收詞彙）。2026-11-14 以 12 秒中文片段實測：本機 1.7 秒、MAI 4.6 秒（其中連線 1.5 秒）。每塊一條連線而不重用，是因為 MAI 的 session 會自行結束，重用要另外處理重連；延遲是否可接受由評測決定。
+
+### 辨識模型可以在另一個服務
+
+`TRANSLATE_QUALITY_ASR_URL`／`TRANSLATE_QUALITY_ASR_KEY` 有值時，`/audio/transcriptions` 改送到該位址並只帶它自己的金鑰（沒填就不帶），文字模型仍走 `TRANSLATE_QUALITY_URL`。用途是把辨識模型架在本機（例如 `qwen-asr-serve` 的 Qwen3-ASR），音訊不離開這台機器，而文字模型留在雲端。文字服務的金鑰不能送到辨識服務，所以不沿用。
+
+### 辨識模型的重複輸出
+
+2026-11-14 評測 `ja_pivot` 時，Qwen3-ASR 1.7B 對一塊 17.9 秒的日文在正確文字之後重複輸出「はい。」直到模型長度上限（8041 字、28 秒），超過 15 秒的等待而失敗，重錄可重現。實測：`max_completion_tokens=300` 讓它 1.2 秒回來（結尾仍有重複）、`repetition_penalty` 無效、`frequency_penalty=0.3` 可以完全消除但會改變一般辨識的取樣，未採用。作法分兩層：`TRANSLATE_QUALITY_ASR_EXTRA`（JSON）併入辨識請求，讓部署者為自己的模型設輸出上限（內建 Qwen3-ASR 用 `{"max_completion_tokens":400}`，18 秒的區塊最多約 270 字）；閘道器另把結尾的重複（2–12 個字的單位連續 5 次以上）收成一次，對任何辨識模型都有效。單一字元的重複（「哈哈哈哈哈」「1000000」）不處理。
+
+`qwen-asr` 服務啟動後第一個辨識請求要約 30 秒（暖機），也會超過等待時間；它的健康檢查改成實際送一秒靜音去辨識（`docker/qwen-asr/healthcheck.py`），服務啟動後就自己暖機，暖好才算健康。
+
+### 譯文語言要寫在文字旁邊
+
+2026-11-14 的 10 段盲評中，`en_sinek`（英文→日文）的精準模式兩版都譯成了中文：系統提示寫了目標語言是日文，但關掉推理的 `deepseek-v4-flash` 仍輸出中文（直接呼叫可重現，三次都是中文）。在每次請求的使用者訊息最後加一行 `TRANSLATE INTO: <語言>`、並在系統提示結尾重申後，六個語言方向各測三次都正確。該段的分數因此不採計，修正後重錄重評。
+
 ### 實作時補上的行為
 
 - 辨識服務以 HTTP 400 拒絕帶 `prompt` 的請求時，改成不帶 `prompt` 重送，該場之後都不帶。2026-11-13 實測：經 litellm 的 gemini-3.5-transcribe 不接受 `prompt`，gpt-transcribe 接受。

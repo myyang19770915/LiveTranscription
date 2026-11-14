@@ -468,7 +468,10 @@ async function checkServices(){
 }
 document.addEventListener('visibilitychange',()=>document.hidden?clearTimeout(serviceTimer):checkServices());
 checkServices();
-fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine,mai,quality:qualityReady})=>{
+// Unknown settings (the request failed) count as external translation: the notice must never claim text stays on the host
+// when it may not (privacy-notice).
+fetch('/api/config').then(r=>r.ok?r.json():{cloudTranslate:true}).catch(()=>({cloudTranslate:true})).then(({cloudRefine,mai,quality:qualityReady,cloudTranslate})=>{
+  cloudTranslation=!!cloudTranslate;
   $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;$('qualityRow').hidden=!qualityReady;$('setupAdvanced').hidden=!(cloudRefine||mai||qualityReady);
   try{$('quality').checked=localStorage.getItem('quality')==='1'}catch{}
   $('cloudRefine').disabled=qualityChosen();
@@ -476,8 +479,10 @@ fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine,mai,quality:qu
   showPrivacy();
 }).catch(()=>{});
 // Where audio and text go for the current choices (privacy-notice); the header and the footer say the same.
+let cloudTranslation=null;   // the translation model is an external service (cloud-translation); null until /api/config answered
 function showPrivacy(){
-  const note=PrivacyNote.text(asrEngine(),cloudRefineOn(),qualityChosen());
+  if(cloudTranslation===null)return;   // not known yet: the page keeps 資料去向／確認中… instead of a claim that may be false
+  const note=PrivacyNote.text(asrEngine(),cloudRefineOn(),qualityChosen(),cloudTranslation);
   $('privacyNote').replaceChildren(Object.assign(document.createElement('b'),{textContent:note.label}),note.sentence);
   $('secureLabel').textContent=note.label;
 }

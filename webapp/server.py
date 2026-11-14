@@ -43,6 +43,32 @@ ASR_WS_URL = os.getenv("ASR_WS_URL", "ws://asr:8272/asr_stream_api_v1")
 ASR_SECRET_KEY = os.getenv("ASR_SECRET_KEY", "change-me-local-only")
 TRANSLATE_URL = os.getenv("TRANSLATE_URL", "http://translate:5000").rstrip("/")
 TRANSLATE_MODEL = os.getenv("TRANSLATE_MODEL", "gemma-4-E2B_q4_0-it.gguf")
+# With a key, TRANSLATE_URL is an OpenAI-compatible service outside this machine (cloud-translation): every
+# translation and term-discovery request carries the key, loses the llama.cpp-only options and takes TRANSLATE_EXTRA
+# (JSON, e.g. reasoning off so drafts stay fast). Meeting text then always leaves the machine; the page says so.
+TRANSLATE_KEY = os.getenv("TRANSLATE_KEY", "")
+LLAMA_ONLY = ("repeat_penalty", "chat_template_kwargs", "top_p")   # not part of the OpenAI API
+
+
+def translate_extra(text: str) -> dict:
+    """TRANSLATE_EXTRA as a dict; anything but a JSON object is ignored with a warning."""
+    try:
+        value = json.loads(text or "{}")
+    except ValueError:
+        value = None
+    if not isinstance(value, dict):
+        logging.getLogger("uvicorn.error").warning("TRANSLATE_EXTRA is not a JSON object; ignored")
+        return {}
+    return value
+
+
+def translation_health_url(url: str, override: str = "") -> str:
+    """What 服務狀態 checks for the translation model: TRANSLATE_HEALTH_URL, or TRANSLATE_URL + /health."""
+    return override.strip() or f"{url}/health"
+
+
+TRANSLATE_EXTRA = translate_extra(os.getenv("TRANSLATE_EXTRA", ""))
+TRANSLATE_HEALTH_URL = translation_health_url(TRANSLATE_URL, os.getenv("TRANSLATE_HEALTH_URL", ""))
 # Optional OpenAI-compatible cloud model for the delayed refinement pass only. Unset = fully local.
 # Meeting text is sent to that service only when the user turns 雲端精修 on.
 REFINE_URL = os.getenv("TRANSLATE_REFINE_URL", "").rstrip("/")
@@ -250,7 +276,7 @@ async def health():
 @app.get("/api/config")
 async def config():
     return {"cloudRefine": bool(REFINE_URL and REFINE_MODEL), "mai": mai_asr.configured(), "minutes": minutes.configured(),
-            "quality": quality_pass.configured()}
+            "quality": quality_pass.configured(), "cloudTranslate": bool(TRANSLATE_KEY)}
 
 
 def asr_health_url(ws_url: str, override: str = "") -> str:
@@ -288,7 +314,7 @@ async def database_ok() -> bool:
 @app.get("/api/services")
 async def services():
     """Whether the local services meetings depend on are ready (service-status); generic names only, no URLs or errors."""
-    checks = await asyncio.gather(service_ok(ASR_HEALTH_URL), service_ok(f"{TRANSLATE_URL}/health"), database_ok())
+    checks = await asyncio.gather(service_ok(ASR_HEALTH_URL), service_ok(TRANSLATE_HEALTH_URL), database_ok())
     entries = [{"key": key, "name": name, "ok": ok}
                for (key, name), ok in zip((("asr", "語音辨識"), ("translate", "翻譯"), ("database", "資料庫")), checks)]
     return {"ready": all(checks), "services": entries}
@@ -328,12 +354,18 @@ async def punctuate_item(context: str, text: str, pause: bool) -> str:
     return mai_asr.merge_marks(text, answer.strip().removeprefix("TEXT："), TO_TRADITIONAL.convert)
 
 
+def translation_request(payload: dict) -> tuple[dict, dict]:
+    """(headers, payload) for the translation model: as built for local llama.cpp, or for the keyed external service."""
+    if not TRANSLATE_KEY:
+        return {}, payload
+    return {"Authorization": f"Bearer {TRANSLATE_KEY}"}, {**{k: v for k, v in payload.items() if k not in LLAMA_ONLY}, **TRANSLATE_EXTRA}
+
+
 def translation_backend(body: "TranslationRequest", payload: dict) -> tuple[str, dict, dict]:
-    """(url, headers, payload): the cloud model for refinements when configured, else local llama.cpp."""
+    """(url, headers, payload): the cloud model for refinements when configured, else the translation model."""
     if not (body.refine and REFINE_URL and REFINE_MODEL):
-        return f"{TRANSLATE_URL}/v1/chat/completions", {}, payload
-    # llama.cpp-only sampling options are not part of the OpenAI API.
-    cloud = {k: v for k, v in payload.items() if k not in ("repeat_penalty", "chat_template_kwargs", "top_p")}
+        return f"{TRANSLATE_URL}/v1/chat/completions", *translation_request(payload)
+    cloud = {k: v for k, v in payload.items() if k not in LLAMA_ONLY}
     headers = refine_headers()
     # Reasoning models (deepseek-v4-flash) spend max_tokens on thinking first; an exact budget
     # returns an empty translation, so leave room for it. Refinements run in the background.
@@ -358,10 +390,8 @@ async def translate(body: TranslationRequest):
     )
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                f"{TRANSLATE_URL}/v1/chat/completions",
-                json={**translation_payload(body), "stream": False},
-            )
+            headers, request = translation_request({**translation_payload(body), "stream": False})
+            response = await client.post(f"{TRANSLATE_URL}/v1/chat/completions", json=request, headers=headers)
             response.raise_for_status()
             payload = response.json()
             if payload["choices"][0].get("finish_reason") == "length":
@@ -392,10 +422,15 @@ async def discover_terms(body: TermsRequest):
                "chat_template_kwargs": {"enable_thinking": False},
                "response_format": {"type": "json_schema", "json_schema": {"name": "terms", "schema": TERMS_SCHEMA}},
                "messages": term_discovery_messages(body.text, language, known)}
+    if TRANSLATE_KEY:
+        # External services differ on JSON schemas; a JSON object with the schema in the prompt works everywhere.
+        payload["response_format"] = {"type": "json_object"}
+        payload["messages"][0]["content"] += "\nAnswer with one JSON object of this schema: " + json.dumps(TERMS_SCHEMA)
+    headers, payload = translation_request(payload)
     started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(f"{TRANSLATE_URL}/v1/chat/completions", json=payload)
+            response = await client.post(f"{TRANSLATE_URL}/v1/chat/completions", json=payload, headers=headers)
             response.raise_for_status()
             output = response.json()["choices"][0]["message"]["content"]
     except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
@@ -629,7 +664,8 @@ async def transcribe(browser: WebSocket):
             async def quality_event(payload: dict) -> None:
                 if browser.client_state == WebSocketState.CONNECTED:
                     await browser.send_text(json.dumps(payload, ensure_ascii=False))
-            quality = quality_pass.QualityPass(quality_event, language, str(header.get("target", "")), glossary, TO_TRADITIONAL.convert)
+            quality = quality_pass.QualityPass(quality_event, language, str(header.get("target", "")), glossary, TO_TRADITIONAL.convert,
+                                               LANGUAGES.get(language, (None,))[0] or "zhen")
             display.quality = quality
             guarded = quality_pass.TeeReceiver(guarded, quality.feed)
         if asr_engine(str(header.get("engine", "")), language) == "mai":
