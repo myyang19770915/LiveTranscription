@@ -20,6 +20,12 @@
     <p id="summary" class="summary" aria-live="polite"></p>
   </div>
 
+  <section id="maiUsage" class="create card" aria-labelledby="maiUsageTitle" hidden>
+    <h2 id="maiUsageTitle" class="label">雲端辨識（Azure MAI）用量</h2>
+    <p id="maiUsageText" class="summary"></p>
+    <p id="maiUsageWarn" class="alert" role="alert" hidden></p>
+  </section>
+
   <form id="createTeam" class="create card">
     <label class="label" for="teamName">建立新團隊</label>
     <div class="row">
@@ -38,6 +44,15 @@
 const $=id=>document.getElementById(id);
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
 function showError(message){$('adminError').textContent=message;$('adminError').hidden=!message}
+// Azure MAI is billed by the audio sent (mai-usage): what has accumulated, against the budget. Reaching it stops nothing.
+function showMaiUsage(usage){
+  if(!usage)return;
+  $('maiUsage').hidden=false;
+  $('maiUsageText').textContent=`累計送出 ${(usage.seconds/3600).toFixed(1)} 小時的音訊，約 ${usage.usd.toFixed(2)} 美元（上限 ${usage.budgetUsd} 美元，每小時 ${usage.usdPerHour} 美元）。金額依送出的音訊長度估算，不是帳單。`;
+  const warn={near:'已達上限的八成。',over:'已達到或超過上限。雲端辨識仍可使用，是否繼續由你決定。'}[usage.state]||'';
+  $('maiUsageWarn').textContent=warn;$('maiUsageWarn').hidden=!warn;
+}
+fetch('/api/admin/mai-usage').then(response=>response.ok?response.json():null).then(showMaiUsage).catch(()=>{});
 async function call(method,url,body){
   const response=await fetch(url,{method,headers:body?{'content-type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
   if(!response.ok){const detail=(await response.json().catch(()=>({}))).detail;throw new Error(typeof detail==='string'?detail:'操作失敗，請再試一次')}

@@ -185,6 +185,9 @@ services:
       DATABASE_URL: postgresql://yuqiao:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/yuqiao
       # Sign-in: company LDAP; ADMIN_USERS (comma-separated usernames) manage teams.
       ADMIN_USERS: ${ADMIN_USERS:-}
+      # Azure MAI is billed by audio length (mai-usage): the price per hour and the budget administrators are warned at.
+      MAI_USD_PER_HOUR: ${MAI_USD_PER_HOUR:-0.54}
+      MAI_BUDGET_USD: ${MAI_BUDGET_USD:-50}
       LDAP_URL: ${LDAP_URL:-}
       LDAP_BASE_DN: ${LDAP_BASE_DN:-}
       LDAP_BIND_DN: ${LDAP_BIND_DN:-}

@@ -16,6 +16,7 @@ from collections import deque
 import websockets
 
 import mai_asr
+import mai_usage
 from translation_quality import asr_context
 
 ASR_WS_URL = os.getenv("ASR_WS_URL", "ws://asr:8272/asr_stream_api_v1")
@@ -70,6 +71,7 @@ class MaiLive:
         self.waiting: deque = deque()   # commits sent, not yet answered: a Future, or None for a transcript to drop
         self.closed = False
         self.open_audio = False   # sound went out since the last commit
+        self.meter = mai_usage.Meter("quality")   # the audio that goes to MAI is billed (mai-usage)
         self.lost = False         # a session ended with such audio: the next commit would answer for part of a chunk
         self.task = asyncio.create_task(self._run())
 
@@ -158,6 +160,7 @@ class MaiLive:
                     else:
                         self.open_audio = self.open_audio or audible(got)
                         await ws.send(json.dumps({"type": "input_audio_buffer.append", "audio": base64.b64encode(got).decode("ascii")}))
+                        self.meter.count(len(got))
             finally:
                 reader.cancel()
 

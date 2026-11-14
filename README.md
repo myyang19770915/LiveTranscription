@@ -495,6 +495,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `TRANSLATE_EXTRA` | 空 | 併入外部翻譯請求的 JSON；推理型模型要關掉推理草稿才夠快，例如 `{"thinking":{"type":"disabled"}}` |
 | `TRANSLATE_HEALTH_URL` | `TRANSLATE_URL` + `/health` | 開會頁「服務狀態」檢查翻譯服務用的網址；litellm 用 `/health/liveliness` |
 | `QWEN_GPU_MEMORY_UTILIZATION` | `0.3` | 內建 Qwen3-ASR 服務（profile `qwen-asr`）可用的顯示卡記憶體比例 |
+| `MAI_USD_PER_HOUR` / `MAI_BUDGET_USD` | `0.54` / `50` | Azure MAI 每小時音訊的單價與累計金額上限（美元）。系統記錄送給 MAI 的音訊秒數（即時引擎與精準模式），系統管理員在「團隊管理」頁看到累計金額；達上限的八成與達上限時顯示提示並記一次警告日誌，不會停用 MAI。評測腳本直接連 MAI 的用量以 `docker exec -w /app <app 容器> python -m mai_usage add <秒數> bench` 登記，不帶參數時印出累計 |
 | `TRANSLATE_QUALITY_ASR_MODEL` / `TRANSLATE_QUALITY_MODEL` | 空（關閉） | 選用：「精準模式」的第二段辨識模型（`/audio/transcriptions`）與文字模型（`/chat/completions`）。兩個都填才啟用，頁面才出現開關（見[精準模式](#精準模式)） |
 | `TRANSLATE_QUALITY_ASR` | 空 | 精準模式的第二次辨識由誰做。空：`TRANSLATE_QUALITY_ASR_MODEL` 的辨識服務；`local`：本機 Confucius（音訊不離開這台機器）；`mai`：Azure MAI（需已設定 `AZURE_MAI_*`）；`hybrid`：中文（`zh`、`yue`）用辨識服務、其他語言用 MAI。用到 MAI 的串流會另開一條 MAI 連線，音訊照收到的速度送出並在每個區塊切點取回文字。文字都會送到文字模型。其他值視為未設定 |
 | `TRANSLATE_QUALITY_ASR_URL` / `_ASR_KEY` | 空（與文字模型同一個服務） | 辨識模型在另一個 OpenAI 相容服務時（例如架在本機的 Qwen3-ASR 或 Whisper），填它的位址與金鑰；文字模型服務的金鑰不會送到這裡 |

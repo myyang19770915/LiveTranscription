@@ -21,6 +21,8 @@ from urllib.parse import urlsplit
 
 import websockets
 
+import mai_usage
+
 logger = logging.getLogger("uvicorn.error")
 MAI_ENDPOINT = os.getenv("AZURE_MAI_ENDPOINT", "")
 MAI_KEY = os.getenv("AZURE_MAI_API_KEY", "")
@@ -113,6 +115,7 @@ class MaiBridge:
         self.audio_since_commit, self.closing, self.eos, self.reconnects = 0, False, False, 0
         self.item_start = 0  # display position where the uncommitted item begins
         self.tentative = ""  # MAI's intermediate text not yet confirmed by a delta
+        self.meter = mai_usage.Meter("live")   # the audio that goes to MAI is billed (mai-usage)
 
     async def connect(self):
         ws = await websockets.connect(realtime_url(), additional_headers={"api-key": MAI_KEY}, max_size=None, ping_interval=20)
@@ -150,7 +153,10 @@ class MaiBridge:
                 pcm = event["bytes"]
                 if self.display.audio is not None:
                     self.display.audio.write(pcm)
+                connected = self.ws is not None   # between sessions nothing is sent, so nothing is billed
                 await self.send({"type": "input_audio_buffer.append", "audio": base64.b64encode(pcm).decode("ascii")})
+                if connected:
+                    self.meter.count(len(pcm))
                 self.audio_since_commit += len(pcm)
                 if self.vad.feed(pcm) and self.language in PAUSE_COMMITS:
                     await self.commit(pause=True)
@@ -267,5 +273,8 @@ class MaiBridge:
             for task in (reader, writer, worker):
                 task.cancel()
             await asyncio.gather(reader, writer, worker, return_exceptions=True)
-            if self.ws is not None:
-                await self.ws.close()
+            try:
+                await asyncio.shield(self.meter.finish())   # on record before the stream is over, also when it was cancelled
+            finally:
+                if self.ws is not None:
+                    await self.ws.close()

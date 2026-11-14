@@ -406,6 +406,7 @@ class QualityPass:
             self.closed = True
             if self.mai:
                 self.mai.close()
+                await self.mai.meter.finish()   # what went to MAI is on record before the stream closes
             await self.client.aclose()
 
     def cancel(self) -> None:
@@ -416,6 +417,7 @@ class QualityPass:
         self.worker.cancel()
         if self.mai:
             self.mai.close()
+            self.mai.meter.finish_soon()
         asyncio.ensure_future(self.client.aclose())
 
     # --- processing --------------------------------------------------------------------------------------

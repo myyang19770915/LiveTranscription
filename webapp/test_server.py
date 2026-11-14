@@ -35,6 +35,7 @@ import meeting_audio
 import minutes
 import qa
 import chunk_asr
+import mai_usage
 import quality_pass
 import reminders
 import search
@@ -2947,6 +2948,9 @@ class FakeMai:
                 await asyncio.sleep(0.3)
             yield json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": self.transcripts.pop(0)})
 
+    async def close(self):
+        pass
+
     def audio(self):
         return b"".join(base64.b64decode(m["audio"]) for m in self.sent if m["type"] == "input_audio_buffer.append")
 
@@ -3209,6 +3213,108 @@ class QualityCoverageTest(unittest.TestCase):
         prompt = quality_pass.system_prompt("en", "zh")
         self.assertIn("never delete, summarize, shorten or skip a sentence", prompt)
         self.assertIn("every sentence of CARRY", prompt)
+
+
+class MaiUsageTests(AccountTestCase):
+    """mai-usage: the audio sent to MAI is recorded by date and purpose, and administrators see the cost."""
+
+    def rows(self):
+        return dict(self.query("SELECT purpose, sum(seconds) FROM mai_usage GROUP BY purpose"))
+
+    def test_entered_by_hand_and_invalid_entries(self):
+        asyncio.run(mai_usage.record("bench", 5400))
+        asyncio.run(mai_usage.record("bench", 600))
+        self.assertEqual(self.rows(), {"bench": 6000})
+        for purpose, seconds in (("bench", -5), ("bench", 0), ("bench", float("inf")), ("bench", float("nan")), ("Bench Run", 60), ("", 60), ("x" * 41, 60)):
+            with self.assertRaises(ValueError):
+                asyncio.run(mai_usage.record(purpose, seconds))
+        self.assertEqual(mai_usage.main(["add", "-5", "bench"]), 2)
+        self.assertEqual(mai_usage.main(["add", "60", "Bench Run"]), 2)
+        self.assertEqual(mai_usage.main(["add", "inf", "bench"]), 2)
+        self.assertEqual(self.rows(), {"bench": 6000})
+        self.assertEqual(self.query("SELECT count(*) FROM mai_usage")[0][0], 1)   # one row per date and purpose
+
+    def test_the_command_adds_and_prints(self):
+        with patch("builtins.print") as printed:
+            self.assertEqual(mai_usage.main(["add", "5400", "bench"]), 0)
+        self.assertEqual(self.rows(), {"bench": 5400})
+        self.assertIn("1.50 h of audio sent to MAI, about 0.81 USD of a 50.00 USD budget (ok)", printed.call_args[0][0])
+
+    def test_a_meter_writes_every_five_minutes_and_at_the_end(self):
+        async def go():
+            meter = mai_usage.Meter("live")
+            for _ in range(301):
+                meter.count(32000)
+            await asyncio.gather(*mai_usage._writing)
+            first = self.rows().get("live", 0)
+            await meter.finish()
+            return first
+        self.assertEqual((asyncio.run(go()), self.rows()), (300, {"live": 301}))
+
+    def test_a_failed_write_is_logged_and_nothing_is_raised(self):
+        with patch("mai_usage.record", side_effect=OSError("database down")), self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            asyncio.run(mai_usage.add("live", 2))
+        self.assertIn("MAI usage not recorded (2 s, live): OSError", logs.output[0])
+
+    def test_cost_and_state_follow_the_example_table(self):
+        for seconds, price, budget, usd, state in ((0, 0.54, 50, 0, "ok"), (5400, 0.54, 50, 0.81, "ok"), (266667, 0.54, 50, 40, "near"),
+                                                   (333334, 0.54, 50, 50, "over"), (7200, 1, 2, 2, "over"),
+                                                   (333306, 0.54, 50, 50, "over")):   # 49.9959 USD is shown as 50.00: the state says the same
+            self.query("DELETE FROM mai_usage RETURNING 1")
+            with patch.multiple("mai_usage", USD_PER_HOUR=price, BUDGET_USD=budget):
+                if seconds:
+                    asyncio.run(mai_usage.record("bench", seconds))
+                total = asyncio.run(mai_usage.summary())
+            self.assertEqual((total["usd"], total["state"], total["budgetUsd"], total["usdPerHour"]), (usd, state, budget, price), seconds)
+
+    def test_only_administrators_see_the_usage(self):
+        asyncio.run(mai_usage.record("bench", 5400))
+        asyncio.run(mai_usage.record("live", 1800))
+        self.assertEqual(self.signed_in("alice").get("/api/admin/mai-usage").status_code, 403)
+        usage = self.signed_in("admin").get("/api/admin/mai-usage").json()
+        self.assertEqual((usage["seconds"], usage["usd"], usage["state"], usage["byPurpose"]), (7200, 1.08, "ok", {"bench": 5400, "live": 1800}))
+
+    def test_near_and_over_the_budget_are_each_logged_once(self):
+        with patch.multiple("mai_usage", USD_PER_HOUR=1, BUDGET_USD=2, _told=set()), self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            for _ in range(5):
+                asyncio.run(mai_usage.add("live", 2880))   # 0.8, 1.6 (80%), 2.4 (over), 3.2, 4.0 USD
+        self.assertEqual(len(logs.output), 2)
+        self.assertIn("MAI usage is at 80% of the budget: about 1.60 USD of 2.00 USD", logs.output[0])
+        self.assertIn("MAI usage is at or over the budget: about 2.40 USD of 2.00 USD", logs.output[1])
+
+    def test_a_live_mai_stream_records_what_it_sent_and_the_budget_stops_nothing(self):
+        asyncio.run(mai_usage.record("bench", 400000))   # 60 USD: over the budget
+        session = FakeMai(["你好"])
+
+        class Browser(FakeBrowser):
+            arriving = [{"bytes": tone(1)}, {"bytes": tone(1)}, {"text": "YOUDAO_ONETIME_ASR_STREAM_EOS"}]
+
+            async def receive(self):
+                return self.arriving.pop(0) if self.arriving else {"type": "websocket.disconnect"}
+
+        async def connect(*_, **__):
+            return session
+
+        async def go():
+            with patch("mai_asr.websockets.connect", connect), patch("mai_asr.MAI_ENDPOINT", "https://res.example.com/x"), patch("mai_asr.MAI_KEY", "k"):
+                await mai_asr.MaiBridge(Browser(), "en", TranscriptDisplay("en", "")).run()
+            await asyncio.gather(*mai_usage._writing)
+        asyncio.run(go())
+        self.assertEqual(self.rows(), {"bench": 400000, "live": 2})
+        self.assertEqual(session.audio(), tone(1) + tone(1))   # recognized as usual
+
+    def test_a_stream_goes_on_when_the_usage_cannot_be_written(self):
+        session = FakeMai(["新的系統"])
+        with patch("mai_usage.record", side_effect=OSError("database down")), self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            service, events = QualityEngineTest.run_mai(self, [session], [tone(3)], [{"sentences": [{"src": "新的系統。", "tgt": "The new system."}], "carry": ""}])
+        self.assertEqual(session.audio(), tone(3))                                                   # MAI heard all of it
+        self.assertEqual([s["target"] for s in events[-1]["quality"]["sentences"]], ["The new system."])
+        self.assertTrue(any("MAI usage not recorded (3 s, quality): OSError" in line for line in logs.output))
+
+    def test_the_quality_pass_records_what_mai_heard(self):
+        session = FakeMai(["新的系統"])
+        QualityEngineTest.run_mai(self, [session], [tone(3)], [{"sentences": [{"src": "新的系統。", "tgt": "The new system."}], "carry": ""}])
+        self.assertEqual(self.rows(), {"quality": 3})
 
 
 class QualityStreamTests(AccountTestCase):
