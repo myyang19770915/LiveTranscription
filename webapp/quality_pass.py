@@ -14,6 +14,7 @@ import math
 import os
 import re
 import time
+import unicodedata
 import wave
 from collections import deque
 from dataclasses import dataclass, field
@@ -21,6 +22,7 @@ from dataclasses import dataclass, field
 import httpx
 
 import chunk_asr
+import mai_asr
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -33,7 +35,9 @@ ASR_URL = os.getenv("TRANSLATE_QUALITY_ASR_URL", "").rstrip("/")
 ASR_KEY = os.getenv("TRANSLATE_QUALITY_ASR_KEY", "")
 MODEL = os.getenv("TRANSLATE_QUALITY_MODEL", "")
 # Who hears each chunk again: empty = the transcriptions API of URL (ASR_MODEL); "local" or "mai" = the app's own
-# engine (chunk_asr.py), so with "local" no audio leaves the machine. Any other value leaves the quality pass off.
+# engine (chunk_asr.py), so with "local" no audio leaves the machine; "hybrid" = the transcriptions API for Chinese
+# and MAI for every other language (bench/README.md 2026-11-14: Qwen3-ASR led on Chinese, MAI elsewhere).
+# Any other value leaves the quality pass off.
 ASR = os.getenv("TRANSLATE_QUALITY_ASR", "").strip().lower()
 # Off by default: the benchmarked configuration (bench/README.md) ran without the live text.
 USE_ALT = os.getenv("TRANSLATE_QUALITY_ALT", "") == "1"
@@ -80,13 +84,59 @@ MIN_SPEECH = 0.3            # less speech than this is not sent: recognizers inv
 MAX_WAITING = 3             # more chunks than this waiting: the oldest is given up so results catch up
 ASR_TIMEOUT, TEXT_TIMEOUT, FINISH_TIMEOUT = 15.0, 25.0, 25.0
 CONTEXT_SENTENCES, PROMPT_TAIL = 8, 200
+CARRY_LIMIT = 800          # characters of unsettled text; beyond this an answer that does not cover its input fails the chunk
 ALT_LAG_MS = 1500           # live text arrives up to ~1.3 s after its audio
 
 NAMES = {"zh": "Chinese (Traditional, Taiwan)", "en": "English", "ja": "Japanese"}
 
 
+CHINESE = ("zh", "yue")
+
+
+def recognizer(language: str) -> str:
+    """Who hears a stream of this language again: "api" (the transcriptions API), "mai", "local", or "" for an
+    unknown setting. With "hybrid" only Chinese goes to the API; mixed and automatic modes go to MAI."""
+    if ASR == "hybrid":
+        return "api" if language in CHINESE else "mai"
+    return {"": "api", "mai": "mai", "local": "local"}.get(ASR, "")
+
+
 def configured() -> bool:
-    return bool(URL and MODEL and (chunk_asr.available(ASR) if ASR else ASR_MODEL))
+    if not (URL and MODEL):
+        return False
+    needs_api, needs_mai = ASR in ("", "hybrid"), ASR in ("mai", "hybrid")
+    return ASR in ("", "local", "mai", "hybrid") and (not needs_api or bool(ASR_MODEL)) and (not needs_mai or mai_asr.configured())
+
+
+def units(text: str, words: bool) -> int:
+    """How much was said in `text`: words for Latin script, letters and digits otherwise."""
+    text = unicodedata.normalize("NFKC", text)
+    return len(re.findall(r"[A-Za-z0-9']+", text)) if words else sum(char.isalnum() for char in text)
+
+
+def in_words(text: str) -> bool:
+    letters = [char for char in unicodedata.normalize("NFKC", text) if char.isalnum()]
+    return sum(char.isascii() for char in letters) * 2 > len(letters)
+
+
+def said(text: str) -> str:
+    """The letters and digits of `text`, for telling whether two pieces say the same thing."""
+    return "".join(char for char in unicodedata.normalize("NFKC", text).lower() if char.isalnum())
+
+
+def joined(first: str, second: str) -> str:
+    """Two pieces of running text as one: no space between CJK or kana, one space otherwise."""
+    if not first or not second:
+        return first or second
+    edge = first[-1:] + second[:1]
+    return first + ("" if CJK.search(edge) or KANA.search(edge) else " ") + second
+
+
+def covered(given: int, back: int) -> bool:
+    """Whether an answer holding `back` units accounts for an input of `given`: nothing much dropped (the model
+    sometimes returns the new text and forgets the carried sentence) and nothing much invented. Removing fillers
+    costs a few per cent; a dropped sentence costs a third or more."""
+    return not (given >= 12 and back < 0.7 * given) and back <= 1.5 * given + 10
 
 
 def new_client() -> httpx.AsyncClient:
@@ -101,6 +151,7 @@ class Chunk:
     speech: float               # seconds of frames above the speech threshold
     pause: str = "short"        # none | short | long; "short" may still become "long" while silence continues
     last: bool = False
+    heard: "asyncio.Future | None" = None   # the text of a recognizer that listens along (MAI), when it arrives
 
 
 class Chunker:
@@ -205,7 +256,7 @@ Input fields:
 - LAST: true when the meeting has ended and nothing follows.
 
 Do this:
-1. Read CARRY + NEW as one continuous stretch of {src} speech. Repair recognition errors only where the context makes the intended word clear (similar-sounding wrong words, a name spelled differently from CONTEXT or TERMS, wrong 他/她, a stray question mark, a number split by a full stop). Delete pure fillers, stutters and false starts. Never add, summarize or drop content; when unsure, keep what was recognized.
+1. Read CARRY + NEW as one continuous stretch of {src} speech. Repair recognition errors only where the context makes the intended word clear (similar-sounding wrong words, a name spelled differently from CONTEXT or TERMS, wrong 他/她, a stray question mark, a number split by a full stop). Remove only filler sounds (uh, um, えー, あの, 嗯, 呃) and a false start that the speaker immediately repeats. Everything else that was said stays, including every sentence of CARRY: never delete, summarize, shorten or skip a sentence, and never add content; when unsure, keep what was recognized.
 2. Split it into sentences: one complete thought per item. The recognizer's full stops are unreliable: it often puts one at a pause in the middle of a sentence. A piece that is not a full clause on its own (a time adverbial like "Later this year.", a relative or subordinate clause, a bare noun phrase, the rest of a list) belongs to the sentence it completes: join them into one item. Items of one to three words are only for real complete utterances (a greeting, an answer, a backchannel). A reply or interjection by another speaker (なるほど, はい, Right., 對) is its own item, never glued to the previous speaker's sentence. A very long sentence may be split at a natural clause boundary only if both halves translate cleanly on their own (never between a negation or condition and what it applies to, never inside a list). Do not merge separate sentences into one item.
 3. The final sentence of the stretch may continue in the next chunk ("...to deploy." + "unsupervised FSD at large scale when..."). If LAST is true, output everything and leave "carry" empty. Otherwise, when PAUSE is none or short, never output the final sentence: return its source text, verbatim, in "carry". When PAUSE is long, output it only if it is grammatically complete and could not be the first half of a longer sentence; else carry it. The carry is at most ~120 characters / 40 words: if the final sentence is longer, output its complete leading clauses as an item and carry only the last open clause.
 4. Translate each item into {tgt}, as a skilled conference interpreter would say it: accurate first, then natural and concise. Keep who does what, negation, numbers, units, tense, hedging, hypotheticals (would have ≠ did) and questions exactly. Keep names and terms consistent with CONTEXT and TERMS. Translate idioms and fixed expressions by their meaning, and avoid calques of source wording (やっぱり is not 果然, 発信 is not 發信, 曖昧な言葉 is 模糊的用語; "unsupervised" driving is 無人監督). Approximate quantities stay exactly as vague as spoken (八千多 is "over eight thousand", not "eight thousand several hundred"). Do not add subjects, "more than", politeness or explanations that are not in the speech; when the subject is generic or third-person, do not turn it into "I". Quoted speech stays marked as a quote.
@@ -287,6 +338,9 @@ class QualityPass:
     def __init__(self, send, language: str, target: str, glossary: str, convert=lambda text: text, engine_language: str = "zhen"):
         self.send, self.language, self.glossary, self.convert = send, language, glossary.strip(), convert
         self.engine_language = engine_language   # the local engine's name for the language (TRANSLATE_QUALITY_ASR=local)
+        self.engine = recognizer(language)
+        # MAI recognizes in real time: it listens along and is committed at each chunk cut.
+        self.mai = chunk_asr.MaiLive(language) if self.engine == "mai" else None
         self.target = target if target in NAMES else "en"
         self.chunker, self.live_text = Chunker(), _Live()
         self.waiting: deque[Chunk] = deque()
@@ -308,12 +362,21 @@ class QualityPass:
 
     def feed(self, pcm: bytes) -> None:
         self.fed_ms += len(pcm) // BYTES_PER_MS
+        if self.mai:
+            self.mai.feed(pcm)
         for chunk in self.chunker.feed(pcm):
+            self._listened(chunk)
             self.waiting.append(chunk)
         if self.waiting or self.wants_more:
             self.idle.clear()
             self.wake.set()
             self.more.set()
+
+    def _listened(self, chunk: Chunk) -> None:
+        """MAI has heard this chunk by now (and a little of what follows the cut): ask for its text. Silence is not
+        committed; it stays in MAI's buffer for the next commit."""
+        if self.mai and chunk.speech >= MIN_SPEECH:
+            chunk.heard = self.mai.commit()
 
     def live(self, text: str) -> None:
         """The live transcript as the browser shows it now."""
@@ -327,6 +390,7 @@ class QualityPass:
         self.closing = True
         last = self.chunker.flush() or Chunk(self.fed_ms, self.fed_ms, b"", 0.0, "long")
         last.last = True
+        self._listened(last)
         self.waiting.append(last)
         self.idle.clear()
         self.wake.set()
@@ -340,6 +404,8 @@ class QualityPass:
                 await self._emit({"failed": True, "throughMs": self.fed_ms, "final": True})
         finally:
             self.closed = True
+            if self.mai:
+                self.mai.close()
             await self.client.aclose()
 
     def cancel(self) -> None:
@@ -348,6 +414,8 @@ class QualityPass:
             return
         self.closing = self.closed = True
         self.worker.cancel()
+        if self.mai:
+            self.mai.close()
         asyncio.ensure_future(self.client.aclose())
 
     # --- processing --------------------------------------------------------------------------------------
@@ -370,7 +438,8 @@ class QualityPass:
             except asyncio.CancelledError:
                 raise
             except Exception as error:   # any failure keeps the live result; the stream goes on
-                outcome = "backlog" if str(error) == "backlog" else f"failed:{type(error).__name__}"
+                # Why, never what was said: the reason of an unusable answer is one fixed word.
+                outcome = "backlog" if str(error) == "backlog" else f"failed:{type(error).__name__}" + (f":{error}" if isinstance(error, Unusable) else "")
                 self.carry, self.carry_start = "", chunk.end_ms
                 await self._emit({"failed": True, "throughMs": chunk.end_ms, "final": chunk.last})
             # No meeting text in logs: numbers only.
@@ -395,7 +464,8 @@ class QualityPass:
     async def _process(self, chunk: Chunk) -> tuple[int, list[dict]]:
         new = ""
         if chunk.speech >= MIN_SPEECH:
-            new = (await self._twice(lambda: self._transcribe(chunk))).strip()
+            # A recognizer that listened along has one answer per commit: waiting for it again gives nothing new.
+            new = (await self._transcribe(chunk) if chunk.heard is not None else await self._twice(lambda: self._transcribe(chunk))).strip()
             self.heard = (self.heard + " " + new)[-2000:]
         if new:
             self.silence_asked = False
@@ -420,14 +490,27 @@ class QualityPass:
         if not new:
             self.silence_asked = True
         alt = self.live_text.between(self.carry_start, chunk.end_ms) if USE_ALT else ""
-        result = await self._twice(lambda: self._refine(new, pause, alt, chunk.last))
+        try:
+            result = await self._twice(lambda: self._refine(new, pause, alt, chunk.last))
+        except Unusable as error:
+            unsettled = joined(self.carry, new)
+            if str(error) != "coverage" or chunk.last or len(unsettled) > CARRY_LIMIT:
+                raise
+            # Twice the answer dropped or invented text. Falling back to the live result here leaves a seam of
+            # repeated and missing sentences (measured 2026-11-14), so nothing is shown yet: all of it waits for
+            # the next chunk, which asks again with more to go on.
+            logger.warning("quality pass: the answer did not cover its input; %d characters wait for the next chunk", len(unsettled))
+            self.carry = unsettled
+            return len(new), []
         items, carry = result["sentences"], result["carry"]
         if chunk.last:
             carry = ""
         elif pause != "long" and items:
-            # A short pause never ends a sentence, whatever the model decided.
+            # A short pause never ends a sentence, whatever the model decided. The model often names that sentence
+            # in "carry" as well: it is carried once, not twice.
             held = items.pop()["src"]
-            carry = held + ("" if not carry or CJK.search(held[-1:] + carry[:1]) or KANA.search(held[-1:] + carry[:1]) else " ") + carry
+            if not said(carry).startswith(said(held)):
+                carry = joined(held, carry)
         spans, carry_start = allocate(self.carry_start, chunk.end_ms, [item["src"] for item in items], carry)
         sentences = []
         for item, (start, end) in zip(items, spans):
@@ -441,9 +524,14 @@ class QualityPass:
         return len(new), sentences
 
     async def _transcribe(self, chunk: Chunk) -> str:
-        if ASR:
+        if chunk.heard is not None:   # MAI listened along; its text for this commit is on its way
+            # Shielded: a timeout must not cancel the answer itself (awaiting a cancelled future ends the worker).
+            return without_loop(await asyncio.wait_for(asyncio.shield(chunk.heard), ASR_TIMEOUT))
+        if self.engine == "mai":
+            raise Unusable("transcription")   # speech that was never committed: nothing can answer for it
+        if self.engine == "local":
             return without_loop(await asyncio.wait_for(
-                chunk_asr.recognize(ASR, chunk.pcm, self.language, self.engine_language, self.glossary), ASR_TIMEOUT))
+                chunk_asr.local(chunk.pcm, self.engine_language, self.language == "zh_ja", self.glossary), ASR_TIMEOUT))
         data = {"model": ASR_MODEL, "response_format": "json", **ASR_EXTRA}
         prompt = " ".join(part for part in (self.glossary, self.heard[-PROMPT_TAIL:].strip()) if part)
         if prompt and self.prompt_ok:
@@ -490,8 +578,20 @@ class QualityPass:
             raise Unusable("answer")
         items = [item for item in answer["sentences"]
                  if isinstance(item, dict) and isinstance(item.get("src"), str) and isinstance(item.get("tgt"), str) and item["src"].strip() and item["tgt"].strip()]
+        # A sentence given twice (again in this answer, or the one shown last) counts and is shown once.
+        shown = said(self.context[-1]["src"]) if self.context else ""
+        for item in list(items):
+            if said(item["src"]) == shown:
+                items.remove(item)
+            shown = said(item["src"])
         carry = answer.get("carry")
-        return {"sentences": items, "carry": carry.strip() if isinstance(carry, str) else ""}
+        carry = carry.strip() if isinstance(carry, str) else ""
+        # The answer must account for what it was given: the carried sentence and the new text, not just one of them.
+        given = joined(self.carry, new)
+        words = in_words(given)
+        if not covered(units(given, words), units(" ".join(item["src"] for item in items) + " " + carry, words)):
+            raise Unusable("coverage")
+        return {"sentences": items, "carry": carry}
 
 
 class TeeReceiver:

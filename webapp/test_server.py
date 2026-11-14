@@ -34,6 +34,7 @@ import mailer
 import meeting_audio
 import minutes
 import qa
+import chunk_asr
 import quality_pass
 import reminders
 import search
@@ -2913,11 +2914,13 @@ class QualityRecognizerElsewhereTest(unittest.TestCase):
 
 
 class FakeMai:
-    """One MAI realtime session that answers the commit with a transcript."""
+    """A MAI realtime session: each commit is answered with the next transcript. With `drop_at`, the session ends
+    at that commit without answering it."""
 
-    def __init__(self, transcript):
-        self.sent, self.transcript = [], transcript
+    def __init__(self, transcripts, drop_at=None, silent_at=None):
+        self.sent, self.transcripts, self.drop_at, self.silent_at = [], list(transcripts), drop_at, silent_at
         self.opening = ["session.created", "session.updated"]
+        self.commits = asyncio.Queue()
 
     async def __aenter__(self):
         return self
@@ -2927,13 +2930,25 @@ class FakeMai:
 
     async def send(self, message):
         self.sent.append(json.loads(message))
+        if self.sent[-1]["type"] == "input_audio_buffer.commit":
+            self.commits.put_nowait(True)
 
     async def recv(self):
         return json.dumps({"type": self.opening.pop(0)})
 
     async def __aiter__(self):
-        yield json.dumps({"type": "conversation.item.input_audio_transcription.delta", "delta": self.transcript})
-        yield json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": self.transcript})
+        answered = 0
+        while True:
+            await self.commits.get()
+            answered += 1
+            if answered == self.drop_at:
+                return
+            if answered == self.silent_at:   # this commit is answered late; the session stays open
+                await asyncio.sleep(0.3)
+            yield json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": self.transcripts.pop(0)})
+
+    def audio(self):
+        return b"".join(base64.b64decode(m["audio"]) for m in self.sent if m["type"] == "input_audio_buffer.append")
 
 
 class QualityEngineTest(unittest.TestCase):
@@ -2968,17 +2983,90 @@ class QualityEngineTest(unittest.TestCase):
         self.assertIn("NEW: 新的系统。", service.user(0))
         self.assertEqual([s["target"] for s in events[-1]["quality"]["sentences"]], ["The new system."])
 
-    def test_mai_hears_the_chunk_after_one_commit(self):
-        session = FakeMai("新的系統")
-        service, events = self.run_pass("mai", session)
+    def run_mai(self, sessions, parts, answers, gap=0):
+        """`parts`: audio pieces; after each but the last, wait for the next quality event before going on."""
+        service = FakeQualityService([], answers)
+
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service))), \
+                    patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", ""), patch("quality_pass.MODEL", "text"), \
+                    patch("quality_pass.ASR", "mai"), patch("chunk_asr.websockets.connect", side_effect=list(sessions)), patch("chunk_asr.RECONNECT_AFTER", 0), \
+                    patch("mai_asr.MAI_ENDPOINT", "https://res.example.com/x"), patch("mai_asr.MAI_KEY", "k"):
+                quality = quality_pass.QualityPass(send, "zh", "en", "", lambda text: text, "Chinese")
+                for number, part in enumerate(parts):
+                    for start in range(0, len(part), 6400):   # 0.2 s messages, as the browser sends them
+                        quality.feed(part[start:start + 6400])
+                    if number < len(parts) - 1:
+                        while len(events) <= number:
+                            await asyncio.sleep(0.01)
+                        await asyncio.sleep(gap)
+                await quality.finish()
+            return events
+        return service, asyncio.run(go())
+
+    def test_mai_hears_the_audio_as_it_arrives_and_is_committed_at_the_chunk(self):
+        session = FakeMai(["新的系統"])
+        service, events = self.run_mai([session], [tone(3)], [{"sentences": [{"src": "新的系統。", "tgt": "The new system."}], "carry": ""}])
         self.assertEqual(service.transcriptions, [])
         kinds = [m["type"] for m in session.sent]
-        self.assertEqual((kinds[0], kinds[-1], kinds.count("input_audio_buffer.commit")), ("session.update", "input_audio_buffer.commit", 1))
-        sent = b"".join(base64.b64decode(m["audio"]) for m in session.sent if m["type"] == "input_audio_buffer.append")
-        self.assertEqual(sent, tone(3))
+        self.assertEqual(kinds, ["session.update"] + ["input_audio_buffer.append"] * 15 + ["input_audio_buffer.commit"])
+        self.assertEqual(session.audio(), tone(3))
         self.assertEqual(session.sent[0]["session"]["audio"]["input"]["transcription"]["language"], "zh")
         self.assertIn("NEW: 新的系統", service.user(0))
         self.assertIs(events[-1]["quality"].get("failed"), None)
+
+    def test_a_dropped_mai_session_fails_its_chunk_and_a_new_one_takes_over(self):
+        first, second = FakeMai([], drop_at=1), FakeMai(["後面的話"])
+        service, events = self.run_mai([first, second], [tone(7) + silence(0.5), tone(6)],
+                                       [{"sentences": [{"src": "後面的話。", "tgt": "What came after."}], "carry": ""}])
+        self.assertEqual([bool(event["quality"].get("failed")) for event in events], [True, False])
+        heard = first.audio()   # up to the commit: the speech and the pause that cut it
+        self.assertTrue((tone(7) + silence(0.5)).startswith(heard) and len(heard) >= len(tone(7) + silence(0.3)), len(heard))
+        self.assertEqual(second.audio(), tone(6))                         # only what arrived after the drop
+        self.assertEqual([m["type"] for m in second.sent].count("input_audio_buffer.commit"), 1)
+        self.assertEqual([s["target"] for s in events[-1]["quality"]["sentences"]], ["What came after."])
+
+    def test_silence_is_not_committed_to_mai(self):
+        session = FakeMai(["新的系統"])
+        service, events = self.run_mai([session], [silence(20) + tone(3)], [{"sentences": [{"src": "新的系統。", "tgt": "The new system."}], "carry": ""}])
+        self.assertEqual([m["type"] for m in session.sent].count("input_audio_buffer.commit"), 1)   # the silent chunks made none
+        self.assertEqual(session.audio(), silence(20) + tone(3))
+
+    def test_a_session_that_drops_inside_a_chunk_fails_that_chunk_too(self):
+        """The new session hears only the end of the chunk: its text would be part of what was said."""
+        async def cut_inside():
+            first, second = FakeMai([], drop_at=1), FakeMai(["後半", "完整的一段"])
+            with patch("chunk_asr.websockets.connect", side_effect=[first, second]), patch("chunk_asr.RECONNECT_AFTER", 0), \
+                    patch("mai_asr.MAI_ENDPOINT", "https://res.example.com/x"), patch("mai_asr.MAI_KEY", "k"):
+                live = chunk_asr.MaiLive("zh")
+                live.feed(tone(1))
+                one = live.commit()
+                live.feed(tone(1))                       # queued before the drop is noticed: the start of the next chunk
+                with contextlib.suppress(chunk_asr.Refused):
+                    await one
+                live.feed(tone(1))                       # its end goes to the new session
+                partial = live.commit()
+                live.feed(tone(1))
+                whole = live.commit()
+                results = await asyncio.gather(partial, whole, return_exceptions=True)
+                live.close()
+                return results, second
+        (partial, whole), second = asyncio.run(cut_inside())
+        self.assertIsInstance(partial, chunk_asr.Refused)
+        self.assertEqual(whole, "完整的一段")              # the transcript of the partial commit was dropped, not handed on
+        self.assertEqual([m["type"] for m in second.sent].count("input_audio_buffer.commit"), 2)
+
+    def test_a_mai_answer_that_comes_too_late_fails_its_chunk_and_the_stream_goes_on(self):
+        session = FakeMai(["來得太晚", "這一段有回來"], silent_at=1)
+        with patch("quality_pass.ASR_TIMEOUT", 0.2):
+            service, events = self.run_mai([session], [tone(7) + silence(0.5), tone(6)],
+                                           [{"sentences": [{"src": "這一段有回來。", "tgt": "This part came back."}], "carry": ""}], gap=0.3)
+        self.assertEqual([bool(event["quality"].get("failed")) for event in events], [True, False])
+        self.assertEqual((events[-1]["quality"]["final"], [s["target"] for s in events[-1]["quality"]["sentences"]]), (True, ["This part came back."]))
 
     def test_a_loop_from_the_apps_own_engine_is_kept_once(self):
         service, events = self.run_pass("local", FakeUpstream(["新的系统。"] + ["好的。"] * 30))
@@ -2998,8 +3086,129 @@ class QualityEngineTest(unittest.TestCase):
                 self.assertTrue(quality_pass.configured())
             with patch("quality_pass.ASR", "whisper"), patch("quality_pass.ASR_MODEL", "asr"):
                 self.assertFalse(quality_pass.configured())
+        # hybrid needs both recognizers: the transcriptions API for Chinese and MAI for the rest.
+        with patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.MODEL", "text"), patch("quality_pass.ASR", "hybrid"):
+            with patch("quality_pass.ASR_MODEL", "asr"), patch("mai_asr.MAI_ENDPOINT", "https://res.example.com/x"), patch("mai_asr.MAI_KEY", "k"):
+                self.assertTrue(quality_pass.configured())
+            with patch("quality_pass.ASR_MODEL", ""), patch("mai_asr.MAI_ENDPOINT", "https://res.example.com/x"), patch("mai_asr.MAI_KEY", "k"):
+                self.assertFalse(quality_pass.configured())
+            with patch("quality_pass.ASR_MODEL", "asr"), patch("mai_asr.MAI_KEY", ""):
+                self.assertFalse(quality_pass.configured())
             with patch("quality_pass.ASR", "local"), patch("quality_pass.MODEL", ""):
                 self.assertFalse(quality_pass.configured())
+
+
+class QualityRecognizerChoiceTest(unittest.TestCase):
+    """quality-pass: the recognizer by setting and stream language (the example table)."""
+
+    def test_example_rows(self):
+        for setting, language, expected in (("", "zh", "api"), ("", "ja", "api"), ("mai", "zh", "mai"), ("hybrid", "zh", "api"), ("hybrid", "yue", "api"),
+                                            ("hybrid", "ja", "mai"), ("hybrid", "en", "mai"), ("hybrid", "auto", "mai"), ("hybrid", "zh_ja", "mai"),
+                                            ("local", "ja", "local"), ("whisper", "zh", "")):
+            with patch("quality_pass.ASR", setting):
+                self.assertEqual(quality_pass.recognizer(language), expected, (setting, language))
+
+    def test_hybrid_sends_chinese_to_the_api_and_opens_no_mai_session(self):
+        service = FakeQualityService(["新的系統。"], [{"sentences": [{"src": "新的系統。", "tgt": "The new system."}], "carry": ""}])
+
+        async def go():
+            async def send(payload):
+                pass
+            with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service))), patch("quality_pass.URL", "http://quality.test/v1"), \
+                    patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", "text"), patch("quality_pass.ASR", "hybrid"), \
+                    patch("chunk_asr.websockets.connect") as connect:
+                quality = quality_pass.QualityPass(send, "zh", "en", "")
+                quality.feed(tone(3))
+                await quality.finish()
+                return connect.call_count
+        self.assertEqual((asyncio.run(go()), len(service.transcriptions)), (0, 1))
+
+
+class QualityCoverageTest(unittest.TestCase):
+    """quality-pass: the text model's answer accounts for its input."""
+
+    FIRST = "we decided last week that the new billing system goes live in March and nobody outside the team was told"   # 20 words
+    NEW = "so please keep this to yourselves until the public announcement"   # 10 words
+
+    def test_example_rows(self):
+        for given, back, usable in ((30, 26, True), (30, 21, True), (30, 20, False), (30, 10, False), (30, 55, True), (30, 56, False), (11, 2, True), (12, 8, False)):
+            self.assertIs(quality_pass.covered(given, back), usable, (given, back))
+
+    def test_units_are_words_for_latin_script_and_characters_otherwise(self):
+        self.assertTrue(quality_pass.in_words("We go live in March 三月"))
+        self.assertFalse(quality_pass.in_words("我們三月上線 FSD"))
+        self.assertEqual(quality_pass.units("It's live, in March 2027.", True), 5)
+        self.assertEqual(quality_pass.units("我們 3 月上線。", False), 6)
+
+    def test_a_dropped_carry_is_asked_for_once_more(self):
+        both = {"sentences": [{"src": f"{self.FIRST}, {self.NEW}.", "tgt": "甲。"}], "carry": ""}
+        service = FakeQualityService([self.FIRST, self.NEW],
+                                     [{"sentences": [{"src": self.FIRST + ".", "tgt": "甲。"}], "carry": ""},
+                                      {"sentences": [{"src": self.NEW + ".", "tgt": "乙。"}], "carry": ""},   # the carried sentence is gone
+                                      both])
+        events = QualityPassTest.run_pass(self, service, tone(7) + silence(0.5) + tone(3), language="en", target="zh")
+        self.assertEqual(len(service.chats), 3)
+        self.assertEqual([s["source"] for s in events[-1]["quality"]["sentences"]], [f"{self.FIRST}, {self.NEW}."])
+        self.assertFalse(any(event["quality"].get("failed") for event in events))
+
+    def test_two_answers_that_drop_content_show_nothing_and_the_text_waits_for_the_next_chunk(self):
+        dropped = {"sentences": [{"src": self.NEW + ".", "tgt": "乙。"}], "carry": ""}
+        whole = {"sentences": [{"src": f"{self.FIRST}, {self.NEW}.", "tgt": "甲乙。"}, {"src": "Thanks everyone.", "tgt": "謝謝大家。"}], "carry": ""}
+        service = FakeQualityService([self.FIRST, self.NEW, "Thanks everyone."],
+                                     [{"sentences": [{"src": self.FIRST + ".", "tgt": "甲。"}], "carry": ""}, dropped, dropped, whole])
+        with self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            events = QualityPassTest.run_pass(self, service, tone(7) + silence(0.5) + tone(7) + silence(0.5) + tone(3), language="en", target="zh")
+        self.assertEqual([bool(event["quality"].get("failed")) for event in events], [False, False, False])
+        self.assertEqual([len(event["quality"]["sentences"]) for event in events], [0, 0, 2])      # nothing shown until an answer covers it
+        self.assertIn(f"CARRY: {self.FIRST}. {self.NEW}\n", service.user(3))                      # all of it asked again, once
+        self.assertEqual([s["target"] for s in events[-1]["quality"]["sentences"]], ["甲乙。", "謝謝大家。"])
+        self.assertTrue(any("did not cover its input" in line for line in logs.output))
+        self.assertFalse(any("billing" in line or "announcement" in line for line in logs.output))   # numbers, never the text
+
+    def test_an_uncovered_last_chunk_fails_and_so_does_one_beyond_the_carry_limit(self):
+        dropped = {"sentences": [{"src": self.NEW + ".", "tgt": "乙。"}], "carry": ""}
+        first = {"sentences": [{"src": self.FIRST + ".", "tgt": "甲。"}], "carry": ""}
+        service = FakeQualityService([self.FIRST, self.NEW], [first, dropped, dropped])
+        with self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            events = QualityPassTest.run_pass(self, service, tone(7) + silence(0.5) + tone(3), language="en", target="zh")
+        self.assertEqual([bool(event["quality"].get("failed")) for event in events], [False, True])   # nothing follows the last chunk
+        self.assertTrue(any("result=failed:Unusable:coverage" in line for line in logs.output))
+        service = FakeQualityService([self.FIRST, self.NEW, "Thanks everyone."],
+                                     [first, dropped, dropped, {"sentences": [{"src": "Thanks everyone.", "tgt": "謝謝大家。"}], "carry": ""}])
+        with patch("quality_pass.CARRY_LIMIT", 50), self.assertLogs("uvicorn.error", level="WARNING"):
+            events = QualityPassTest.run_pass(self, service, tone(7) + silence(0.5) + tone(7) + silence(0.5) + tone(3), language="en", target="zh")
+        self.assertEqual([bool(event["quality"].get("failed")) for event in events], [False, True, False])
+        self.assertEqual([s["target"] for s in events[-1]["quality"]["sentences"]], ["謝謝大家。"])
+
+    def test_a_sentence_the_model_also_names_in_carry_is_carried_once(self):
+        service = FakeQualityService(["我們下週要上線", "新的系統。"],
+                                     [{"sentences": [{"src": "我們下週要上線", "tgt": "We go live next week"}], "carry": "我們下週要上線"},   # in both places
+                                      {"sentences": [{"src": "我們下週要上線新的系統。", "tgt": "We launch the new system next week."}], "carry": ""}])
+        QualityPassTest.run_pass(self, service, tone(7) + silence(0.5) + tone(2))
+        self.assertIn("CARRY: 我們下週要上線\nNEW: 新的系統。", service.user(1))
+
+    def test_a_repeated_sentence_does_not_stand_in_for_dropped_content(self):
+        half = "we decided last week that the new billing system goes live in March and nobody"   # 15 of the 30 words given
+        twice = {"sentences": [{"src": half + ".", "tgt": "甲。"}, {"src": half + ".", "tgt": "甲。"}], "carry": ""}
+        service = FakeQualityService([self.FIRST + " " + self.NEW], [twice, twice])
+        with self.assertLogs("uvicorn.error", level="WARNING"):
+            events = QualityPassTest.run_pass(self, service, tone(3), language="en", target="zh")
+        self.assertEqual((len(service.chats), bool(events[-1]["quality"].get("failed"))), (2, True))
+
+    def test_a_sentence_given_twice_is_shown_once(self):
+        again = {"src": "我們下週上線。", "tgt": "We go live next week."}
+        service = FakeQualityService(["我們下週上線。", "請先確認測試結果。", "謝謝。"],
+                                     [{"sentences": [again, {"src": "請先", "tgt": "Please first"}], "carry": ""},
+                                      {"sentences": [again, again, {"src": "請先確認測試結果。", "tgt": "Please check the test results first."}, {"src": "謝謝", "tgt": "Thanks"}], "carry": ""},
+                                      {"sentences": [{"src": "謝謝。", "tgt": "Thank you."}], "carry": ""}])
+        events = QualityPassTest.run_pass(self, service, tone(7) + silence(0.5) + tone(7) + silence(0.5) + tone(2))
+        self.assertEqual([s["target"] for event in events for s in event["quality"]["sentences"]],
+                         ["We go live next week.", "Please check the test results first.", "Thank you."])
+
+    def test_the_instructions_forbid_deleting_content(self):
+        prompt = quality_pass.system_prompt("en", "zh")
+        self.assertIn("never delete, summarize, shorten or skip a sentence", prompt)
+        self.assertIn("every sentence of CARRY", prompt)
 
 
 class QualityStreamTests(AccountTestCase):

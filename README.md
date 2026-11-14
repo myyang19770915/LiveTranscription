@@ -338,6 +338,8 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 
 離線原型（2026-11-13，尚未經真實頁面重播）以 gpt-transcribe＋gpt-5.5 在 10 段評測影片的同輪盲評平均 92.1 分，同一輪的既有最佳組合為 83.0 分；較小的文字模型（gemini-3.5-flash-lite）只有 81.8 分，所以文字模型要選夠強的。
 
+**建議設定**：`TRANSLATE_QUALITY_ASR=hybrid`，中文交給本機的 Qwen3-ASR（`qwen-asr` 服務），其他語言交給 Azure MAI。文字模型的回答若明顯少於或多於它拿到的內容（丟句或憑空增加），會重問一次；仍不合格時先不顯示，整段留給下一塊一起重問，只有最後一塊或累積超過 800 個字元時才保留即時結果。
+
 **評測結果（2026-11-14，10 段各 4 分鐘，同輪盲評，滿分 100）**：第二次辨識用 Azure MAI 平均 84.7，不開精準模式的基準（MAI 即時＋雲端精修）81.4，第二次辨識用本機 Qwen3-ASR 1.7B 80.6。Qwen3-ASR 在中文高於基準（84.7 對 77.0），在日文低於基準（77.8 對 83.5）；兩種設定的主要失分都是整句內容遺漏。精準模式因此仍是每場會議自行勾選的選項，細節見 [bench/README.md](bench/README.md)。
 
 ## 會後校對
@@ -494,7 +496,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `TRANSLATE_HEALTH_URL` | `TRANSLATE_URL` + `/health` | 開會頁「服務狀態」檢查翻譯服務用的網址；litellm 用 `/health/liveliness` |
 | `QWEN_GPU_MEMORY_UTILIZATION` | `0.3` | 內建 Qwen3-ASR 服務（profile `qwen-asr`）可用的顯示卡記憶體比例 |
 | `TRANSLATE_QUALITY_ASR_MODEL` / `TRANSLATE_QUALITY_MODEL` | 空（關閉） | 選用：「精準模式」的第二段辨識模型（`/audio/transcriptions`）與文字模型（`/chat/completions`）。兩個都填才啟用，頁面才出現開關（見[精準模式](#精準模式)） |
-| `TRANSLATE_QUALITY_ASR` | 空 | 精準模式的第二次辨識改用本系統的引擎：`local`（本機 Confucius，音訊不離開這台機器）或 `mai`（Azure MAI，需已設定 `AZURE_MAI_*`）。填了就不需要 `TRANSLATE_QUALITY_ASR_MODEL`；文字仍會送到文字模型。其他值視為未設定 |
+| `TRANSLATE_QUALITY_ASR` | 空 | 精準模式的第二次辨識由誰做。空：`TRANSLATE_QUALITY_ASR_MODEL` 的辨識服務；`local`：本機 Confucius（音訊不離開這台機器）；`mai`：Azure MAI（需已設定 `AZURE_MAI_*`）；`hybrid`：中文（`zh`、`yue`）用辨識服務、其他語言用 MAI。用到 MAI 的串流會另開一條 MAI 連線，音訊照收到的速度送出並在每個區塊切點取回文字。文字都會送到文字模型。其他值視為未設定 |
 | `TRANSLATE_QUALITY_ASR_URL` / `_ASR_KEY` | 空（與文字模型同一個服務） | 辨識模型在另一個 OpenAI 相容服務時（例如架在本機的 Qwen3-ASR 或 Whisper），填它的位址與金鑰；文字模型服務的金鑰不會送到這裡 |
 | `TRANSLATE_QUALITY_ASR_EXTRA` | 空 | 併入辨識請求的欄位（JSON）。內建 Qwen3-ASR 建議設 `{"max_completion_tokens":400}`：實測一塊日文音訊會重複輸出到上限（28 秒）而逾時，設了之後 1.2 秒回來，重複的部分由閘道器收成一次 |
 | `TRANSLATE_QUALITY_URL` / `_KEY` | 沿用 `TRANSLATE_REFINE_URL` / `_KEY` | 精準模式的 OpenAI 相容服務位址與金鑰 |
