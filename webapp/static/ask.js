@@ -34,7 +34,8 @@ function busy(on){
   clearTimeout(slowTimer);
   $('answer').setAttribute('aria-busy',String(on));
   $('answer').classList.toggle('is-loading',on);
-  if(on)slowTimer=setTimeout(()=>{$('summary').textContent='正在找資料並整理答案…'},200);
+  if(on)slowTimer=setTimeout(()=>{$('summary').textContent='正在找資料並整理答案…';LoadingState.show($('answer'),'整理答案中…')},200);
+  else LoadingState.hide($('answer'));
 }
 
 // The answer with every [n] as a link to source n.

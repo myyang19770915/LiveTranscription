@@ -11,7 +11,7 @@
 .progress-card[hidden] { display: none; }
 .progress-card .hint { margin: 0 0 10px; }
 .progress-list { display: grid; gap: 10px; }
-.progress-item { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; }
+.progress-item { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-card); }
 .progress-item p { margin: 0; }
 .progress-label { color: var(--accent); }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
@@ -73,7 +73,7 @@
 .mail-line.ok { color: var(--text); }
 .mail-line.warn { color: var(--warn); font-weight: 600; }
 .mail-line.error { color: var(--danger); font-weight: 600; }
-.mail-settings { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px; }
+.mail-settings { display: grid; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-card); }
 .mail-settings[hidden] { display: none; }
 .mail-settings fieldset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin: 0; padding: 0; border: 0; }
 .mail-settings legend { width: 100%; margin-bottom: 6px; padding: 0; font-size: 13px; font-weight: 600; color: var(--muted); }

@@ -55,14 +55,14 @@ body { margin: 0; color: var(--text); background: var(--page); }
 
 .auth-features { margin: 0; padding: 0; list-style: none; }
 .feat { position: absolute; width: 30%; display: flex; align-items: center; gap: 14px; padding: 13px 16px; transform: translateY(-50%);
-  border: 1px solid var(--card-border); border-radius: 12px; background: var(--card); box-shadow: var(--card-shadow); }
+  border: 1px solid var(--card-border); border-radius: var(--radius-control); background: var(--card); box-shadow: var(--card-shadow); }
 .feat-1 { --hue: var(--f1); left: 15%; top: 22.8%; } .feat-2 { --hue: var(--f2); left: 55%; top: 22.8%; }
 .feat-3 { --hue: var(--f3); left: 2.2%; top: 50%; } .feat-4 { --hue: var(--f4); left: 67.8%; top: 50%; }
 .feat-5 { --hue: var(--f5); left: 15%; top: 77.2%; } .feat-6 { --hue: var(--f6); left: 55%; top: 77.2%; }
 .feat > span:last-child { display: grid; gap: 3px; min-width: 0; }
 .feat b { font-size: 17px; font-weight: 700; }
 .feat small { color: var(--muted); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.feat-icon { flex: none; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px; color: var(--hue); background: color-mix(in srgb, var(--hue) 14%, var(--card)); }
+.feat-icon { flex: none; width: 46px; height: 46px; display: grid; place-items: center; border-radius: var(--radius-control); color: var(--hue); background: color-mix(in srgb, var(--hue) 14%, var(--card)); }
 .feat-icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Right: the sign-in panel */
@@ -77,7 +77,7 @@ body { margin: 0; color: var(--text); background: var(--page); }
 .auth-field-icon { position: absolute; left: 17px; top: 50%; width: 20px; height: 20px; transform: translateY(-50%); fill: none; stroke: var(--muted); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .auth-input {
   width: 100%; height: 56px; padding: 0 16px 0 50px;
-  border: 1px solid var(--input-border); border-radius: 8px; background: var(--field); color: var(--text);
+  border: 1px solid var(--input-border); border-radius: var(--radius-control); background: var(--field); color: var(--text);
   font: inherit; font-size: 16px;               /* 16px keeps iOS from zooming on focus */
   outline: none; transition: border-color .15s ease, box-shadow .15s ease;
 }
@@ -87,29 +87,29 @@ body { margin: 0; color: var(--text); background: var(--page); }
 .auth-input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 .auth-input[aria-invalid="true"] { border-color: var(--danger); }
 .auth-reveal { position: absolute; right: 8px; top: 50%; width: 40px; height: 40px; display: grid; place-items: center; transform: translateY(-50%);
-  border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); cursor: pointer; }
 .auth-reveal:hover { color: var(--text); background: var(--accent-soft); }
 .auth-reveal svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .auth-reveal .eye-on, .auth-reveal[aria-pressed="true"] .eye-off { display: none; }
 .auth-reveal[aria-pressed="true"] .eye-on { display: block; }
 .auth-caps { margin: -16px 0 18px; color: var(--warn); font-size: 14px; }
 
-.auth-error { margin: 0 0 18px; padding: 12px 14px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+.auth-error { margin: 0 0 18px; padding: 12px 14px; border-radius: var(--radius-control); border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
   background: var(--danger-soft); color: var(--danger); font-size: 14px; }
 
 .auth-submit { height: 56px; margin-top: 4px; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-  border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 18px; font-weight: 700; letter-spacing: .3em; text-indent: .3em;
+  border: 0; border-radius: var(--radius-control); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 18px; font-weight: 700; letter-spacing: .3em; text-indent: .3em;
   cursor: pointer; transition: box-shadow .15s ease, opacity .15s ease, filter .15s ease; }
 .auth-submit:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 10px 26px var(--accent-soft); }
 .auth-submit:disabled { cursor: wait; opacity: .8; }
 .auth-submit.loading { letter-spacing: .05em; text-indent: 0; }
-.auth-spinner { display: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: auth-spin .8s linear infinite; }
+.auth-spinner { display: none; }   /* the shared .spinner (tokens.css), shown while signing in */
 .auth-submit.loading .auth-spinner { display: inline-block; }
 .auth-help { margin: 30px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.7; text-align: center; }
 .auth-copy { position: absolute; left: clamp(32px, 3vw, 58px); bottom: 28px; margin: 0; color: var(--muted); font-size: 13.5px; }
 
 .auth-theme { position: absolute; top: 24px; right: 28px; height: 40px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
+  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel); color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
 .auth-theme:hover { border-color: var(--field-border); }
 .auth-theme svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .auth-theme .moon { display: none; }
@@ -119,7 +119,6 @@ body { margin: 0; color: var(--text); background: var(--page); }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 [hidden] { display: none !important; }
 
-@keyframes auth-spin { to { transform: rotate(360deg); } }
 
 /* Motion (login-motion): the left side is alive but calm. Features light up one at a time, clockwise every 2 s, and a
    packet travels from each one along its dotted line to the hub, which answers with a ripple; Cloud and Local send their

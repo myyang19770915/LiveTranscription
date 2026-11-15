@@ -142,17 +142,35 @@ function updateTranslationDirection(){
   if(transcript)scheduleTranslation(true);
 }
 function selectedSource(){return $('audioSource').value}
-function updateSourceUI(){const mode=selectedSource(),system=mode!=='microphone';$('microphone').closest('.mic-field').classList.toggle('is-hidden',mode==='system');$('sourceHint').textContent=system?'點「測試音源」或「開始會議」後，在 Chrome 分享視窗勾選「分享分頁音訊」或「分享系統音訊」。只選畫面、不分享音訊，無法轉錄。'+(mode==='mixed'?'混合模式也會收取麥克風；建議使用耳機。':''):'使用耳機開會可避免喇叭聲被麥克風重複收進來。';$('testMic').querySelector('small').textContent=system?'開啟分享選擇器':'確認有聲音';if(!testStream)setMicStatus(system?'尚未連接分享音訊':'尚未測試音源')}
+function updateSourceUI(){const mode=selectedSource(),system=mode!=='microphone';$('microphone').closest('.mic-field').classList.toggle('is-hidden',mode==='system');$('sourceHint').textContent=system?'點「測試音源」或「開始會議」後，在 Chrome 分享視窗勾選「分享分頁音訊」或「分享系統音訊」。只選畫面、不分享音訊，無法轉錄。'+(mode==='mixed'?'混合模式也會收取麥克風；建議使用耳機。':''):'使用耳機開會可避免喇叭聲被麥克風重複收進來。';$('testMic').querySelector('small').textContent=system?'開啟分享選擇器':'確認有聲音';if(!testStream)mediaUnavailable()?setMicStatus(mediaUnavailable(),'error'):setMicStatus(system?'尚未連接分享音訊':'尚未測試音源')}
 function audioConstraints(){const selected=$('microphone').value;return{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true,...(selected&&selected!=='default'?{deviceId:{exact:selected}}:{})}}
 function setMicStatus(text,kind=''){$('micStatus').textContent=text;$('micStatus').className=kind}
+// Browsers offer media capture only on secure pages (https or localhost): over http the API is missing and calling it
+// throws a script error nobody can act on (microphone-access).
+function mediaUnavailable(){
+  if(!window.isSecureContext)return'需要 https 連線才能使用麥克風';
+  if(!navigator.mediaDevices?.getUserMedia)return'此瀏覽器不支援麥克風';
+  return'';
+}
+function mediaUnavailableError(){
+  const reason=mediaUnavailable();if(!reason)return null;
+  // The https address only for a plain hostname on the default port: an IP address or an explicit port (the LAN's
+  // http://192.168.x.x:18082) has no https at that address, so naming it would send people nowhere.
+  const plain=!location.port&&!/^[\d.]+$|^\[/.test(location.hostname);
+  const advice=window.isSecureContext?'請改用新版 Chrome、Edge 或 Safari 開啟':plain?`請改用 https://${location.hostname}${location.pathname}${location.search} 開啟`:'請改用 https 網址，或在這台電腦上以 localhost 開啟';
+  const error=new Error(`${reason}，${advice}`);
+  error.name='MediaUnavailableError';error.status=reason;return error;
+}
 async function microphonePermission(){try{return(await navigator.permissions.query({name:'microphone'})).state}catch{return'unknown'}}
 async function requestMicrophone(){
+  const unavailable=mediaUnavailableError();if(unavailable)throw unavailable;
   let expired=false,timer;
   const request=navigator.mediaDevices.getUserMedia({audio:audioConstraints()});
   request.then(result=>{if(expired)result.getTracks().forEach(track=>track.stop())}).catch(()=>{});
   try{return await Promise.race([request,new Promise((_,reject)=>{timer=setTimeout(()=>{expired=true;reject(new DOMException('請在 Chrome 網址列允許此網站使用麥克風','NotAllowedError'))},10000)})])}finally{clearTimeout(timer)}
 }
 async function requestDisplayAudio(){
+  const unavailable=mediaUnavailableError();if(unavailable)throw unavailable;
   if(!navigator.mediaDevices?.getDisplayMedia)throw new Error('此瀏覽器不支援分頁／系統音訊分享，請使用新版 Chrome 並透過 localhost 或 HTTPS 開啟');
   const display=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true,systemAudio:'include',windowAudio:'system',surfaceSwitching:'include',selfBrowserSurface:'exclude'});
   if(!display.getAudioTracks().length){display.getTracks().forEach(track=>track.stop());throw new Error('沒有取得分享音訊。請重新選擇分頁並勾選「分享分頁音訊」，或在分享整個畫面時勾選「分享系統音訊」。')}
@@ -168,6 +186,7 @@ async function acquireAudio(){
 }
 function streamLabel(streams){const names=streams.flatMap(media=>media.getAudioTracks().map(track=>track.label)).filter(Boolean);return names.join(' + ')||'已連接音訊'}
 async function refreshMicrophones(preferredId=''){
+  if(mediaUnavailable()){setMicStatus(mediaUnavailable(),'error');return}
   if(!navigator.mediaDevices?.enumerateDevices){setMicStatus('瀏覽器不支援裝置選擇','error');return}
   const permission=await microphonePermission();
   if(permission==='denied')setMicStatus('Chrome 已封鎖麥克風，請在網址列解除','error');
@@ -194,7 +213,7 @@ async function toggleMicTest(){
     const draw=()=>{testAnalyser.getFloatTimeDomainData(samples);let sum=0;for(const value of samples)sum+=value*value;const rms=Math.sqrt(sum/samples.length),level=Math.min(1,rms*8);peak=Math.max(level,peak*.94);$('micTestLevel').style.transform=`scaleX(${Math.max(.03,peak)})`;if(peak>.08)setMicStatus(`訊號正常：${label}`,'ok');testAnimation=requestAnimationFrame(draw)};draw();
     $('testMic').classList.add('testing');$('testMic').querySelector('b').textContent='結束測試';$('testMic').querySelector('small').textContent=selectedSource()==='microphone'?'請對麥克風說話':'請播放影片或會議音訊';$('microphone').disabled=true;$('audioSource').disabled=true;$('testMic').disabled=false;
     testStreams.forEach(media=>media.getTracks().forEach(mediaTrack=>mediaTrack.onended=()=>{stopMicTest();setMicStatus('音源已中斷','error')}));
-  }catch(error){stopMicTest();setMicStatus(error.name==='NotAllowedError'?(error.message||'Chrome 未允許麥克風'):'無法連接所選音源','error');toast(error.message)}finally{$('testMic').disabled=false}
+  }catch(error){stopMicTest();setMicStatus(error.status||(error.name==='NotAllowedError'?(error.message||'Chrome 未允許麥克風'):'無法連接所選音源'),'error');toast(error.message,error.status?8000:undefined)}finally{$('testMic').disabled=false}
 }
 function resampleTo16k(input, inputRate) {
   if (inputRate === 16000) return input;
@@ -239,7 +258,7 @@ async function startMeeting() {
     await audioContext.resume();
     startedAt=Date.now(); timerHandle=setInterval(updateTimer,1000); updateTimer();
     $('start').innerHTML=translate?translateStopContent:stopButtonContent; $('start').classList.add('stop'); setControls(true); setStatus(translate?'即時翻譯中':'即時轉錄中','live');
-  } catch (error) { await stopMeeting(false);setStatus(error.message,'error');setMicStatus(error.message,'error');toast(error.message,5000); }
+  } catch (error) { await stopMeeting(false);setStatus(error.message,'error');setMicStatus(error.status||error.message,'error');toast(error.message,error.status?8000:5000); }
   finally{starting=false;$('start').disabled=false}
 }
 
@@ -489,7 +508,7 @@ fetch('/api/config').then(r=>r.ok?r.json():{cloudTranslate:true}).catch(()=>({cl
   try{$('quality').checked=localStorage.getItem('quality')==='1'}catch{}
   $('cloudRefine').disabled=qualityChosen();
   try{$('cloudRefine').checked=localStorage.getItem('cloudRefine')==='1';const engine=localStorage.getItem('asrEngine');if([...$('asrEngine').options].some(o=>o.value===engine))$('asrEngine').value=engine}catch{}
-  showPrivacy();
+  showPrivacy();showAdvanced();
 }).catch(()=>{});
 // Where audio and text go for the current choices (privacy-notice); the header and the footer say the same.
 let cloudTranslation=null;   // the translation model is an external service (cloud-translation); null until /api/config answered
@@ -638,7 +657,7 @@ const mobileQuery=matchMedia('(max-width: 760px), (max-width: 1000px) and (max-h
 const mobilePanels={transcript:$('transcript').closest('article'),translation:$('translation').closest('article')};
 const mobileFollow={transcript:true,translation:true};
 let mobileView='translation';
-const mobileSettingsNodes=[$('modeRow'),$('setupMeeting'),$('teamRow'),$('topicRow'),$('seriesRow'),$('setupAudio'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('setupAdvanced'),$('asrEngineRow'),$('cloudRefineRow')];
+const mobileSettingsNodes=[$('modeRow'),$('setupMeeting'),$('teamRow'),$('topicRow'),$('seriesRow'),$('setupAudio'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('setupAdvanced'),$('asrEngineRow'),$('cloudRefineRow'),$('qualityRow')];
 const movableControls=[...mobileSettingsNodes,$('start')].map(node=>{
   const anchor=document.createComment('responsive-control');node.before(anchor);return{node,anchor};
 });
@@ -667,7 +686,36 @@ function syncMobileLayout(){
   });
   $('download').textContent=mobile?'↓ 匯出':'↓ 匯出逐字稿';
   setMobileView(mobileView);
+  showAdvanced();
 }
+// 進階 folds away on wide windows and remembers the choice (meeting-setup-layout); folded, its button names the advanced
+// options in use. Folding only hides the fields: their values and what a meeting sends stay the same. Phones keep the
+// settings dialog as it was, where the heading is not a fold button.
+const ENGINE_SUMMARY={mai:'雲端 MAI',hybrid:'混合辨識'};
+function advancedSummary(){
+  const parts=[];
+  if(ENGINE_SUMMARY[asrEngine()])parts.push(ENGINE_SUMMARY[asrEngine()]);   // the same helpers decide what a meeting sends
+  if(cloudRefineOn())parts.push('雲端精修');
+  if(qualityChosen())parts.push('精準模式');
+  return parts.join('、')||'預設';
+}
+let advancedOpen=false;
+try{advancedOpen=localStorage.getItem('setupAdvancedOpen')==='1'}catch{}
+function showAdvanced(){
+  const button=$('setupAdvanced'),folding=!mobileQuery.matches;
+  button.disabled=!folding;
+  if(folding){button.setAttribute('aria-expanded',String(advancedOpen));button.setAttribute('aria-controls','asrEngineRow refineGroup')}
+  else{button.removeAttribute('aria-expanded');button.removeAttribute('aria-controls')}
+  document.querySelector('.controls').classList.toggle('advanced-folded',folding&&!advancedOpen);
+  $('advancedSummary').textContent=advancedSummary();
+}
+$('setupAdvanced').onclick=()=>{
+  if(mobileQuery.matches)return;
+  advancedOpen=!advancedOpen;
+  try{localStorage.setItem('setupAdvancedOpen',advancedOpen?'1':'0')}catch{}
+  showAdvanced();
+};
+['asrEngine','cloudRefine','quality'].forEach(id=>$(id).addEventListener('change',showAdvanced));
 Object.keys(mobilePanels).forEach(view=>{
   $(`${view}Tab`).onclick=()=>setMobileView(view);
   $(`${view}Tab`).onkeydown=event=>{

@@ -24,7 +24,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
   backdrop-filter: blur(10px);
 }
 .brand { display: flex; align-items: center; gap: 11px; color: var(--text); text-decoration: none; }
-.brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); }
+.brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: var(--radius-control); border: 1px solid var(--border); background: var(--panel); }
 .brand b { display: block; font-size: 15px; }
 .brand small { display: block; color: var(--muted); font-size: 12px; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
@@ -36,7 +36,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
   align-items: center;
   padding: 0 14px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--panel);
   color: var(--text);
   font-size: 14px;
@@ -65,7 +65,7 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
 .lead strong { color: var(--text); font-weight: 600; }
 .summary { margin: 0; color: var(--muted); font-size: 14px; white-space: nowrap; }
 
-.card { border: 1px solid var(--border); border-radius: 18px; background: var(--panel); box-shadow: 0 10px 30px #0000000f; }
+.card { border: 1px solid var(--border); border-radius: var(--radius-feature); background: var(--panel); box-shadow: var(--shadow-card); }
 .label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; }
 .row { display: flex; gap: 10px; }
 .input {
@@ -74,7 +74,7 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
   height: 46px;
   padding: 0 14px;
   border: 1.5px solid var(--field-border);
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   background: var(--field);
   color: var(--text);
   font-size: 16px;
@@ -90,7 +90,7 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
   flex: none;
   height: 46px;
   padding: 0 20px;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
@@ -102,12 +102,13 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
 .secondary-button { border: 1.5px solid var(--accent); background: transparent; color: var(--accent); }
 .secondary-button:hover:not(:disabled) { background: var(--accent-soft); }
 button:disabled { opacity: .6; cursor: wait; }
-.text-button { flex: none; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; }
+.text-button { flex: none; padding: 6px 10px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; }
 .text-button:hover { color: var(--text); background: var(--accent-soft); }
 .text-button.danger:hover, .text-button.danger[data-confirm] { color: var(--danger); background: var(--danger-soft); }
+.member-actions .text-button.danger { color: var(--danger); }   /* 移出團隊 reads as destructive next to 移除照片 (ui-review-fixes) */
 
 .create { padding: 20px; margin-bottom: 16px; }
-.alert { margin: 0 0 16px; padding: 12px 16px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius: 12px; background: var(--danger-soft); color: var(--danger); font-size: 14px; }
+.alert { margin: 0 0 16px; padding: 12px 16px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius: var(--radius-control); background: var(--danger-soft); color: var(--danger); font-size: 14px; }
 
 /* Teams */
 .team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 16px; }
@@ -116,8 +117,8 @@ button:disabled { opacity: .6; cursor: wait; }
 .rename .input { flex: 1; }
 .team-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .team h2 { margin: 0; font-size: 19px; overflow-wrap: anywhere; }
-.count { flex: none; padding: 2px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; }
-.members { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.count { flex: none; padding: 2px 9px; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700; }
+.members { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
 .member { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 10px 10px 12px; }
 .member + .member { border-top: 1px solid var(--border); }
 .avatar { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
@@ -132,8 +133,8 @@ button:disabled { opacity: .6; cursor: wait; }
 .member-text { flex: 1 1 140px; min-width: 0; display: flex; flex-direction: column; }
 .member-text b { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 .member-text small { color: var(--muted); font-size: 13px; }
-.chip { flex: none; padding: 3px 9px; border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); border-radius: 999px; color: var(--warn); font-size: 12px; }
-.empty-members { margin: 0; padding: 16px; border: 1px dashed var(--field-border); border-radius: 14px; color: var(--muted); font-size: 14px; text-align: center; }
+.chip { flex: none; padding: 3px 9px; border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); border-radius: var(--radius-pill); color: var(--warn); font-size: 12px; }
+.empty-members { margin: 0; padding: 16px; border: 1px dashed var(--field-border); border-radius: var(--radius-card); color: var(--muted); font-size: 14px; text-align: center; }
 .empty { grid-column: 1 / -1; padding: 40px 20px; text-align: center; }
 .empty b { font-size: 17px; }
 .empty p { margin: 8px 0 0; color: var(--muted); }
@@ -159,9 +160,12 @@ button:disabled { opacity: .6; cursor: wait; }
 .account-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .account-initial { color: var(--accent); font-weight: 700; }
 .account-menu { position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; min-width: 140px; display: grid; gap: 2px; padding: 6px;
-  border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: 0 12px 32px rgb(0 0 0 / .18); }
+  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel); box-shadow: 0 12px 32px rgb(0 0 0 / .18); }
 .account-menu[hidden] { display: none; }
-.account .account-menu button { width: 100%; height: 34px; justify-content: flex-start; border: 0; border-radius: 8px; background: transparent; }
+.account .account-menu button { width: 100%; height: 34px; justify-content: flex-start; border: 0; border-radius: var(--radius-control); background: transparent; }
 .account .account-menu button:hover, .account .account-menu button:focus-visible { background: var(--accent-soft); }
 .account-menu .menu-phone { display: none; }   /* only the meeting page's phone header needs them (accounts.css) */
+.account-menu .menu-nav { display: none; }
+/* site-navigation: at 640px the header hides 成效指標 and 團隊管理 (above); the avatar menu offers them and 會議紀錄. */
+@media (max-width: 640px) { .account .account-menu .menu-nav { display: flex; } }
 .account-menu-error { max-width: 220px; margin: 4px 6px; color: var(--danger); font-size: 13px; white-space: normal; }

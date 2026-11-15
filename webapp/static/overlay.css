@@ -4,7 +4,7 @@
 .toast { z-index: 70; }   /* messages stay above the view */
 #screenView video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .overlay-subs { position: absolute; left: 50%; top: 88%; transform: translate(-50%, -50%); width: min(92vw, 1100px); max-height: 50vh; overflow: hidden; box-sizing: border-box;
-  padding: 8px 18px 14px; border-radius: 14px; background: rgba(0, 0, 0, var(--ov-alpha, .55)); color: #fff;
+  padding: 8px 18px 14px; border-radius: var(--radius-card); background: rgba(0, 0, 0, var(--ov-alpha, .55)); color: #fff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, .6); cursor: grab; user-select: none; touch-action: none;
   font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif; }
 .overlay-subs.dragging { cursor: grabbing; }
@@ -14,7 +14,7 @@
 .overlay-subs[data-size="3"] { font-size: min(34px, 5.5vh); }
 .overlay-subs[data-size="4"] { font-size: min(40px, 5.5vh); }
 .ov-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 12px; }
-.ov-bar button { height: 26px; padding: 0 10px; border: 1px solid rgba(255, 255, 255, .35); border-radius: 999px; background: rgba(255, 255, 255, .12);
+.ov-bar button { height: 26px; padding: 0 10px; border: 1px solid rgba(255, 255, 255, .35); border-radius: var(--radius-pill); background: rgba(255, 255, 255, .12);
   color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
 .ov-bar button:hover { background: rgba(255, 255, 255, .22); }
 .ov-bar button[aria-pressed="true"] { background: var(--accent); border-color: transparent; color: var(--accent-ink, #fff); }

@@ -227,7 +227,12 @@ function ownAvatar(me,make,signOut){
       })),
       me.avatarUrl?item('移除照片',()=>run(async()=>{await AvatarPhoto.remove('/api/me/avatar');changed(null);close()})):null,
       item('我的 Email',()=>{close();emailDialog(me,make)}),
+      // Page links the header hides on narrow windows (site-navigation); accounts.css / admin.css show each one only
+      // at the widths where its header link is hidden. 會議紀錄 is never a header link outside the meeting page.
+      !['/','/meetings'].includes(location.pathname)?item('會議紀錄',()=>{location.href='/meetings'},'menu-nav menu-meetings'):null,
       location.pathname!=='/actions'?item('待辦看板',()=>{location.href='/actions'},'menu-phone'):null,
+      location.pathname!=='/metrics'?item('成效指標',()=>{location.href='/metrics'},'menu-nav menu-metrics'):null,
+      me.admin&&location.pathname!=='/admin'?item('團隊管理',()=>{location.href='/admin'},'menu-nav menu-admin'):null,
       item('登出',signOut,'menu-phone'),
       message].filter(Boolean));
   }

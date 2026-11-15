@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261108b"><link rel="stylesheet" href="/assets/admin.css?v=20261108d"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261115d"><link rel="stylesheet" href="/assets/admin.css?v=20261115c"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>團隊管理</small></span></a>
@@ -39,7 +39,7 @@
 </main>
 
 <script src="/assets/return-path.js?v=20261113c"></script>
-<script src="/assets/account.js?v=20261113a"></script>
+<script src="/assets/account.js?v=20261115a"></script>
 <script>
 const $=id=>document.getElementById(id);
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
@@ -61,8 +61,9 @@ async function call(method,url,body){
 async function act(work,button){showError('');if(button)button.disabled=true;try{await work();await load()}catch(error){showError(error.message)}finally{if(button)button.disabled=false}}
 function initial(member){return [...(member.displayName||member.username)][0].toUpperCase()}
 // A button that asks once more ("確定…？") before doing its work; the question goes away after 4 s.
-function confirmButton(label,question,work){
-  const button=el('button',{type:'button',className:'text-button danger',textContent:label});
+// danger=false for 移除照片: it only clears a photo, so it must not look like 移出團隊 next to it (ui-review-fixes).
+function confirmButton(label,question,work,danger=true){
+  const button=el('button',{type:'button',className:danger?'text-button danger':'text-button',textContent:label});
   button.onclick=()=>{
     if(button.dataset.confirm){act(work,button);return}
     button.dataset.confirm='1';button.textContent=question;
@@ -97,10 +98,10 @@ function avatar(member,name){
 }
 
 function memberRow(team,member){
-  const remove=confirmButton('移除','確定移除？',()=>call('DELETE',`/api/admin/teams/${team.id}/members/${encodeURIComponent(member.username)}`));
   const named=member.displayName&&member.displayName!==member.username;
   const name=named?member.displayName:member.username;
-  const clear=member.avatarUrl?confirmButton('移除照片','確定移除照片？',async()=>{await call('DELETE',`/api/admin/users/${encodeURIComponent(member.username)}/avatar`);ownChanged(member,null)}):null;
+  const remove=confirmButton('移出團隊',`確定把${name}移出${team.name}？`,()=>call('DELETE',`/api/admin/teams/${team.id}/members/${encodeURIComponent(member.username)}`));
+  const clear=member.avatarUrl?confirmButton('移除照片','確定移除照片？',async()=>{await call('DELETE',`/api/admin/users/${encodeURIComponent(member.username)}/avatar`);ownChanged(member,null)},false):null;
   return el('li',{className:'member'},
     ...avatar(member,name),
     el('span',{className:'member-text'},el('b',{textContent:name}),named?el('small',{textContent:member.username}):null),

@@ -23,6 +23,7 @@
   --danger: #ff8d72;
   --danger-soft: #ff795d1f;
   --warn: #f2c66d;
+  --shadow-card: none;           /* dark panels stand apart by their border; a shadow on a dark page only blurs the edge */
   font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif;
 }
 :root[data-theme="light"] {
@@ -48,6 +49,22 @@
   --danger: #c23a24;             /* 4.9:1 under white text and on white */
   --danger-soft: #c23a2416;
   --warn: #8a5a00;
+  --shadow-card: 0 8px 24px rgb(20 40 70 / .06);
+}
+
+/* Shape, spacing and type scale shared by every page, in both themes. Page styles use these instead of their own numbers. */
+:root {
+  --radius-small: 6px;           /* chips inside a row, small marks, inputs inside a field */
+  --radius-control: 10px;        /* buttons, inputs, selects, small cards */
+  --radius-card: 14px;           /* cards and panels inside a page */
+  --radius-feature: 18px;        /* the main panels of a page */
+  --radius-frame: 24px;          /* the page frame and dialogs */
+  --radius-pill: 999px;          /* chips, badges, round-ended buttons */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px;
+  --text-page-title: 32px;
+  --text-section: 18px;
+  --text-body: 15px;
+  --text-note: 12px;
 }
 
 /* One typeface everywhere: form controls and code otherwise fall back to the browser's own fonts,
@@ -55,3 +72,18 @@
 button, input, select, textarea { font: inherit; }
 input, select, textarea { font-weight: 400; }
 code, kbd { font-family: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono", monospace; font-size: .88em; }
+
+/* One spinner for every wait (loading-feedback): the sign-in button and the loading row of search and Q&A. */
+.spinner { box-sizing: border-box; display: inline-block; flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spinner-turn .8s linear infinite; }
+@keyframes spinner-turn { to { transform: rotate(360deg); } }
+/* The loading row a result region shows on a slow request (loading-state.js). */
+.loading-state { display: grid; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); color: var(--muted); font-size: 14px; }
+.loading-state.floating { position: absolute; z-index: 2; top: var(--space-3); left: 50%; transform: translateX(-50%); padding: var(--space-2) var(--space-4); border-radius: var(--radius-pill); box-shadow: 0 8px 24px rgb(0 0 0 / .22); white-space: nowrap; }
+.loading-row { display: flex; align-items: center; gap: var(--space-2); }
+.loading-row .spinner { width: 14px; height: 14px; color: var(--accent); }
+.loading-lines { display: grid; gap: var(--space-2); }
+.loading-lines i { display: block; height: 12px; border-radius: 4px; background: color-mix(in srgb, var(--border) 75%, transparent); animation: loading-pulse 1.4s ease-in-out infinite; }
+.loading-lines i:nth-child(2) { width: 86%; }
+.loading-lines i:nth-child(3) { width: 62%; }
+@keyframes loading-pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .spinner, .loading-lines i { animation: none; } }

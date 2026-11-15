@@ -4,13 +4,13 @@
 /* Title with the 全文搜尋｜問答 switch (meeting-qa), shared by /search and /ask. */
 .search-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-bottom: 16px; }
 .search-page .search-title h1 { margin: 0; }
-.mode-switch { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: 10px; }
-.mode-switch a { padding: 6px 14px; border-radius: 7px; color: var(--muted); font-size: 13px; font-weight: 700; text-decoration: none; }
+.mode-switch { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-control); }
+.mode-switch a { padding: 6px 14px; border-radius: var(--radius-small); color: var(--muted); font-size: 13px; font-weight: 700; text-decoration: none; }
 .mode-switch a:hover { color: var(--text); }
 .mode-switch a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
 .search-form { display: flex; gap: 10px; margin-bottom: 12px; }
 .search-box { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; height: 46px; padding: 0 14px; border: 1.5px solid var(--field-border);
-  border-radius: 12px; background: var(--field); }
+  border-radius: var(--radius-control); background: var(--field); }
 .search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .search-box:has(input[aria-invalid="true"]) { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }   /* over 5 terms or 100 characters */
 .search-box svg { flex: none; width: 18px; height: 18px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
@@ -18,19 +18,23 @@
 .search-form .primary-button { width: auto; height: 46px; }
 
 .search-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 18px; }
-.kind-tabs { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: 10px; }
-.kind { height: 30px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
+.kind-tabs { display: inline-flex; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-control); }
+.kind { height: 30px; padding: 0 12px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; }
 .kind:hover { color: var(--text); }
 .kind[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 .filter-select { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
-.filter-select select, .filter-select input { height: 34px; padding: 0 8px; border: 1px solid var(--field-border); border-radius: 8px; background: var(--field);
+.filter-select select, .filter-select input { height: 34px; padding: 0 8px; border: 1px solid var(--field-border); border-radius: var(--radius-control); background: var(--field);
   color: var(--text); font-size: 13px; }
 
 .search-summary { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
-.results { display: grid; gap: 14px; transition: opacity .2s; }
-/* A search under way (search-feedback-term-limit): the previous results fade after a short delay and cannot be clicked. */
-.results.is-loading { opacity: .45; pointer-events: none; transition-delay: .15s; }
-@media (prefers-reduced-motion: reduce) { .results { transition: none; } }
+.results { position: relative; display: grid; gap: 14px; }   /* relative: the floating loading row (loading-state.js) */
+.results > * { transition: opacity .2s; }
+/* A search under way (search-feedback-term-limit): the previous results fade after a short delay and cannot be clicked;
+   the loading row (loading-feedback) stays at full strength. With no results yet, the intro card gives way to it. */
+.results.is-loading { pointer-events: none; }
+.results.is-loading > :not(.loading-state) { opacity: .45; transition-delay: .15s; }
+.results.no-results > .search-empty { display: none; }
+@media (prefers-reduced-motion: reduce) { .results > * { transition: none; } }
 .result-group { padding: 14px 16px 6px; }
 .result-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
 .result-head a, .result-head b { color: var(--text); font-size: 16px; font-weight: 700; text-decoration: none; }
@@ -39,9 +43,9 @@
 .result-count { margin-left: auto; color: var(--muted); font-size: 12px; }
 .hits { margin: 0; padding: 0; list-style: none; }
 .hit { border-top: 1px solid var(--border); }
-.hit a { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 10px 4px; color: var(--text); text-decoration: none; border-radius: 8px; }
+.hit a { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 10px 4px; color: var(--text); text-decoration: none; border-radius: var(--radius-control); }
 .hit a:hover, .hit a:focus-visible { background: var(--accent-soft); outline: none; }
-.hit-tag { align-self: start; justify-self: start; padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--text) 8%, transparent);
+.hit-tag { align-self: start; justify-self: start; padding: 2px 8px; border-radius: var(--radius-small); background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--muted); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .hit-tag.time { color: var(--accent); }
 .hit-text { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }

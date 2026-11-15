@@ -2,9 +2,9 @@
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 .hint { margin: 4px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
-code { padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); font-size: 13px; }
+code { padding: 1px 6px; border-radius: var(--radius-small); background: var(--accent-soft); font-size: 13px; }
 .link-button { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
-.bar { display: block; width: 140px; height: 6px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.bar { display: block; width: 140px; height: 6px; border-radius: var(--radius-pill); background: var(--border); overflow: hidden; }
 .bar i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
 .meeting-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 10px 0 0; color: var(--muted); font-size: 14px; }
 
@@ -38,7 +38,7 @@ code { padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); fon
 .rename-title { margin: 10px 0 2px; }
 .rename-title .input { flex: 1 1 320px; font-size: 20px; font-weight: 600; }
 .rename-title .series-input { flex: 0 1 200px; font-size: 15px; font-weight: 400; appearance: auto; }
-.back-link { display: inline-flex; align-items: center; gap: 4px; margin: -12px 0 18px -6px; padding: 6px 10px 6px 4px; border-radius: 999px; color: var(--muted); font-size: 14px; font-weight: 600; text-decoration: none; }
+.back-link { display: inline-flex; align-items: center; gap: 4px; margin: -12px 0 18px -6px; padding: 6px 10px 6px 4px; border-radius: var(--radius-pill); color: var(--muted); font-size: 14px; font-weight: 600; text-decoration: none; }
 .back-link:hover { color: var(--text); background: var(--accent-soft); }
 .back-link svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .review-progress { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; color: var(--muted); }
@@ -51,10 +51,10 @@ code { padding: 1px 6px; border-radius: 6px; background: var(--accent-soft); fon
 .segment-head, .seg { display: grid; grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr) 76px; gap: 16px; align-items: start; }
 .segment-head { padding: 0 16px 8px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 .segments { display: grid; gap: 6px; }
-.seg { padding: 12px 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
+.seg { padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
 .seg:hover { border-color: var(--field-border); }
 .seg.open { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); cursor: default; }
-.seg-time { justify-self: start; padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.seg-time { justify-self: start; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-control); background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; cursor: pointer; }
 .seg-time:hover, .seg.open .seg-time { color: var(--accent); border-color: var(--accent); }
 .seg-source, .seg-target { font-size: 16px; line-height: 1.65; overflow-wrap: anywhere; white-space: pre-wrap; }
 .seg-target { color: var(--muted); }
@@ -78,10 +78,10 @@ main.no-target .seg-target, main.no-target .segment-head span:nth-child(3) { dis
 .seg-note:empty { display: none; }
 .seg-note .ok { color: var(--accent); font-weight: 600; }
 .seg-note .warn { color: var(--danger); font-weight: 600; }
-.edit-form { grid-column: 2 / 4; display: grid; gap: 8px; }
+.edit-form { grid-column: 2 / 3; display: grid; gap: 8px; }   /* the translation stays in its own column while editing (ui-review-fixes) */
 .editor { height: auto; min-height: 84px; padding: 10px 12px; resize: vertical; line-height: 1.6; font-family: inherit; }
 .edit-buttons { display: flex; gap: 8px; }
-.history { margin: 0; padding: 10px 14px 10px 32px; border-radius: 12px; background: var(--accent-soft); display: grid; gap: 6px; font-size: 13px; }
+.history { margin: 0; padding: 10px 14px 10px 32px; border-radius: var(--radius-control); background: var(--accent-soft); display: grid; gap: 6px; font-size: 13px; }
 .history small { display: block; color: var(--muted); overflow-wrap: anywhere; }
 
 @media (max-width: 760px) {
@@ -103,10 +103,10 @@ main.no-target .seg-target, main.no-target .segment-head span:nth-child(3) { dis
 .view-tabs { display: flex; gap: 4px; margin: 0 0 18px; border-bottom: 1px solid var(--border); }
 .view-tab { display: inline-flex; align-items: center; gap: 8px; margin-bottom: -1px; padding: 12px 18px; border-bottom: 3px solid transparent; color: var(--muted); font-size: 16px; font-weight: 700; text-decoration: none; cursor: pointer; transition: color .15s ease, border-color .15s ease, background .15s ease; }
 .view-tab svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.view-tab:hover { color: var(--text); background: var(--accent-soft); border-radius: 10px 10px 0 0; }
+.view-tab:hover { color: var(--text); background: var(--accent-soft); border-radius: var(--radius-control) var(--radius-control) 0 0; }
 .view-tab[aria-current="page"] { color: var(--accent); border-bottom-color: var(--accent); cursor: default; }
 .view-tab[aria-current="page"]:hover { background: transparent; }
-.view-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px 10px 0 0; }
+.view-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-control) var(--radius-control) 0 0; }
 #title:empty::before { content: '\00a0'; }
 
 /* Switching views: the shared header stays put while the content below cross-fades (Chromium/Edge). */

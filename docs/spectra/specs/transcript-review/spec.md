@@ -296,3 +296,50 @@ code:
   - meeting-2026-11-01T00-16-53.txt
   - docs/roadmap.md
 -->
+
+---
+### Requirement: Translation stays visible while correcting
+
+While a reviewer edits a segment's source text on the review page, the segment's translation SHALL stay shown in the translation column next to the editor, so the reviewer can compare the two while typing. When the meeting has no translation column, or on a phone-width layout where the columns stack, the editor SHALL take the source text's place in that layout.
+
+#### Scenario: Editing a translated segment
+
+- **WHEN** a reviewer presses 修改原文 on a segment whose translation is "Hello everyone" in a 1280px wide window
+- **THEN** the editor appears in the source column and "Hello everyone" is shown in the translation column with the same column width as before editing
+
+<!-- @trace
+source: ui-review-fixes
+updated: 2026-11-15
+code:
+  - webapp/static/review.html
+  - docs/ui-review-shots/qa-answer.jpeg
+  - webapp/static/meetings.html
+  - docs/ui-review-shots/minutes-empty.jpeg
+  - docs/ui-review-shots/search-results.jpeg
+  - webapp/static/accounts.css
+  - webapp/static/not-found.html
+  - docs/ui-review-shots/metrics.jpeg
+  - webapp/static/search.html
+  - docs/ui-review-shots/team-management.jpeg
+  - docs/ui-review-codex.md
+  - webapp/static/minutes.html
+  - chang01.png
+  - bench/ui_review_e2e.mjs
+  - webapp/static/admin.css
+  - docs/ui-review-shots/meetings-list.jpeg
+  - docs/ui-review-shots/mobile-transcript-review.jpeg
+  - webapp/static/account.js
+  - docs/ui-review-shots/meeting-live.jpeg
+  - webapp/static/ask.html
+  - bench/README.md
+  - webapp/static/actions.html
+  - webapp/static/admin.html
+  - docs/ui-review-shots/login-dark.jpeg
+  - webapp/static/index.html
+  - webapp/static/metrics.html
+  - docs/ui-review-shots/404-page.jpeg
+  - webapp/static/review.css
+  - docs/ui-review-shots/actions-board.jpeg
+tests:
+  - webapp/test_server.py
+-->

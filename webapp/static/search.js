@@ -40,7 +40,8 @@ function busy(on,q=''){
   clearTimeout(slowTimer);
   $('results').setAttribute('aria-busy',String(on));
   $('results').classList.toggle('is-loading',on);
-  if(on)slowTimer=setTimeout(()=>{$('summary').textContent=`正在搜尋「${q}」…`},200);
+  if(on)slowTimer=setTimeout(()=>{$('summary').textContent=`正在搜尋「${q}」…`;LoadingState.show($('results'),'搜尋中…')},200);
+  else LoadingState.hide($('results'));
 }
 
 // The text with every term wrapped in <mark>, case-insensitively; overlapping terms merge.

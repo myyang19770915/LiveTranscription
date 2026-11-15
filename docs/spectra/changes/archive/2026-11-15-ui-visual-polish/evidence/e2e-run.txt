@@ -1,0 +1,45 @@
+ok   dark: every token has a value []
+ok   dark: --shadow-card is none only in the dark theme "none"
+ok   light: every token has a value []
+ok   light: --shadow-card is none only in the dark theme "0 8px 24px rgb(20 40 70 / .06)"
+ok   no border-radius outside the tokens (other than %, inherit, 0, <= 4px) []
+ok   1280px first visit: 進階 is folded
+ok   1280px first visit: 辨識引擎, 雲端精修, 精準模式 hidden [false,false,false]
+ok   1280px first visit: 會議情境 visible
+ok   1280px pressing 進階 unfolds
+ok   1280px unfolded is remembered after a reload
+ok   850px first visit: 進階 is folded
+ok   850px first visit: 辨識引擎, 雲端精修, 精準模式 hidden [false,false,false]
+ok   850px first visit: 會議情境 visible
+ok   850px pressing 進階 unfolds
+ok   850px unfolded is remembered after a reload
+ok   no storage: 進階 starts folded
+ok   summary local/0/0 reads 預設 "預設"
+ok   local/0/0: folding keeps every setting [{"summary":"預設","visible":true,"engine":"local","refine":false,"quality":false},{"engine":"local","refine":false,"quality":false,"summaryShown":false}]
+ok   local/0/0: summary hidden while unfolded
+ok   summary local/0/1 reads 精準模式 "精準模式"
+ok   local/0/1: folding keeps every setting [{"summary":"精準模式","visible":true,"engine":"local","refine":false,"quality":true},{"engine":"local","refine":false,"quality":true,"summaryShown":false}]
+ok   local/0/1: summary hidden while unfolded
+ok   summary mai/1/0 reads 雲端 MAI、雲端精修 "雲端 MAI、雲端精修"
+ok   mai/1/0: folding keeps every setting [{"summary":"雲端 MAI、雲端精修","visible":true,"engine":"mai","refine":true,"quality":false},{"engine":"mai","refine":true,"quality":false,"summaryShown":false}]
+ok   mai/1/0: summary hidden while unfolded
+ok   summary hybrid/0/1 reads 混合辨識、精準模式 "混合辨識、精準模式"
+ok   hybrid/0/1: folding keeps every setting [{"summary":"混合辨識、精準模式","visible":true,"engine":"hybrid","refine":false,"quality":true},{"engine":"hybrid","refine":false,"quality":true,"summaryShown":false}]
+ok   hybrid/0/1: summary hidden while unfolded
+ok   summary updates when a setting changes
+ok   start check: 進階 folded before starting
+ok   folded: the meeting starts with 精準模式 on and the chosen engine {"quality":true,"engine":"mai","refine":false}
+ok   500px: 辨識引擎 and 雲端精修 in the settings dialog without pressing 進階
+ok   500px: 進階 is not a fold button there
+ok   500px: 進階 looks like a heading (full strength, no chevron) {"opacity":"1","chevron":"none"}
+ok   slow search with results: loading row with 搜尋中…, hidden from assistive technology {"row":true,"lines":0,"verb":"搜尋中…","hidden":"true","dimmed":["0.878405"]}
+ok   slow search with results: no placeholder lines 0
+ok   slow search with results: earlier results dimmed and not clickable [["0.878405"],"none"]
+ok   slow search: region keeps its height (the row floats over the results) [518,518]
+ok   loading row gone once the results arrive
+ok   fast search (50 ms): loading row never appears
+ok   first question: loading row with 整理答案中… and three placeholder lines {"row":true,"lines":3,"verb":"整理答案中…","hidden":"true","dimmed":[]}
+ok   failed question: loading row removed
+ok   reduced motion: spinner does not turn, 搜尋中… still shown {"animations":0,"text":"搜尋中…"}
+ok   reduced motion: placeholder lines do not pulse [0,0,0]
+ok   sign-in: shared spinner shown at 16px with 登入中… {"shared":true,"visible":true,"size":[16,16],"label":"登入中…"}

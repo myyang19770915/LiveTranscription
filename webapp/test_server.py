@@ -2672,7 +2672,7 @@ class NotFoundPageTests(AccountTestCase):
 
     def assert_page(self, response):
         self.assertEqual((response.status_code, response.headers["content-type"].split(";")[0]), (404, "text/html"))
-        for text in ("找不到這個頁面", 'href="/"', 'href="/meetings"'):
+        for text in ("找不到這個頁面", 'href="/"', 'href="/meetings"', "返回上一頁", "請團隊管理員確認你在該團隊中", "history.back()", "!=='/login'"):
             self.assertIn(text, response.text)
         self.assertNotIn("account.js", response.text)   # no sign-in needed, no API called
 

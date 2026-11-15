@@ -7,7 +7,7 @@ body[data-size="2"] { font-size: 28px; }
 body[data-size="3"] { font-size: 34px; }
 body[data-size="4"] { font-size: 40px; }
 .sub-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 12px; }
-.sub-bar button { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
+.sub-bar button { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--panel); color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
 .sub-bar button:hover { color: var(--text); border-color: var(--field-border); }
 .sub-bar button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .sub-title { margin-left: auto; color: var(--faint); }
