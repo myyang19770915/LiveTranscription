@@ -453,6 +453,17 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - **`embed` 停掉時**：問答只用關鍵字找資料，回答下方會註明，換句話說的問題可能找不到。紀要模型未設定時問答無法使用。
 - 問題與篩選會寫在網址，但打開網址不會自動送出（每次問答都會呼叫模型）。問答內容不會保存。問題與找到的資料會送到紀要模型服務。
 
+## 即時口譯（管理員）
+
+團隊管理頁的「即時口譯」（`/interpret`，只開放系統管理員）用 Azure GPT-Realtime-Translate 做即時口譯：說話後直接聽到譯音、看到譯文。
+
+- **原文**：由語橋辨識，跟即時翻譯模式相同：中文、中英混合、粵語用本機 Confucius，其他語言用雲端 MAI（記在 MAI 用量）。
+- **輸出語言**：模型支援的語言都能選（中文輸出轉成台灣繁體），每次連線只能翻成一種。說的話已經是輸出語言時，模型可能不翻。沒有術語表，也不能選聲音。
+- **同步播放譯音**：取消勾選就只看譯文、不出聲，譯音照樣存檔。
+- **我的紀錄**：每次中斷自動存到 `output/interpret/<帳號>/<日期-時間>/`（`input.wav` 原音、`output.wav` 譯音、`session.json`、`transcript.txt`），只有本人看得到。可載入重播（整段、只聽譯音、只聽原音，點或拖動波形從該處依目前模式播放）、下載、刪除。
+- **費用**：依譯音長度每小時約 2.04 美元（`INTERPRET_USD_PER_HOUR`），記在資料表 `interpret_usage`，團隊管理頁顯示累計，不算進 MAI 上限。系統外的用量以 `docker exec -w /app <app 容器> python -m interpret_usage add <秒數> <用途>` 登記。
+- **串流名額**：一次口譯占兩條串流（翻譯與原文辨識），預設上限 2 條（`MAX_STREAMS_PER_USER`），開會中無法同時口譯。
+
 ## 成效指標
 
 頁首「成效指標」（`/metrics`，手機寬度不顯示連結）依團隊與期間（近 30 天、90 天、一年）即時計算 roadmap 的效益指標，每個數字都附計算依據的件數；分母為 0 時顯示「—」與「資料不足」。
@@ -561,6 +572,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `POST /api/login`、`POST /api/logout`、`GET /api/me` | LDAP 登入、登出、目前使用者與所屬團隊（含 `email`、`emailSource`：`ldap`／`self`） |
 | `PUT /api/me/email` | 自行填寫或清除（`""`）自己的 Email；來自 LDAP 時 409，格式不符 422 |
 | `GET /admin`、`/api/admin/teams…` | 團隊管理（限系統管理員） |
+| `GET /interpret`、`WS /ws/interpret`、`GET /api/interpret/config`、`GET`／`DELETE /api/interpret/sessions…`、`GET /api/admin/interpret-usage` | 即時口譯（限系統管理員；紀錄只限本人） |
 | `PUT`／`DELETE /api/admin/users/{帳號}/avatar`、`PUT`／`DELETE /api/me/avatar`、`GET /api/users/{帳號}/avatar` | 成員頭像照片（改別人的限系統管理員，`/api/me/avatar` 改自己的，讀取需登入） |
 | `POST /api/meetings`、`GET /api/meetings`、`GET /api/meetings/{id}` | 建立會議（需指定自己的團隊）、列出與讀取自己團隊的會議 |
 | `GET /meetings`、`GET /meetings/{id}` | 會議紀錄列表、會後校對頁 |

@@ -8,7 +8,7 @@ Quality pass is an opt-in mode of the live page in which the gateway re-recogniz
 
 ### Requirement: Quality pass is opt-in and hidden until configured
 
-`GET /api/config` SHALL include `quality`, true only when both a recognizer (`TRANSLATE_QUALITY_ASR_MODEL`, or one of the app's own engines chosen with `TRANSLATE_QUALITY_ASR` as the requirement below states) and `TRANSLATE_QUALITY_MODEL` are set and a service URL is available from `TRANSLATE_QUALITY_URL` or, when that is empty, `TRANSLATE_REFINE_URL`. The live page SHALL show the 精準模式 checkbox only when `quality` is true, unchecked by default, with the note 音訊與文字會傳送到外部服務, remembered in the browser, and disabled while a session is running. The gateway SHALL run the quality pass for a stream only when the stream header has `quality: true` and the service is configured; otherwise it SHALL NOT call the external services and the events sent to the browser SHALL be the same as without this capability.
+`GET /api/config` SHALL include `quality`, true only when both a recognizer (`TRANSLATE_QUALITY_ASR_MODEL`, or one of the app's own engines chosen with `TRANSLATE_QUALITY_ASR` as the requirement below states) and `TRANSLATE_QUALITY_MODEL` are set and a service URL is available from `TRANSLATE_QUALITY_URL` or, when that is empty, `TRANSLATE_REFINE_URL`. The live page SHALL show the 精準模式 checkbox only when `quality` is true, unchecked by default, with the two-line explanation that meeting-setup-layout specifies (its second line states 傳送音訊與文字到外部服務), remembered in the browser, and disabled while a session is running. The gateway SHALL run the quality pass for a stream only when the stream header has `quality: true` and the service is configured; otherwise it SHALL NOT call the external services and the events sent to the browser SHALL be the same as without this capability.
 
 #### Scenario: Not configured
 
@@ -22,28 +22,16 @@ Quality pass is an opt-in mode of the live page in which the gateway re-recogniz
 
 
 <!-- @trace
-source: quality-pass
-updated: 2026-11-14
+source: engine-auto-and-mode-help
+updated: 2026-11-15
 code:
-  - bench/blindn.py
-  - .env.example
-  - README.en.md
-  - webapp/quality_pass.py
-  - docker/qwen-asr/healthcheck.py
-  - bench/privacycheck.js
-  - bench/quality_e2e.mjs
   - bench/README.md
-  - webapp/chunk_asr.py
-  - compose.yaml
-  - webapp/static/privacy-note.js
+  - webapp/static/refine.css
+  - bench/translate_e2e.mjs
   - webapp/static/app.js
-  - README.deploy.md
-  - bench/privacy_e2e.mjs
-  - webapp/server.py
+  - bench/ui_polish_e2e.mjs
   - webapp/static/index.html
-  - README.md
-tests:
-  - webapp/test_server.py
+  - chang01.png
 -->
 
 ---

@@ -46,8 +46,9 @@ QUESTION_MAX = 300
 ANSWER_TIMEOUT = 90
 QUESTION_EMBED_TIMEOUT = 5   # one sentence: a service that does not answer by then is treated as down (keyword only)
 
-NOT_CONFIGURED = "問答需要紀要模型，目前未設定"
+NOT_CONFIGURED = "問答功能尚未設定"
 EMPTY_QUESTION = "請輸入問題"
+ANSWER_FAILED = "暫時無法回答，請稍後再試"
 LABELS = minutes.LABELS
 
 # Query and document prefixes the models were trained with, by model file name.
@@ -452,7 +453,7 @@ async def ask(body: AskIn, user: auth.CurrentUser):
         reply = await minutes.call_model(build_messages(question, sources), timeout=ANSWER_TIMEOUT)
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         logger.warning("問答：模型呼叫失敗：%s", exc)
-        raise HTTPException(status_code=502, detail="模型暫時無法回答，請稍後再試")
+        raise HTTPException(status_code=502, detail=ANSWER_FAILED)
     answer, cited = check_answer(reply, len(sources))
     if answer is None:
         return result

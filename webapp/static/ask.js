@@ -124,7 +124,7 @@ function render(result){
   $('answer').replaceChildren(
     el('article',{className:'card ask-answer'},el('p',{className:'ask-question',textContent:result.question}),
       el('p',{className:'ask-text'},...answerText(result.answer,numbers)),degraded,
-      el('p',{className:'ask-caution',textContent:'回答由模型根據下列出處整理，重要決定請點開出處核對原文。'})),
+      el('p',{className:'ask-caution',textContent:'回答由系統根據下列出處整理，重要決定請點開出處核對原文。'})),
     el('section',{className:'card ask-sources','aria-label':'出處'},el('h2',{textContent:'出處'}),el('ol',{className:'sources'},...result.sources.map(sourceItem))));
 }
 function idle(){
@@ -174,7 +174,7 @@ async function loadState(){
   const response=await fetch(`/api/ask/status${$('team').value?`?team=${$('team').value}`:''}`).catch(()=>null);
   const state=response?.ok?await response.json():null;
   let text='';
-  if(state&&!state.configured)text='問答需要紀要模型，目前未設定，請管理員設定後再使用。';
+  if(state&&!state.configured)text='問答功能尚未設定，請聯絡系統管理員。';
   else if(state&&!state.embedReachable)text='語意比對服務目前無法使用，問答只會用關鍵字找資料。';
   else if(state&&state.indexed<state.total)text=`還在建立索引（已完成 ${state.indexed} / ${state.total} 筆），剛加入的內容可能還找不到。`;
   $('indexState').textContent=text;$('indexState').hidden=!text;

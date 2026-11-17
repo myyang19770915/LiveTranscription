@@ -24,7 +24,7 @@ async function notice(config) {   // config: object to answer with, 'fail' for H
 }
 
 t('local translation', await notice({cloudRefine: false, mai: false, quality: false, cloudTranslate: false}), ['自架主機音訊與文字只在語橋主機處理', '自架主機']);
-t('external translation', await notice({cloudRefine: true, mai: true, quality: true, cloudTranslate: true}), ['雲端翻譯文字會傳送到外部模型服務', '雲端翻譯']);
-t('settings could not be read', await notice('fail'), ['雲端翻譯文字會傳送到外部模型服務', '雲端翻譯']);
+t('external translation', await notice({cloudRefine: true, mai: true, quality: true, cloudTranslate: true}), ['雲端翻譯文字會傳送到外部服務', '雲端翻譯']);
+t('settings could not be read', await notice('fail'), ['雲端翻譯文字會傳送到外部服務', '雲端翻譯']);
 t('settings not read yet', await notice('hold'), ['資料去向確認中…', '資料去向']);
 await browser.close();

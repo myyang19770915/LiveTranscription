@@ -8,7 +8,7 @@ The meeting page puts the settings people change for each meeting first and fold
 
 ### Requirement: Advanced settings fold away by default
 
-On the meeting page (`/`) on a window wider than 760px, the 進階 heading SHALL be a button with `aria-expanded` and `aria-controls` that shows or hides the advanced settings it introduces: 辨識引擎, 雲端精修 and 精準模式. On a first visit the group SHALL be folded. The chosen state SHALL be stored in localStorage under `setupAdvancedOpen` and used on later visits; when storage is unavailable the group SHALL start folded. 會議情境 is not an advanced setting and SHALL stay visible. When none of the advanced settings is offered, the heading SHALL stay hidden as before. Folding SHALL NOT change any setting's value or what is sent when a meeting starts.
+On the meeting page (`/`) on a window wider than 760px, the 進階 heading SHALL be a button with `aria-expanded` and `aria-controls` that shows or hides the advanced settings it introduces: 辨識引擎 (a read-only statement of the engine in use), 雲端精修 and 精準模式. On a first visit the group SHALL be folded. The chosen state SHALL be stored in localStorage under `setupAdvancedOpen` and used on later visits; when storage is unavailable the group SHALL start folded. 會議情境 is not an advanced setting and SHALL stay visible. When none of the advanced settings is offered, the heading SHALL stay hidden as before. Folding SHALL NOT change any setting's value or what is sent when a meeting starts.
 
 #### Scenario: First visit
 
@@ -27,70 +27,22 @@ On the meeting page (`/`) on a window wider than 760px, the 進階 heading SHALL
 
 
 <!-- @trace
-source: ui-visual-polish
+source: engine-auto-and-mode-help
 updated: 2026-11-15
 code:
-  - webapp/static/accounts.css
-  - docs/ui-review-shots/mobile-transcript-review.jpeg
-  - webapp/static/overlay.css
-  - webapp/static/subtitles.css
-  - chang01.png
-  - webapp/static/minutes.css
-  - webapp/static/styles.css
-  - webapp/static/minutes.html
-  - docs/ui-review-shots/minutes-empty.jpeg
-  - webapp/static/mobile.css
-  - docs/ui-review-shots/login-dark.jpeg
-  - bench/ui_polish_e2e.mjs
-  - webapp/static/ask.css
-  - webapp/static/metrics.css
-  - docs/ui-review-shots/qa-answer.jpeg
-  - webapp/static/refine.css
-  - webapp/static/speakers.css
-  - webapp/static/subtitles.js
-  - webapp/static/themes.css
-  - webapp/static/tokens.css
-  - webapp/static/review.css
-  - webapp/static/loading-state.js
-  - docs/ui-design-suggestions-codex.md
-  - bench/ui_review_e2e.mjs
-  - docs/ui-review-shots/404-page.jpeg
-  - docs/ui-review-shots/meeting-live.jpeg
   - bench/README.md
-  - webapp/static/series.css
-  - docs/ui-review-shots/metrics.jpeg
-  - docs/ui-review-codex.md
-  - webapp/static/actions.css
-  - webapp/static/search.css
-  - webapp/static/search.js
-  - docs/ui-review-shots/search-results.jpeg
-  - webapp/static/evidence-panel.css
-  - webapp/static/not-found.html
-  - docs/ui-review-shots/meetings-list.jpeg
-  - webapp/static/index.html
-  - docs/ui-review-shots/team-management.jpeg
-  - webapp/static/login.html
-  - webapp/static/metrics.html
-  - webapp/static/admin.css
-  - docs/ui-review-shots/actions-board.jpeg
-  - webapp/static/admin.html
-  - webapp/static/ask.js
-  - webapp/static/login.css
-  - webapp/static/account.js
-  - webapp/static/meetings.html
-  - webapp/static/review.html
-  - webapp/static/ask.html
-  - webapp/static/actions.html
+  - webapp/static/refine.css
+  - bench/translate_e2e.mjs
   - webapp/static/app.js
-  - webapp/static/search.html
-tests:
-  - webapp/test_server.py
+  - bench/ui_polish_e2e.mjs
+  - webapp/static/index.html
+  - chang01.png
 -->
 
 ---
 ### Requirement: Folded heading names the advanced options in use
 
-While folded, the 進階 button SHALL show a short summary of the offered advanced options that differ from their defaults, joined with 、, or 預設 when none differ. The summary SHALL update when a setting changes.
+While folded, the 進階 button SHALL show a short summary of the offered advanced choices that differ from their defaults, joined with 、, or 預設 when none differ. The choices are 雲端精修 (listed when it is checked, offered and 精準模式 is not checked) and 精準模式 (listed when it is checked and offered). The recognition engine SHALL NOT appear in the summary, because it is decided by the spoken language and is not a choice. The summary SHALL update when a setting changes.
 
 #### Scenario: Summary text
 
@@ -99,73 +51,26 @@ While folded, the 進階 button SHALL show a short summary of the offered advanc
 
 ##### Example: summary
 
-| 辨識引擎 | 雲端精修 | 精準模式 | Summary |
-| -------- | -------- | -------- | ------- |
-| 本機 | off | off | 預設 |
-| 本機 | off | on | 精準模式 |
-| 雲端 MAI | on | off | 雲端 MAI、雲端精修 |
-| 混合 | off | on | 混合辨識、精準模式 |
+| Spoken language | 雲端精修 | 精準模式 | Summary |
+| --------------- | -------- | -------- | ------- |
+| 中文 | off | off | 預設 |
+| 日本語 | off | off | 預設 |
+| 中文 | off | on | 精準模式 |
+| 日本語 | on | off | 雲端精修 |
+| 日本語 | on | on | 精準模式 |
 
 
 <!-- @trace
-source: ui-visual-polish
+source: engine-auto-and-mode-help
 updated: 2026-11-15
 code:
-  - webapp/static/accounts.css
-  - docs/ui-review-shots/mobile-transcript-review.jpeg
-  - webapp/static/overlay.css
-  - webapp/static/subtitles.css
-  - chang01.png
-  - webapp/static/minutes.css
-  - webapp/static/styles.css
-  - webapp/static/minutes.html
-  - docs/ui-review-shots/minutes-empty.jpeg
-  - webapp/static/mobile.css
-  - docs/ui-review-shots/login-dark.jpeg
-  - bench/ui_polish_e2e.mjs
-  - webapp/static/ask.css
-  - webapp/static/metrics.css
-  - docs/ui-review-shots/qa-answer.jpeg
-  - webapp/static/refine.css
-  - webapp/static/speakers.css
-  - webapp/static/subtitles.js
-  - webapp/static/themes.css
-  - webapp/static/tokens.css
-  - webapp/static/review.css
-  - webapp/static/loading-state.js
-  - docs/ui-design-suggestions-codex.md
-  - bench/ui_review_e2e.mjs
-  - docs/ui-review-shots/404-page.jpeg
-  - docs/ui-review-shots/meeting-live.jpeg
   - bench/README.md
-  - webapp/static/series.css
-  - docs/ui-review-shots/metrics.jpeg
-  - docs/ui-review-codex.md
-  - webapp/static/actions.css
-  - webapp/static/search.css
-  - webapp/static/search.js
-  - docs/ui-review-shots/search-results.jpeg
-  - webapp/static/evidence-panel.css
-  - webapp/static/not-found.html
-  - docs/ui-review-shots/meetings-list.jpeg
-  - webapp/static/index.html
-  - docs/ui-review-shots/team-management.jpeg
-  - webapp/static/login.html
-  - webapp/static/metrics.html
-  - webapp/static/admin.css
-  - docs/ui-review-shots/actions-board.jpeg
-  - webapp/static/admin.html
-  - webapp/static/ask.js
-  - webapp/static/login.css
-  - webapp/static/account.js
-  - webapp/static/meetings.html
-  - webapp/static/review.html
-  - webapp/static/ask.html
-  - webapp/static/actions.html
+  - webapp/static/refine.css
+  - bench/translate_e2e.mjs
   - webapp/static/app.js
-  - webapp/static/search.html
-tests:
-  - webapp/test_server.py
+  - bench/ui_polish_e2e.mjs
+  - webapp/static/index.html
+  - chang01.png
 -->
 
 ---
@@ -175,7 +80,7 @@ At 760px or less the meeting page SHALL show every advanced setting the server o
 
 #### Scenario: Phone width
 
-- **WHEN** `/` is opened at 500px and the settings dialog is opened
+- **WHEN** `/` is opened at 500px while the server offers MAI and cloud refinement, and the settings dialog is opened
 - **THEN** 辨識引擎 and 雲端精修 appear in the dialog without pressing 進階
 
 #### Scenario: 精準模式 offered on a phone
@@ -188,63 +93,204 @@ At 760px or less the meeting page SHALL show every advanced setting the server o
 - **WHEN** the page is resized from 390px to 1280px
 - **THEN** 精準模式 is back inside the 進階 group next to 雲端精修
 
+
 <!-- @trace
-source: phone-mic-and-layout
+source: engine-auto-and-mode-help
 updated: 2026-11-15
 code:
-  - bench/ui_polish_e2e.mjs
-  - webapp/static/search.html
-  - webapp/static/refine.css
-  - docs/ui-review-shots/metrics.jpeg
-  - webapp/static/admin.html
-  - webapp/static/login.html
-  - webapp/static/admin.css
-  - webapp/static/actions.css
-  - webapp/static/search.js
-  - docs/ui-review-shots/actions-board.jpeg
-  - webapp/static/accounts.css
-  - webapp/static/styles.css
-  - webapp/static/evidence-panel.css
-  - webapp/static/meetings.html
-  - bench/ui_review_e2e.mjs
-  - docs/ui-review-shots/404-page.jpeg
-  - webapp/static/metrics.html
-  - webapp/static/account.js
-  - docs/ui-review-shots/search-results.jpeg
-  - webapp/static/index.html
-  - webapp/static/overlay.css
-  - webapp/static/review.css
-  - webapp/static/subtitles.css
-  - webapp/static/subtitles.js
-  - webapp/static/speakers.css
-  - webapp/static/actions.html
-  - docs/ui-review-shots/qa-answer.jpeg
-  - webapp/static/themes.css
-  - docs/ui-review-shots/meeting-live.jpeg
-  - docs/ui-review-shots/team-management.jpeg
-  - docs/ui-review-shots/meetings-list.jpeg
   - bench/README.md
+  - webapp/static/refine.css
+  - bench/translate_e2e.mjs
   - webapp/static/app.js
-  - webapp/static/ask.css
-  - webapp/static/minutes.html
+  - bench/ui_polish_e2e.mjs
+  - webapp/static/index.html
   - chang01.png
-  - webapp/static/not-found.html
-  - webapp/static/review.html
-  - webapp/static/tokens.css
-  - webapp/static/search.css
-  - webapp/static/series.css
-  - webapp/static/ask.html
-  - webapp/static/login.css
-  - webapp/static/mobile.css
-  - docs/ui-design-suggestions-codex.md
-  - docs/ui-review-codex.md
-  - docs/ui-review-shots/login-dark.jpeg
-  - docs/ui-review-shots/mobile-transcript-review.jpeg
-  - webapp/static/minutes.css
+-->
+
+---
+### Requirement: The spoken language decides the recognition engine
+
+The meeting page (both 會議 and 即時翻譯 modes) SHALL NOT offer a recognition engine selector. When `/api/config` reports `mai` true, the engine SHALL be `local` for the spoken languages `zh`, `yue`, `auto` and `zh_ja` and `mai` for every other spoken language; when `mai` is false or `/api/config` cannot be read, the engine SHALL be `local`. This engine SHALL be the `engine` sent in `POST /api/meetings` and in the stream header, and a value stored under the localStorage key `asrEngine` by earlier versions SHALL have no effect. When `mai` is true the 辨識引擎 row SHALL show, as text, 本機（語橋主機） for the `local` engine or 雲端辨識（音訊會傳送到外部服務） for the `mai` engine, and the note 依語音語言自動選擇：中文、粵語、中英、中日雙向用本機，其他語言用雲端 MAI. The text SHALL update as soon as the spoken language changes, including through the swap button. When `mai` is false the row SHALL stay hidden.
+
+#### Scenario: Language picks the engine
+
+- **WHEN** the server offers MAI and the user picks a spoken language and starts a meeting
+- **THEN** the 辨識引擎 row text and the `engine` sent are as in the example table
+
+##### Example: engine by language
+
+| Spoken language | `mai` in `/api/config` | Row text | `engine` sent |
+| --------------- | ---------------------- | -------- | ------------- |
+| zh | true | 本機（語橋主機） | local |
+| yue | true | 本機（語橋主機） | local |
+| auto | true | 本機（語橋主機） | local |
+| zh_ja | true | 本機（語橋主機） | local |
+| ja | true | 雲端辨識（音訊會傳送到外部服務） | mai |
+| en | true | 雲端辨識（音訊會傳送到外部服務） | mai |
+| ja | false | (row hidden) | local |
+
+#### Scenario: Old stored choice is ignored
+
+- **WHEN** localStorage holds `asrEngine` = `mai`, the server offers MAI and the spoken language is 中文
+- **THEN** the row shows 本機（語橋主機） and the meeting starts with `engine` `local`
+
+#### Scenario: Swapping the direction updates the engine
+
+- **WHEN** the spoken language is 中文, the target is 日本語, and the user presses the swap button
+- **THEN** the row shows 雲端辨識（音訊會傳送到外部服務） without reloading the page
+
+
+<!-- @trace
+source: engine-auto-and-mode-help
+updated: 2026-11-15
+code:
+  - bench/README.md
+  - webapp/static/refine.css
+  - bench/translate_e2e.mjs
+  - webapp/static/app.js
+  - bench/ui_polish_e2e.mjs
+  - webapp/static/index.html
+  - chang01.png
+-->
+
+
+<!-- @trace
+source: plain-wording-no-tech-names
+updated: 2026-11-17
+code:
   - webapp/static/ask.js
-  - webapp/static/loading-state.js
-  - docs/ui-review-shots/minutes-empty.jpeg
-  - webapp/static/metrics.css
+  - webapp/static/privacy-note.js
+  - bench/interpret_e2e.mjs
+  - bench/series_e2e.mjs
+  - gpt-realtime-translate_demoUI.png
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - bench/README.md
+  - README.md
+  - webapp/static/meetings.html
+  - webapp/static/admin.html
+  - lab/realtime-translate/index.html
+  - webapp/server.py
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - bench/qa_e2e.mjs
+  - webapp/static/app.js
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - webapp/static/interpret.css
+  - webapp/static/metrics.js
+  - webapp/static/refine.css
+  - webapp/static/index.html
+  - bench/translate_e2e.mjs
+  - webapp/migrations/019_interpret_usage.sql
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - chang01.png
+  - webapp/static/minutes.js
+  - webapp/static/interpret.js
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/interpret.py
+  - bench/ui_polish_e2e.mjs
+  - webapp/interpret_usage.py
+  - .env.example
+  - webapp/static/admin.css
+  - webapp/static/ask.html
+  - bench/privacy_e2e.mjs
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/qa.py
+  - lab/realtime-translate/costs.jsonl
+  - webapp/static/minutes.html
+  - webapp/static/interpret.html
+  - webapp/minutes.py
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - compose.yaml
+  - lab/realtime-translate/server.py
+  - webapp/static/metrics.html
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+tests:
+  - webapp/test_server.py
+-->
+
+---
+### Requirement: Cloud refinement and 精準模式 state what each does
+
+Each of the 雲端精修 and 精準模式 checkboxes SHALL show, as visible text next to the checkbox and not only as a tooltip, two lines: what it does and how fast, and what it sends and when to use it, with the wording of the example table. The text SHALL be visible at 1280px when 進階 is unfolded and at 390px inside the settings dialog. While 精準模式 is checked, the second line of 雲端精修 SHALL read 精準模式已包含，不需另外開啟, and SHALL return to its normal wording when 精準模式 is unchecked.
+
+#### Scenario: Both explanations visible
+
+- **WHEN** the server offers both and the user opens the advanced settings at 1280px, or the settings dialog at 390px
+- **THEN** both checkboxes show both lines of the example table
+
+##### Example: explanation wording
+
+| Checkbox | First line | Second line |
+| -------- | ---------- | ----------- |
+| 雲端精修 | 只改寫譯文：每句定稿後幾秒內由雲端服務帶前後文重譯，原文不變 | 傳送文字到外部服務 · 適合辨識已正確、想要譯文更通順 |
+| 精準模式 | 重新辨識再翻譯：語句結束後把音訊交給較準的辨識重新修字、斷句、翻譯，取代即時結果，約慢 10–25 秒 | 傳送音訊與文字到外部服務 · 適合重要會議、需要準確紀錄；已包含雲端精修 |
+
+#### Scenario: 精準模式 covers cloud refinement
+
+- **WHEN** the user checks 精準模式
+- **THEN** 雲端精修 is disabled and its second line reads 精準模式已包含，不需另外開啟, and after unchecking 精準模式 it reads 傳送文字到外部服務 · 適合辨識已正確、想要譯文更通順 again
+
+<!-- @trace
+source: engine-auto-and-mode-help
+updated: 2026-11-15
+code:
+  - bench/README.md
+  - webapp/static/refine.css
+  - bench/translate_e2e.mjs
+  - webapp/static/app.js
+  - bench/ui_polish_e2e.mjs
+  - webapp/static/index.html
+  - chang01.png
+-->
+
+<!-- @trace
+source: plain-wording-no-tech-names
+updated: 2026-11-17
+code:
+  - webapp/static/ask.js
+  - webapp/static/privacy-note.js
+  - bench/interpret_e2e.mjs
+  - bench/series_e2e.mjs
+  - gpt-realtime-translate_demoUI.png
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - bench/README.md
+  - README.md
+  - webapp/static/meetings.html
+  - webapp/static/admin.html
+  - lab/realtime-translate/index.html
+  - webapp/server.py
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - bench/qa_e2e.mjs
+  - webapp/static/app.js
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - webapp/static/interpret.css
+  - webapp/static/metrics.js
+  - webapp/static/refine.css
+  - webapp/static/index.html
+  - bench/translate_e2e.mjs
+  - webapp/migrations/019_interpret_usage.sql
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - chang01.png
+  - webapp/static/minutes.js
+  - webapp/static/interpret.js
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/interpret.py
+  - bench/ui_polish_e2e.mjs
+  - webapp/interpret_usage.py
+  - .env.example
+  - webapp/static/admin.css
+  - webapp/static/ask.html
+  - bench/privacy_e2e.mjs
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/qa.py
+  - lab/realtime-translate/costs.jsonl
+  - webapp/static/minutes.html
+  - webapp/static/interpret.html
+  - webapp/minutes.py
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - compose.yaml
+  - lab/realtime-translate/server.py
+  - webapp/static/metrics.html
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
 tests:
   - webapp/test_server.py
 -->

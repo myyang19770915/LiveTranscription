@@ -49,7 +49,7 @@ try {
   check('panel lists the unfinished items', expected.length > 0 && await page.textContent('#seriesCount') === String(expected.length), expected.length);
   check('series choice is remembered', await page.inputValue('#series') === String(seriesId));
   check('detection is offered, off by default, with the notice', await page.isVisible('#detectRow') && !(await page.isChecked('#detect'))
-    && (await page.textContent('#detectRow')).includes('外部模型服務'));
+    && (await page.textContent('#detectRow')).includes('外部服務'));
   await page.check('#detect'); await page.reload(); await page.waitForSelector('#seriesPanel:not([hidden])');
   check('detection choice survives a reload', await page.isChecked('#detect'));
   await page.screenshot({path: join(out, 'series-panel.png')});

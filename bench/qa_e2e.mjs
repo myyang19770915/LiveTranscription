@@ -46,7 +46,7 @@ try {
   await page.route('**/api/ask', async route => {
     const q = route.request().postDataJSON().question;
     if (hold && q === hold) await new Promise(r => { release = r; });
-    await route.fulfill(status === 200 ? {json: reply(q)} : {status, json: {detail: '問答需要紀要模型，目前未設定'}});
+    await route.fulfill(status === 200 ? {json: reply(q)} : {status, json: {detail: '問答功能尚未設定'}});
   });
   const ready = () => page.waitForFunction(() => document.querySelector('#team option:nth-child(2)'));
 
@@ -171,7 +171,7 @@ try {
   check('a keyword-only answer says so', (await page.textContent('.ask-note')).includes('只用關鍵字'));
   status = 503;
   await page.fill('#q', QUESTION); await page.press('#q', 'Enter'); await page.waitForFunction(() => !document.getElementById('notice').hidden);
-  check('an error is shown and the old answer goes', await page.textContent('#notice') === '問答需要紀要模型，目前未設定' && await page.locator('.ask-answer').count() === 0);
+  check('an error is shown and the old answer goes', await page.textContent('#notice') === '問答功能尚未設定' && await page.locator('.ask-answer').count() === 0);
   status = 200;
   const before = sent;
   await page.fill('#q', '   '); await page.press('#q', 'Enter');
@@ -191,7 +191,7 @@ try {
   // Index progress and service state, from /api/ask/status.
   for (const [state, expected] of [[{indexed: 1, total: 3, embedReachable: true, configured: true}, '還在建立索引（已完成 1 / 3 筆）'],
                                    [{indexed: 3, total: 3, embedReachable: false, configured: true}, '問答只會用關鍵字找資料'],
-                                   [{indexed: 3, total: 3, embedReachable: true, configured: false}, '問答需要紀要模型，目前未設定']]) {
+                                   [{indexed: 3, total: 3, embedReachable: true, configured: false}, '問答功能尚未設定']]) {
     await page.route('**/api/ask/status*', route => route.fulfill({json: {model: 'bge-m3-q8_0.gguf', ...state}}));
     await page.reload(); await ready(); await page.waitForFunction(() => !document.getElementById('indexState').hidden);
     check(`the page says: ${expected}`, (await page.textContent('#indexState')).includes(expected));

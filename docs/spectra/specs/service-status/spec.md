@@ -72,7 +72,7 @@ tests:
 ---
 ### Requirement: Readiness in the meeting page status
 
-While no meeting or live translation is running and none is starting, the meeting page SHALL check `/api/services` once after loading, every 30 seconds afterwards while the tab is visible, and immediately when the tab becomes visible again; it SHALL NOT check while hidden. When `ready` is true the status SHALL read 服務就緒 with a steady accent-coloured dot (kind `ready`, not pulsing). When any service is not ready the status SHALL turn red (kind `error`) and read the names of the services that are not ready joined with 、 followed by 服務未啟動, with the title 請確認 Docker 服務已啟動. When the request fails or returns a status other than 200 or 401, the status SHALL read 無法連線到伺服器 in red; a 401 SHALL go to the sign-in page. While a meeting or live translation is running or starting, results SHALL NOT change the status. The message shown when a session ends SHALL stay until the next scheduled check.
+While no meeting or live translation is running and none is starting, the meeting page SHALL check `/api/services` once after loading, every 30 seconds afterwards while the tab is visible, and immediately when the tab becomes visible again; it SHALL NOT check while hidden. When `ready` is true the status SHALL read 服務就緒 with a steady accent-coloured dot (kind `ready`, not pulsing). When any service is not ready the status SHALL turn red (kind `error`) and read the names of the services that are not ready joined with 、 followed by 服務未啟動, with the title 請聯絡系統管理員. When the request fails or returns a status other than 200 or 401, the status SHALL read 無法連線到伺服器 in red; a 401 SHALL go to the sign-in page. While a meeting or live translation is running or starting, results SHALL NOT change the status. The message shown when a session ends SHALL stay until the next scheduled check.
 
 #### Scenario: Ready on load
 
@@ -111,6 +111,59 @@ code:
   - webapp/static/index.html
   - bench/translate_e2e.mjs
   - 20261108_143903.mp4
+tests:
+  - webapp/test_server.py
+-->
+
+<!-- @trace
+source: plain-wording-no-tech-names
+updated: 2026-11-17
+code:
+  - webapp/static/ask.js
+  - webapp/static/privacy-note.js
+  - bench/interpret_e2e.mjs
+  - bench/series_e2e.mjs
+  - gpt-realtime-translate_demoUI.png
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - bench/README.md
+  - README.md
+  - webapp/static/meetings.html
+  - webapp/static/admin.html
+  - lab/realtime-translate/index.html
+  - webapp/server.py
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - bench/qa_e2e.mjs
+  - webapp/static/app.js
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - webapp/static/interpret.css
+  - webapp/static/metrics.js
+  - webapp/static/refine.css
+  - webapp/static/index.html
+  - bench/translate_e2e.mjs
+  - webapp/migrations/019_interpret_usage.sql
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - chang01.png
+  - webapp/static/minutes.js
+  - webapp/static/interpret.js
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/interpret.py
+  - bench/ui_polish_e2e.mjs
+  - webapp/interpret_usage.py
+  - .env.example
+  - webapp/static/admin.css
+  - webapp/static/ask.html
+  - bench/privacy_e2e.mjs
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/qa.py
+  - lab/realtime-translate/costs.jsonl
+  - webapp/static/minutes.html
+  - webapp/static/interpret.html
+  - webapp/minutes.py
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - compose.yaml
+  - lab/realtime-translate/server.py
+  - webapp/static/metrics.html
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
 tests:
   - webapp/test_server.py
 -->

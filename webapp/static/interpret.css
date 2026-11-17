@@ -1,0 +1,84 @@
+/* 即時口譯 (realtime-interpret). The top bar, cards, fields and buttons come from admin.css; colours from tokens.css.
+   The waveform draws the speech sent in --accent and the translated speech in --accent-2 (read by interpret.js). */
+.interpret .page-head { align-items: flex-end; }
+.status-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 14px; color: var(--muted); font-size: 14px; }
+.status-row b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pill { display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--panel); color: var(--text); }
+.pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.pill.live i { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.pill.busy i { background: var(--warn); }
+.pill.bad i { background: var(--danger); }
+
+.controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 20px; margin-bottom: 16px; }
+.field { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.controls select.input { flex: none; min-width: 150px; padding-right: 10px; cursor: pointer; }
+.controls #target { min-width: 190px; }
+.speak { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border: 1.5px solid var(--field-border); border-radius: var(--radius-control);
+  background: var(--field); color: var(--text); font-size: 14px; cursor: pointer; user-select: none; }
+.speak:hover { border-color: var(--field-hover); }
+.speak input { width: 17px; height: 17px; margin: 0; accent-color: var(--accent); }
+#connect { height: 40px; min-width: 104px; }
+#connect.live { background: var(--danger); color: #fff; }
+.controls .note { flex-basis: 100%; margin: 2px 0 0; color: var(--muted); font-size: var(--text-note); line-height: 1.6; }
+.controls select:disabled, .speak:has(input:disabled) { opacity: .6; cursor: not-allowed; }
+
+.card h2 { margin: 0; font-size: var(--text-section); }
+.hint { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.hint b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.wave-card { padding: 20px; margin-bottom: 16px; }
+.wave-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.legend { display: flex; gap: 14px; flex: none; color: var(--muted); font-size: 13px; }
+.legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; vertical-align: 0; }
+.legend .in::before { background: var(--accent); }
+.legend .out::before { background: var(--accent-2); }
+.replay { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 12px; }
+.mode-button { height: 36px; padding: 0 14px; border: 1.5px solid var(--border); border-radius: var(--radius-pill); background: transparent; color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; }
+.mode-button:hover:not(:disabled) { border-color: var(--field-border); }
+.mode-button:disabled { opacity: .45; cursor: default; }
+.mode-button.mode:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.mode-button.playing { border-color: var(--accent-2); color: var(--accent-2); background: var(--accent-2-soft); }
+.wave { height: 220px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--field); overflow: hidden; }
+.wave canvas { display: block; width: 100%; height: 100%; cursor: pointer; touch-action: none; }
+.loaded { margin: 10px 0 0; color: var(--accent); font-size: 13px; }
+.stats { margin-top: 8px; }
+
+.texts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.text-card { padding: 20px; min-width: 0; }
+.text-card small { color: var(--muted); font-size: 13px; font-weight: 400; }
+.text { min-height: 120px; max-height: 300px; overflow-y: auto; margin-top: 10px; font-size: 16px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.text .tentative { color: var(--muted); }
+
+.history { padding: 20px; }
+.table-wrap { margin-top: 12px; overflow-x: auto; }
+.history table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.history th, .history td { padding: 10px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+.history th { color: var(--muted); font-size: 13px; font-weight: 600; }
+.history td { font-variant-numeric: tabular-nums; }
+.history tr.current td { background: var(--accent-soft); }
+.history .preview { display: block; max-width: 360px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.history .acts { white-space: nowrap; text-align: right; }
+.history .acts a { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: var(--radius-control); color: var(--muted); font-size: 14px; font-weight: 600; text-decoration: none; }
+.history .acts a:hover { color: var(--text); background: var(--accent-soft); }
+.empty-note { margin: 12px 0 0; padding: 16px; border: 1px dashed var(--field-border); border-radius: var(--radius-card); color: var(--muted); font-size: 14px; text-align: center; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .interpret .page-head { align-items: flex-start; }
+  .status-row { justify-content: flex-start; }
+  .controls { padding: 16px; }
+  .field, .controls select.input, .controls #target { width: 100%; min-width: 0; }
+  .speak { flex: 1; }
+  #connect { flex: 1; width: auto; }
+  .texts { grid-template-columns: 1fr; }
+  .wave { height: 180px; }
+  .wave-head { flex-direction: column; gap: 8px; }
+  /* 我的紀錄 as stacked rows: time and languages, then length and cost, then the actions. */
+  .history thead { display: none; }
+  .history table, .history tbody, .history tr { display: block; }
+  .history tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .history td { display: block; padding: 2px 4px; border: 0; }
+  .history td:nth-child(3), .history td:nth-child(4) { display: inline-block; color: var(--muted); }
+  .history td:nth-child(5) { display: none; }
+  .history .acts { text-align: left; margin-top: 4px; white-space: normal; }
+}

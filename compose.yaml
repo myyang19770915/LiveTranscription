@@ -191,6 +191,13 @@ services:
       # Azure MAI is billed by audio length (mai-usage): the price per hour and the budget administrators are warned at.
       MAI_USD_PER_HOUR: ${MAI_USD_PER_HOUR:-0.54}
       MAI_BUDGET_USD: ${MAI_BUDGET_USD:-50}
+      # 即時口譯 (realtime-interpret, administrators only): Azure GPT-Realtime-Translate. Empty endpoint or key = off.
+      # The translated speech is billed by its length (INTERPRET_USD_PER_HOUR); it is not part of the MAI budget.
+      AZURE_gpt_realtime_translate_ENDPOINT: ${AZURE_gpt_realtime_translate_ENDPOINT:-}
+      AZURE_gpt_realtime_translate_KEY: ${AZURE_gpt_realtime_translate_KEY:-}
+      AZURE_gpt_realtime_translate_DEPLOYMENT: ${AZURE_gpt_realtime_translate_DEPLOYMENT:-gpt-realtime-translate}
+      AZURE_gpt_realtime_translate_TRANSCRIBE_DEPLOYMENT: ${AZURE_gpt_realtime_translate_TRANSCRIBE_DEPLOYMENT:-}
+      INTERPRET_USD_PER_HOUR: ${INTERPRET_USD_PER_HOUR:-2.04}
       LDAP_URL: ${LDAP_URL:-}
       LDAP_BASE_DN: ${LDAP_BASE_DN:-}
       LDAP_BIND_DN: ${LDAP_BIND_DN:-}

@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import io
 import json
+import logging
 import math
 import os
 import re
@@ -29,6 +30,8 @@ from ldap3.core.exceptions import LDAPSocketOpenError
 import auth
 import db
 import diarize
+import interpret
+import interpret_usage
 import mai_asr
 import mailer
 import meeting_audio
@@ -1559,7 +1562,7 @@ class MinutesApiTests(ReviewTestCase):
     def test_model_not_configured_is_400(self):
         with patch("minutes.MINUTES_URL", ""):
             response = self.alice.post(f"/api/meetings/{self.meeting}/minutes/generate")
-        self.assertEqual((response.status_code, response.json()["detail"]), (400, "紀要模型未設定"))
+        self.assertEqual((response.status_code, response.json()["detail"]), (400, "紀要功能尚未設定"))
         self.assertEqual(self.query("SELECT count(*) FROM minutes"), [(0,)])
 
     def test_meeting_without_segments_is_422(self):
@@ -1984,7 +1987,7 @@ class SeriesTests(ReviewTestCase):
         self.detection()
         with patch("minutes.MINUTES_URL", ""):
             response = self.alice.post(f"/api/meetings/{self.today}/progress/check", json={"after": 0})
-        self.assertEqual((response.status_code, response.json()["detail"]), (400, "紀要模型未設定"))
+        self.assertEqual((response.status_code, response.json()["detail"]), (400, "紀要功能尚未設定"))
 
     def suggest(self, item, status="done", note="合約已寄出", evidence=(33,)):
         result, _ = self.check({"updates": [{"item": item, "status": status, "note": note, "evidence": list(evidence)}]})
@@ -4438,7 +4441,7 @@ class QaAskTests(QaTestCase):
             raise httpx.ConnectError("connection refused")
         with patch("minutes.call_model", broken), self.assertLogs("uvicorn.error", "WARNING"):
             response = self.alice.post("/api/ask", json={"question": "報價"})
-        self.assertEqual((response.status_code, response.json()["detail"]), (502, "模型暫時無法回答，請稍後再試"))
+        self.assertEqual((response.status_code, response.json()["detail"]), (502, "暫時無法回答，請稍後再試"))
         theirs = self.carol.post(f"/api/teams/{self.sales}/series", json={"name": "業務週會"}).json()["id"]
         self.ask("報價", series=theirs, status=404)
 
@@ -4447,7 +4450,7 @@ class QaAskTests(QaTestCase):
         self.ask("問" * 300)
         self.assertEqual(self.ask("問" * 301, status=422)["detail"], "問題最多 300 個字")
         with patch("minutes.configured", lambda: False):
-            self.assertEqual(self.ask("報價", status=503)["detail"], "問答需要紀要模型，目前未設定")
+            self.assertEqual(self.ask("報價", status=503)["detail"], "問答功能尚未設定")
         self.assertEqual(TestClient(app).post("/api/ask", json={"question": "報價"}).status_code, 401)
 
     def test_query_terms_and_fusion(self):
@@ -5421,6 +5424,465 @@ class ActionReminderTests(ReviewTestCase):
         run_sql("UPDATE users SET email = 'bob@corp.example,root' WHERE username = 'bob'")
         self.assertEqual(self.run_on(self.TODAY), {"owners": 0, "items": 0, "failed": 0, "pending": 0})
         self.assertEqual(self.sent, [])
+
+
+
+class FakeAzureTranslate:
+    """Azure's /realtime/translations as interpret.py sees it: the events are sent after the first audio arrives,
+    and the stream ends when session.close comes in."""
+
+    def __init__(self, events):
+        self.events, self.sent, self.fired = events, [], False
+        self.queue = None
+
+    async def send(self, raw):
+        if self.queue is None:
+            self.queue = asyncio.Queue()
+        message = json.loads(raw)
+        self.sent.append(message)
+        if message["type"] == "session.input_audio_buffer.append" and not self.fired:
+            self.fired = True
+            for event in self.events:
+                self.queue.put_nowait(event)
+        if message["type"] == "session.close":
+            self.queue.put_nowait(None)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.queue is None:
+            self.queue = asyncio.Queue()
+        event = await self.queue.get()
+        if event is None:
+            raise StopAsyncIteration
+        return json.dumps(event)
+
+    async def close(self):
+        pass
+
+
+class InterpretTests(AccountTestCase):
+    """realtime-interpret: the 即時口譯 page for administrators, the Azure proxy, saved sessions and their cost."""
+
+    KEY = "test-key-not-real-0123"
+
+    def setUp(self):
+        super().setUp()
+        for fake in (patch.multiple("interpret", ENDPOINT="https://example-translate.services.ai.azure.com", KEY=self.KEY,
+                                    DEPLOYMENT="gpt-realtime-translate", TRANSCRIBE=""),):
+            fake.start()
+            self.addCleanup(fake.stop)
+
+    def connect_with(self, azure):
+        calls = []
+
+        async def connect(url, **kwargs):
+            calls.append((url, kwargs))
+            return azure
+        return patch("interpret.websockets.connect", side_effect=connect), calls
+
+    def closed_code(self, websocket):
+        with self.assertRaises(WebSocketDisconnect) as closed:
+            for _ in range(50):
+                websocket.receive_json()
+        return closed.exception.code
+
+    def run_session(self, events, target="en", source="zh", audio=b"\x01\x00" * 24000, source_text=None, client=None):
+        """One session: start, one chunk of audio, the source text, stop. Returns (messages, Azure fake, connect calls)."""
+        azure = FakeAzureTranslate(events)
+        connect, calls = self.connect_with(azure)
+        messages = []
+        with connect, (client or self.signed_in("admin")).websocket_connect("/ws/interpret") as websocket:
+            websocket.send_json({"target": target, "sourceLang": source})
+            messages.append(websocket.receive_json())
+            websocket.send_bytes(audio)
+            if source_text is not None:
+                websocket.send_json({"type": "source", "text": source_text})
+            websocket.send_json({"type": "stop"})
+            try:
+                while True:
+                    messages.append(websocket.receive_json())
+            except WebSocketDisconnect:
+                pass
+        return messages, azure, calls
+
+    # --- The interpret page is for system administrators
+
+    def test_who_can_open_the_page(self):
+        self.assertEqual(self.signed_in("admin").get("/interpret").status_code, 200)
+        member = self.signed_in("alice").get("/interpret")
+        self.assertEqual(member.status_code, 403)
+        self.assertIn("沒有權限", member.text)
+        anonymous = TestClient(app).get("/interpret", follow_redirects=False)
+        self.assertEqual((anonymous.status_code, anonymous.headers["location"]), (303, "/login?next=%2Finterpret"))
+        for path in ("/api/interpret/config", "/api/interpret/sessions", "/api/admin/interpret-usage"):
+            self.assertEqual(self.signed_in("alice").get(path).status_code, 403, path)
+            self.assertEqual(TestClient(app).get(path).status_code, 401, path)
+
+    def test_the_config_names_the_languages_and_never_the_key(self):
+        response = self.signed_in("admin").get("/api/interpret/config")
+        config = response.json()
+        self.assertEqual((config["configured"], config["usdPerHour"], len(config["targets"])), (True, 2.04, 58))
+        self.assertIn("zh", config["targets"])
+        self.assertNotIn("zh-TW", config["targets"])
+        self.assertNotIn(self.KEY, response.text)
+        self.assertNotIn("example-translate", response.text)
+
+    def test_members_and_strangers_are_closed_before_azure(self):
+        connect, calls = self.connect_with(FakeAzureTranslate([]))
+        with connect:
+            with self.signed_in("alice").websocket_connect("/ws/interpret") as websocket:
+                self.assertEqual(self.closed_code(websocket), 4403)
+            with TestClient(app).websocket_connect("/ws/interpret") as websocket:
+                self.assertEqual(self.closed_code(websocket), 4401)
+        self.assertEqual(calls, [])
+
+    # --- Translation is proxied with the key kept on the server
+
+    def test_an_unsupported_language_or_no_configuration_closes_before_azure(self):
+        connect, calls = self.connect_with(FakeAzureTranslate([]))
+        client = self.signed_in("admin")
+        with connect:
+            with client.websocket_connect("/ws/interpret") as websocket:
+                websocket.send_json({"target": "zh-TW", "sourceLang": "zh"})
+                self.assertEqual(self.closed_code(websocket), 4400)
+            with patch("interpret.KEY", ""), client.websocket_connect("/ws/interpret") as websocket:
+                websocket.send_json({"target": "en", "sourceLang": "zh"})
+                self.assertEqual(self.closed_code(websocket), 4503)
+            with patch("interpret.KEY", ""):
+                self.assertFalse(client.get("/api/interpret/config").json()["configured"])
+        self.assertEqual(calls, [])
+
+    def test_no_start_message_closes_4408(self):
+        with patch("stream_limits.STREAM_HEADER_TIMEOUT", 0.2), self.signed_in("admin").websocket_connect("/ws/interpret") as websocket:
+            self.assertEqual(self.closed_code(websocket), 4408)
+
+    def test_translating_to_chinese_reaches_the_page_in_taiwan_wording(self):
+        pcm = b"\x02\x00" * 4800
+        events = [{"type": "session.output_transcript.delta", "delta": "这个软件"},
+                  {"type": "session.output_audio.delta", "delta": base64.b64encode(pcm).decode()}]
+        with self.assertLogs("uvicorn.error", level="DEBUG") as logs:
+            logging.getLogger("uvicorn.error").debug("interpret test")
+            messages, azure, calls = self.run_session(events, target="zh", source="en", source_text="This software")
+        self.assertIn({"type": "out", "delta": "這個軟體"}, messages)
+        self.assertIn({"type": "audio", "audio": base64.b64encode(pcm).decode()}, messages)
+        url, kwargs = calls[0]
+        self.assertEqual(url, "wss://example-translate.services.ai.azure.com/openai/v1/realtime/translations?model=gpt-realtime-translate")
+        self.assertEqual(kwargs["additional_headers"], {"api-key": self.KEY})
+        self.assertEqual(azure.sent[0], {"type": "session.update", "session": {"audio": {"output": {"language": "zh"}}}})
+        self.assertEqual(azure.sent[1]["type"], "session.input_audio_buffer.append")
+        self.assertEqual(base64.b64decode(azure.sent[1]["audio"]), b"\x01\x00" * 24000)
+        self.assertEqual(azure.sent[-1], {"type": "session.close"})
+        self.assertNotIn(self.KEY, json.dumps(messages, ensure_ascii=False) + "\n".join(logs.output))
+
+    def test_too_much_audio_closes_4413(self):
+        with patch("stream_limits.MAX_STREAM_HOURS", 1 / 3600):   # one second: 48,000 bytes at 24 kHz
+            azure = FakeAzureTranslate([])
+            connect, _ = self.connect_with(azure)
+            with connect, self.signed_in("admin").websocket_connect("/ws/interpret") as websocket:
+                websocket.send_json({"target": "en", "sourceLang": "zh"})
+                websocket.receive_json()
+                websocket.send_bytes(b"\x00" * 48000)
+                websocket.send_bytes(b"\x00" * 2)
+                self.assertEqual(self.closed_code(websocket), 4413)
+        appended = [m for m in azure.sent if m["type"] == "session.input_audio_buffer.append"]
+        self.assertEqual(len(appended), 1)
+
+    # --- Sessions are saved for their owner
+
+    def test_placing_translated_audio(self):
+        second = lambda s: b"\x01\x00" * int(24000 * s)
+        for arrivals, pieces in ((((2.0, 3), (4.0, 3)), ((2.0, 5.0), (5.0, 8.0))),
+                                 (((1.0, 1), (5.0, 2)), ((1.0, 2.0), (5.0, 7.0))),
+                                 (((0.5, 2),), ((0.5, 2.5),))):
+            folder = self.output / "interpret" / "placing"
+            rec = interpret.Recording(folder, {"target": "en"})
+            for at, length in arrivals:
+                rec.add_piece(at, second(length))
+            with wave.open(str(folder / rec.save(0.0) / "output.wav")) as audio:
+                track = audio.readframes(audio.getnframes())
+            shutil.rmtree(folder)
+            samples = struct.unpack(f"<{len(track) // 2}h", track)
+            spans, start = [], None
+            for i, value in enumerate(samples + (0,)):
+                if value and start is None:
+                    start = i
+                elif not value and start is not None:
+                    spans.append((start / 24000, i / 24000))
+                    start = None
+            # Two pieces back to back read as one span of sound; compare where sound is with the expected union.
+            expected, merged = [], []
+            for a, b in pieces:
+                if merged and merged[-1][1] == a:
+                    merged[-1] = (merged[-1][0], b)
+                else:
+                    merged.append((a, b))
+            self.assertEqual(spans, merged, arrivals)
+            self.assertEqual(len(track) / 48000, pieces[-1][1], arrivals)
+
+    def test_a_saved_session_and_its_cost(self):
+        pcm = b"\x05\x00" * int(24000 * 15.4)
+        events = [{"type": "session.output_audio.delta", "delta": base64.b64encode(pcm).decode()},
+                  {"type": "session.output_transcript.delta", "delta": "Hello."}]
+        messages, _, _ = self.run_session(events, audio=b"\x01\x00" * 24000 * 10, source_text="你好。")
+        closed = messages[-1]
+        self.assertEqual((closed["state"], closed["usd"], closed["outputSeconds"], closed["inputSeconds"]), ("closed", 0.0087, 15.4, 10.0))
+        folder = self.output / "interpret" / "admin" / closed["saved"]
+        self.assertTrue(re.fullmatch(r"\d{8}-\d{6}", closed["saved"]))
+        data = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+        self.assertEqual(closed["saved"], re.sub(r"\D", "", data["startedAt"])[:8] + "-" + re.sub(r"\D", "", data["startedAt"])[8:])   # the id is the start time
+        self.assertEqual((data["sourceText"], data["translation"], data["target"], data["engine"], data["usd"]), ("你好。", "Hello.", "en", "local", 0.0087))
+        with wave.open(str(folder / "input.wav")) as audio:
+            self.assertEqual((audio.getframerate(), audio.getnframes()), (24000, 240000))
+        self.assertIn("你好。", (folder / "transcript.txt").read_text(encoding="utf-8"))
+        self.assertEqual(self.query("SELECT purpose, seconds FROM interpret_usage"), [("live", 15.4)])
+        self.assertNotIn(self.KEY, "".join(p.read_text(encoding="utf-8") for p in folder.glob("*.json")))
+
+    def test_a_session_is_saved_when_the_usage_cannot_be_written(self):
+        events = [{"type": "session.output_audio.delta", "delta": base64.b64encode(b"\x01\x00" * 2400).decode()}]
+        with patch("interpret_usage.record", side_effect=OSError("database down")), self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            messages, _, _ = self.run_session(events)
+        self.assertTrue(messages[-1]["saved"])
+        self.assertIn("interpret usage not recorded (0.1 s, live): OSError", "\n".join(logs.output))
+
+    def test_two_pieces_of_translated_speech_make_six_seconds(self):
+        three = base64.b64encode(b"\x02\x00" * 24000 * 3).decode()
+        events = [{"type": "session.output_audio.delta", "delta": three}] * 2
+        closed = self.run_session(events, audio=b"\x01\x00" * 24000 * 10)[0][-1]
+        self.assertEqual((closed["inputSeconds"], closed["outputSeconds"], closed["usd"]), (10.0, 6.0, 0.0034))
+        data = json.loads((self.output / "interpret" / "admin" / closed["saved"] / "session.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["outputSeconds"], 6.0)
+
+    def test_the_translation_service_unreachable_says_so_and_saves_nothing(self):
+        async def refuse(url, **kwargs):
+            raise OSError("connection refused")
+        with patch("interpret.websockets.connect", side_effect=refuse), self.signed_in("admin").websocket_connect("/ws/interpret") as websocket:
+            websocket.send_json({"target": "en", "sourceLang": "zh"})
+            self.assertEqual(websocket.receive_json()["type"], "error")
+            self.assertEqual(self.closed_code(websocket), 1011)
+        self.assertFalse((self.output / "interpret").exists())
+
+    def test_a_failed_save_is_reported(self):
+        events = [{"type": "session.output_transcript.delta", "delta": "Hi"}]
+        with patch("interpret.Recording.save", side_effect=OSError("disk full")), self.assertLogs("uvicorn.error", level="ERROR"):
+            messages = self.run_session(events)[0]
+        self.assertIn({"type": "error", "message": "存檔失敗"}, messages)
+        self.assertIsNone(messages[-1]["saved"])
+
+    def test_too_many_streams_close_4429_before_azure(self):
+        connect, calls = self.connect_with(FakeAzureTranslate([]))
+        with connect, patch("stream_limits.MAX_STREAMS_PER_USER", 0), self.signed_in("admin").websocket_connect("/ws/interpret") as websocket:
+            self.assertEqual(self.closed_code(websocket), 4429)
+        self.assertEqual(calls, [])
+
+    def test_the_service_ending_the_session_is_reported_and_what_there_is_saved(self):
+        events = [{"type": "session.output_transcript.delta", "delta": "Hi"}, None]   # None: the service closes
+        connect, _ = self.connect_with(FakeAzureTranslate(events))
+        messages = []
+        with connect, self.assertLogs("uvicorn.error", level="WARNING"), self.signed_in("admin").websocket_connect("/ws/interpret") as websocket:
+            websocket.send_json({"target": "en", "sourceLang": "zh"})
+            websocket.receive_json()
+            websocket.send_bytes(b"\x01\x00" * 2400)
+            with self.assertRaises(WebSocketDisconnect) as ended:
+                while True:
+                    messages.append(websocket.receive_json())
+        self.assertEqual(ended.exception.code, 1011)
+        self.assertIn("翻譯服務中斷了連線", next(m["message"] for m in messages if m["type"] == "error"))
+        self.assertTrue(messages[-1]["saved"])
+
+    def test_a_session_that_ends_stops_the_interpreting(self):
+        real, signed_out = auth.session_user, []
+
+        async def session_user(token):   # signed in when the page opens, signed out once interpreting has started
+            return None if signed_out else await real(token)
+        connect, _ = self.connect_with(FakeAzureTranslate([]))
+        with connect, patch("stream_limits.STREAM_RECHECK_MINUTES", 0), patch("auth.session_user", side_effect=session_user), \
+                self.signed_in("admin").websocket_connect("/ws/interpret") as websocket:
+            websocket.send_json({"target": "en", "sourceLang": "zh"})
+            websocket.receive_json()
+            signed_out.append(True)
+            websocket.send_bytes(b"\x01\x00" * 2400)
+            self.assertEqual(self.closed_code(websocket), 4401)
+
+    def test_a_session_without_audio_is_not_saved(self):
+        azure = FakeAzureTranslate([])
+        connect, _ = self.connect_with(azure)
+        with connect, self.signed_in("admin").websocket_connect("/ws/interpret") as websocket:
+            websocket.send_json({"target": "en", "sourceLang": "zh"})
+            websocket.receive_json()
+            websocket.send_json({"type": "stop"})
+            closed = websocket.receive_json()
+        self.assertEqual((closed["state"], closed["saved"]), ("closed", None))
+        self.assertFalse((self.output / "interpret").exists())
+
+    def test_another_administrators_session_is_not_found(self):
+        events = [{"type": "session.output_transcript.delta", "delta": "Hi"}]
+        with patch("auth.ADMIN_USERS", frozenset({"admin", "bob"})):
+            sid = self.run_session(events)[0][-1]["saved"]
+            owner, other = self.signed_in("admin"), self.signed_in("bob")
+            self.assertEqual([s["id"] for s in owner.get("/api/interpret/sessions").json()], [sid])
+            self.assertEqual(other.get("/api/interpret/sessions").json(), [])
+            for path in (f"/api/interpret/sessions/{sid}", f"/api/interpret/sessions/{sid}/input.wav"):
+                self.assertEqual(other.get(path).status_code, 404, path)
+                self.assertEqual(owner.get(path).status_code, 200, path)
+            self.assertEqual(other.delete(f"/api/interpret/sessions/{sid}").status_code, 404)
+            for bad in (f"/api/interpret/sessions/{sid}/session.json", "/api/interpret/sessions/..%2F..%2Fteams",
+                        "/api/interpret/sessions/20261117-1746/input.wav", f"/api/interpret/sessions/{sid}/..%2Fsession.json"):
+                self.assertEqual(owner.get(bad).status_code, 404, bad)
+            self.assertEqual(owner.delete(f"/api/interpret/sessions/{sid}").status_code, 200)
+            self.assertEqual(owner.get("/api/interpret/sessions").json(), [])
+            self.assertEqual(owner.get(f"/api/interpret/sessions/{sid}").status_code, 404)
+
+    def test_audio_is_on_disk_during_the_session(self):
+        azure = FakeAzureTranslate([])
+        connect, _ = self.connect_with(azure)
+        client = self.signed_in("admin")
+        with connect, client.websocket_connect("/ws/interpret") as websocket:
+            websocket.send_json({"target": "en", "sourceLang": "zh"})
+            websocket.receive_json()
+            for _ in range(3):
+                websocket.send_bytes(b"\x01\x00" * 2400)
+            for _ in range(50):   # the server writes as it receives; wait until the third chunk is in
+                working = list((self.output / "interpret" / "admin").glob(".recording-*"))
+                if working and (working[0] / "input.wav").stat().st_size == 44 + 14400:
+                    break
+                time.sleep(0.02)
+            self.assertEqual(len(working), 1)
+            self.assertEqual((working[0] / "input.wav").stat().st_size, 44 + 14400)
+            self.assertEqual(client.get("/api/interpret/sessions").json(), [])
+            self.assertEqual(client.get(f"/api/interpret/sessions/{working[0].name}").status_code, 404)
+            websocket.send_json({"type": "stop"})
+            closed = websocket.receive_json()
+        self.assertEqual([p.name for p in (self.output / "interpret" / "admin").iterdir()], [closed["saved"]])
+
+    def test_the_waveform_of_a_session(self):
+        full = b"\xff\x7f"
+        events = [{"type": "session.output_audio.delta", "delta": base64.b64encode(full * 4800 + b"\x00\x00" * 2400).decode()}]
+        with patch("interpret.Recording.clock", return_value=1.0):
+            sid = self.run_session(events, audio=full * 7200)[0][-1]["saved"]
+        owner = self.signed_in("admin")
+        expected = {"step": 0.1, "input": [1.0, 1.0, 1.0], "output": [[1.0, 1.0], [1.1, 1.0]]}
+        self.assertEqual(owner.get(f"/api/interpret/sessions/{sid}/bars").json(), expected)
+        (self.output / "interpret" / "admin" / sid / "bars.json").unlink()   # a session saved before bars.json
+        self.assertEqual(owner.get(f"/api/interpret/sessions/{sid}/bars").json(), expected)
+        with patch("auth.ADMIN_USERS", frozenset({"admin", "bob"})):
+            self.assertEqual(self.signed_in("bob").get(f"/api/interpret/sessions/{sid}/bars").status_code, 404)
+        self.assertEqual(owner.get("/api/interpret/sessions/2026-11-17/bars").status_code, 404)
+        self.assertEqual(self.signed_in("alice").get(f"/api/interpret/sessions/{sid}/bars").status_code, 403)
+        part = owner.get(f"/api/interpret/sessions/{sid}/input.wav", headers={"Range": "bytes=44-4843"})   # replay seeks
+        self.assertEqual((part.status_code, len(part.content)), (206, 4800))
+
+    def test_applying_source_messages(self):
+        for held, message, after in (("大家好", {"keep": 3, "text": "，今天"}, "大家好，今天"),
+                                     ("大家好，今天", {"keep": 4, "text": "明天"}, "大家好，明天"),
+                                     ("大家好", {"text": "你好"}, "你好"),
+                                     ("大家好", {"keep": 9, "text": "。"}, "大家好"),
+                                     ("大家好", {"keep": -1, "text": "。"}, "大家好"),
+                                     ("大家好", {"keep": True, "text": "。"}, "大家好"),
+                                     ("大家好", {"keep": "3", "text": "。"}, "大家好")):
+            azure = FakeAzureTranslate([])
+            connect, _ = self.connect_with(azure)
+            with connect, self.signed_in("admin").websocket_connect("/ws/interpret") as websocket:
+                websocket.send_json({"target": "en", "sourceLang": "zh"})
+                websocket.receive_json()
+                websocket.send_bytes(b"\x01\x00" * 2400)
+                websocket.send_json({"type": "source", "text": held})
+                websocket.send_json({"type": "source"} | message)
+                websocket.send_json({"type": "stop"})
+                sid = websocket.receive_json()["saved"]
+            saved = self.signed_in("admin").get(f"/api/interpret/sessions/{sid}").json()["sourceText"]
+            self.assertEqual(saved, after, message)
+            shutil.rmtree(self.output / "interpret" / "admin" / sid)
+
+    def test_the_source_text_grows_by_its_changes(self):
+        azure = FakeAzureTranslate([])
+        connect, _ = self.connect_with(azure)
+        with connect, self.signed_in("admin").websocket_connect("/ws/interpret") as websocket:
+            websocket.send_json({"target": "en", "sourceLang": "zh"})
+            websocket.receive_json()
+            websocket.send_bytes(b"\x01\x00" * 2400)
+            for keep, text in ((0, "大家好"), (3, "，今天"), (6, "開會")):
+                websocket.send_json({"type": "source", "keep": keep, "text": text})
+            websocket.send_json({"type": "stop"})
+            sid = websocket.receive_json()["saved"]
+        self.assertEqual(self.signed_in("admin").get(f"/api/interpret/sessions/{sid}").json()["sourceText"], "大家好，今天開會")
+
+    def test_a_name_unfit_for_a_path_gets_its_own_folder(self):
+        self.assertEqual(interpret.user_dir("t05313").name, "t05313")
+        for name in ("..", "a/b", "A", "domain\\user"):
+            folder = interpret.user_dir(name)
+            self.assertTrue(folder.name.startswith("u-"), name)
+            self.assertEqual(folder.parent, self.output / "interpret")
+
+    # --- Translation cost is recorded for administrators
+
+    def test_usage_figures_follow_the_example_table(self):
+        for seconds, price, usd in ((0, 2.04, 0), (1800, 2.04, 1.02), (129, 2.04, 0.07), (3600, 3, 3)):
+            self.query("DELETE FROM interpret_usage RETURNING 1")
+            with patch("interpret_usage.USD_PER_HOUR", price):
+                if seconds:
+                    asyncio.run(interpret_usage.record("lab", seconds))
+                total = asyncio.run(interpret_usage.summary())
+            self.assertEqual((total["usd"], total["usdPerHour"]), (usd, price), seconds)
+
+    def test_usage_by_hand_and_for_administrators(self):
+        self.assertEqual(interpret_usage.main(["add", "129", "lab"]), 0)
+        for argv in (["add", "-5", "lab"], ["add", "inf", "lab"], ["add", "nan", "lab"], ["add", "60", "Lab Run"]):
+            self.assertEqual(interpret_usage.main(argv), 2, argv)
+        asyncio.run(interpret_usage.record("live", 1800))
+        self.assertEqual(self.signed_in("alice").get("/api/admin/interpret-usage").status_code, 403)
+        usage = self.signed_in("admin").get("/api/admin/interpret-usage").json()
+        self.assertEqual((usage["seconds"], usage["usd"], usage["usdPerHour"], usage["byPurpose"]), (1929, 1.09, 2.04, {"lab": 129, "live": 1800}))
+        self.assertEqual(asyncio.run(mai_usage.summary())["seconds"], 0)   # not part of the MAI budget
+
+
+class PlainWordingTests(unittest.TestCase):
+    """Visible text names no supplier, model or technology (plain-wording spec)."""
+
+    STATIC = Path(__file__).resolve().parent / "static"
+    FORBIDDEN = re.compile(r"Azure|(?<![A-Za-z])MAI(?![A-Za-z])|Confucius|Qwen|DeepSeek|Gemma|GPT|OpenAI|LDAP|Docker"
+                           r"|WebSocket|vLLM|MINUTES_|TRANSLATE_|AZURE_|\.env|模型")
+    CHINESE = re.compile(r"[㐀-鿿]")
+
+    @staticmethod
+    def visible_strings(source: str) -> list[str]:
+        """Text between tags, title/placeholder/aria-label/alt values and string literals, comments removed."""
+        source = re.sub(r"<!--.*?-->|/\*.*?\*/", "", source, flags=re.S)
+        source = re.sub(r"(?m)(^|[\s;{}(),])//[^\n]*", r"\1", source)
+        found = re.findall(r">([^<>]+)<", source)
+        found += re.findall(r"""\b(?:title|placeholder|aria-label|alt)=(?:"([^"]*)"|'([^']*)')""", source)
+        found += re.findall(r"""'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`([^`]*)`""", source)
+        return [s for item in found for s in (item if isinstance(item, tuple) else (item,)) if s]
+
+    @classmethod
+    def offending_pieces(cls, text: str) -> list[tuple[str, list[str]]]:
+        """Pieces that hold Chinese and a forbidden word; code around a template's ${…} is not text."""
+        pieces = re.split(r"\$\{|[\n;`'\"{}]", text)
+        return [(p.strip(), words) for p in pieces if cls.CHINESE.search(p) and (words := cls.FORBIDDEN.findall(p))]
+
+    @classmethod
+    def offending(cls, text: str) -> list[str]:
+        return [w for _, words in cls.offending_pieces(text) for w in words]
+
+    def test_the_example_strings(self):
+        self.assertEqual(self.offending("雲端 MAI（音訊會傳送到 Azure）"), ["MAI", "Azure"])
+        self.assertEqual(self.offending("紀要模型未設定，無法產生（請在 .env 設定 MINUTES_*）"), ["模型", ".env", "MINUTES_"])
+        self.assertEqual(self.offending("雲端辨識（音訊會傳送到外部服務）"), [])
+        self.assertEqual(self.offending("engine === 'mai'"), [])
+
+    def test_pages_and_server_messages_name_no_technology(self):
+        problems = []
+        for path in sorted([*self.STATIC.glob("*.html"), *self.STATIC.glob("*.js")]):
+            for text in self.visible_strings(path.read_text(encoding="utf-8")):
+                problems += [f"{path.name}: {'、'.join(dict.fromkeys(words))} in {piece[:60]!r}"
+                             for piece, words in self.offending_pieces(text)]
+        problems = list(dict.fromkeys(problems))
+        messages = {"minutes.NOT_CONFIGURED": minutes.NOT_CONFIGURED, "qa.NOT_CONFIGURED": qa.NOT_CONFIGURED,
+                    "qa.ANSWER_FAILED": qa.ANSWER_FAILED, "interpret.NOT_CONFIGURED": interpret.NOT_CONFIGURED,
+                    "interpret.UNREACHABLE": interpret.UNREACHABLE, "auth.LDAP_UNREACHABLE": auth.LDAP_UNREACHABLE}
+        problems += [f"{name}: {'、'.join(words)}" for name, text in messages.items() if (words := self.offending(text))]
+        self.assertEqual(problems, [], "\n" + "\n".join(problems))
 
 
 if __name__ == "__main__":

@@ -76,7 +76,7 @@ function card(item){
     el('label',{},'負責人',ownerSelect(item)),
     el('label',{},'到期日',dueInput(item)),
     item.dueText?el('span',{className:'muted small',textContent:`原話：「${item.dueText}」`}):null,
-    !item.owner&&item.ownerHint?el('span',{className:'hint-name',textContent:`模型提到「${item.ownerHint}」，不是團隊成員`}):null):null;
+    !item.owner&&item.ownerHint?el('span',{className:'hint-name',textContent:`紀要提到「${item.ownerHint}」，不是團隊成員`}):null):null;
   const actions=el('div',{className:'item-actions'},
     item.state!=='confirmed'?el('button',{type:'button',className:'secondary-button compact',textContent:'確認',onclick:()=>decide('confirm')}):null,
     item.state!=='rejected'?el('button',{type:'button',className:'text-button danger',textContent:'駁回',onclick:()=>decide('reject')}):null,
@@ -102,7 +102,7 @@ function renderStatus(){
   $('generate').textContent=running?'產生中…':data.items.some(i=>i.origin==='ai')||data.summary?'重新產生':'產生紀要';
   $('generate').disabled=running||!data.modelAvailable;
   const done=data.finishedAt?new Date(data.finishedAt).toLocaleString('zh-TW',{hour12:false}):'';
-  $('status').textContent=!data.modelAvailable?'紀要模型未設定，無法產生（請在 .env 設定 MINUTES_* 或 TRANSLATE_REFINE_*）':
+  $('status').textContent=!data.modelAvailable?'紀要功能尚未設定，請聯絡系統管理員':
     running?'正在產生紀要，通常需要數秒到一分鐘…':data.status==='failed'?data.message:
     data.status==='done'?`${done} 產生完成${data.dropped?`；${data.dropped} 條因沒有證據段落而略過`:''}。重新產生只會替換「待確認」的 AI 條目。`:'還沒有產生紀要。';
   $('status').className=`status-line ${data.status}`;
@@ -136,7 +136,7 @@ async function load(){
   data=await call('GET',`/api/meetings/${meetingId}/minutes`);
   // While generating, polls only refresh the status: redrawing the items would wipe an open editor.
   if(polling&&data.status==='running'){renderStatus();poll=setTimeout(()=>load().catch(error=>notice(error.message)),2000);return}
-  $('modelNote').textContent=data.modelAvailable?` 產生時整場逐字稿會傳送到外部模型服務${data.model?`（${data.model}）`:''}。`:'';
+  $('modelNote').textContent=data.modelAvailable?' 產生時整場逐字稿會傳送到外部服務。':'';
   render();
   // From the board (#item-N): bring that item into view once.
   const linked=!linkedShown&&linkedId&&$(`item-${linkedId}`);
@@ -213,7 +213,7 @@ function renderMail(){
   $('sendMail').title=mail.configured?'':'尚未設定寄信伺服器（SMTP_HOST）';
   const to=mail.target==='team'?`寄到團隊信箱 ${mail.address}`:`寄給 ${mail.recipients} 位成員的個人信箱`;
   const lines=[];
-  if(!mail.configured)lines.push(['尚未設定寄信伺服器（請在 .env 設定 SMTP_HOST），目前只能定稿。','warn']);
+  if(!mail.configured)lines.push(['寄信功能尚未設定，目前只能定稿；需要寄信請聯絡系統管理員。','warn']);
   else lines.push([`${to}${mail.auto?'；定稿後自動寄送':''}。${mail.target==='members'&&mail.missing.length?`沒有 Email：${mail.missing.join('、')}。`:''}`,'']);
   const change=mailChangeLine(mail.lastChange);
   if(change)lines.push(change);

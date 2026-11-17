@@ -125,7 +125,7 @@ function renderTranslation(){
 function updateCounts(){ $('transcriptCount').textContent=`${transcript.length.toLocaleString()} 字`; $('translationCount').textContent=`${visibleTranslation().length.toLocaleString()} 字`; }
 function toast(message,duration=2200){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),duration)}
 const screenAwake=ScreenAwake.create(navigator,document);   // screen-awake: held while a session runs
-function setControls(active){active?screenAwake.hold():screenAwake.release();for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active;const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('asrEngine').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active||qualityChosen();$('quality').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
+function setControls(active){active?screenAwake.hold():screenAwake.release();for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active;const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active||qualityChosen();$('quality').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
 function updateTranslationDirection(){
   const pair=$('language').value==='zh_ja';
   if(pair){if($('targetLanguage').value!=='zh_ja')fixedTarget=$('targetLanguage').value;$('targetLanguage').value='zh_ja'}
@@ -140,6 +140,7 @@ function updateTranslationDirection(){
   $('targetLabel').closest('.card-title').querySelector('.language-dot').textContent=languageTags[direction.target]||direction.target.toUpperCase();
   $('translateState').textContent='就緒';$('translateState').className='state-chip';
   if(transcript)scheduleTranslation(true);
+  showEngine();showPrivacy();   // the spoken language decides the engine, and so where the audio goes
 }
 function selectedSource(){return $('audioSource').value}
 function updateSourceUI(){const mode=selectedSource(),system=mode!=='microphone';$('microphone').closest('.mic-field').classList.toggle('is-hidden',mode==='system');$('sourceHint').textContent=system?'點「測試音源」或「開始會議」後，在 Chrome 分享視窗勾選「分享分頁音訊」或「分享系統音訊」。只選畫面、不分享音訊，無法轉錄。'+(mode==='mixed'?'混合模式也會收取麥克風；建議使用耳機。':''):'使用耳機開會可避免喇叭聲被麥克風重複收進來。';$('testMic').querySelector('small').textContent=system?'開啟分享選擇器':'確認有聲音';if(!testStream)mediaUnavailable()?setMicStatus(mediaUnavailable(),'error'):setMicStatus(system?'尚未連接分享音訊':'尚未測試音源')}
@@ -242,7 +243,7 @@ async function startMeeting() {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     socket = new WebSocket(`${protocol}//${location.host}/ws/transcribe`);
     socket.binaryType = 'arraybuffer';
-    await new Promise((resolve, reject) => { socket.onopen=resolve; socket.onerror=()=>reject(new Error('WebSocket 連線失敗')); });
+    await new Promise((resolve, reject) => { socket.onopen=resolve; socket.onerror=()=>reject(new Error('連線失敗')); });
     qualityOn=qualityChosen();
     socket.send(JSON.stringify({requestId:crypto.randomUUID(),meeting_id:meetingId,mode:translate?'translate':'meeting',language:$('language').value,use_vad:direction.source==='zh_ja',system_prompt:$('context').value,engine:asrEngine(),refine:cloudRefineOn(),quality:qualityOn,target:direction.target}));
     socket.onmessage = onMessage;
@@ -465,8 +466,13 @@ function finalizedRecords(){
 }
 // 雲端精修: refinements go to the configured cloud model. Off by default; the choice stays in this browser.
 function cloudRefineOn(){return !$('cloudRefineRow').hidden&&$('cloudRefine').checked&&!qualityChosen()}   // 精準模式 includes it
-// 辨識引擎: local (shown as 本機, never the model name), Azure MAI, or MAI for every language except Chinese. Shown only when MAI is configured.
-function asrEngine(){return $('asrEngineRow').hidden?'local':$('asrEngine').value}
+// The spoken language decides the engine (meeting-setup-layout): Chinese and the modes that may contain it stay on the
+// local model, every other language uses MAI when the server offers it. Keep in step with server.asr_engine()'s 混合 rule.
+const LOCAL_ENGINE_LANGUAGES=['zh','yue','auto','zh_ja'];
+function engineForLanguage(language){return LOCAL_ENGINE_LANGUAGES.includes(language)?'local':'mai'}
+function asrEngine(){return $('asrEngineRow').hidden?'local':engineForLanguage($('language').value)}   // the row shows only with MAI
+function showEngine(){$('asrEngineValue').textContent=asrEngine()==='mai'?'雲端辨識（音訊會傳送到外部服務）':'本機（語橋主機）'}
+function showRefineFit(){$('cloudRefineFit').textContent=qualityChosen()?'精準模式已包含，不需另外開啟':'傳送文字到外部服務 · 適合辨識已正確、想要譯文更通順'}
 // 團隊: every meeting belongs to one of the user's teams; the last choice stays in this browser.
 const NO_TEAM='尚未加入任何團隊，請聯絡管理員';
 window.accountReady.then(({teams})=>{
@@ -496,7 +502,7 @@ async function checkServices(){
   if(!state)return setStatus('無法連線到伺服器','error');
   const down=state.services.filter(service=>!service.ok).map(service=>service.name);
   if(!down.length)return setStatus('服務就緒','ready');
-  setStatus(`${down.join('、')}服務未啟動`,'error');$('status').title='請確認 Docker 服務已啟動';
+  setStatus(`${down.join('、')}服務未啟動`,'error');$('status').title='請聯絡系統管理員';
 }
 document.addEventListener('visibilitychange',()=>document.hidden?clearTimeout(serviceTimer):checkServices());
 checkServices();
@@ -507,8 +513,8 @@ fetch('/api/config').then(r=>r.ok?r.json():{cloudTranslate:true}).catch(()=>({cl
   $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;$('qualityRow').hidden=!qualityReady;$('setupAdvanced').hidden=!(cloudRefine||mai||qualityReady);
   try{$('quality').checked=localStorage.getItem('quality')==='1'}catch{}
   $('cloudRefine').disabled=qualityChosen();
-  try{$('cloudRefine').checked=localStorage.getItem('cloudRefine')==='1';const engine=localStorage.getItem('asrEngine');if([...$('asrEngine').options].some(o=>o.value===engine))$('asrEngine').value=engine}catch{}
-  showPrivacy();showAdvanced();
+  try{$('cloudRefine').checked=localStorage.getItem('cloudRefine')==='1'}catch{}
+  showEngine();showRefineFit();showPrivacy();showAdvanced();
 }).catch(()=>{});
 // Where audio and text go for the current choices (privacy-notice); the header and the footer say the same.
 let cloudTranslation=null;   // the translation model is an external service (cloud-translation); null until /api/config answered
@@ -519,8 +525,7 @@ function showPrivacy(){
   $('secureLabel').textContent=note.label;
 }
 $('cloudRefine').onchange=()=>{try{localStorage.setItem('cloudRefine',$('cloudRefine').checked?'1':'0')}catch{}showPrivacy()};
-$('quality').onchange=()=>{try{localStorage.setItem('quality',$('quality').checked?'1':'0')}catch{}$('cloudRefine').disabled=qualityChosen();showPrivacy()};
-$('asrEngine').onchange=()=>{try{localStorage.setItem('asrEngine',$('asrEngine').value)}catch{}showPrivacy()};
+$('quality').onchange=()=>{try{localStorage.setItem('quality',$('quality').checked?'1':'0')}catch{}$('cloudRefine').disabled=qualityChosen();showRefineFit();showPrivacy()};
 let correctionTimer=null;
 async function correctNext(){
   if(correcting||!correctionQueue.length)return;
@@ -691,10 +696,8 @@ function syncMobileLayout(){
 // 進階 folds away on wide windows and remembers the choice (meeting-setup-layout); folded, its button names the advanced
 // options in use. Folding only hides the fields: their values and what a meeting sends stay the same. Phones keep the
 // settings dialog as it was, where the heading is not a fold button.
-const ENGINE_SUMMARY={mai:'雲端 MAI',hybrid:'混合辨識'};
-function advancedSummary(){
+function advancedSummary(){   // the engine is not listed: the spoken language decides it, the privacy notice names it
   const parts=[];
-  if(ENGINE_SUMMARY[asrEngine()])parts.push(ENGINE_SUMMARY[asrEngine()]);   // the same helpers decide what a meeting sends
   if(cloudRefineOn())parts.push('雲端精修');
   if(qualityChosen())parts.push('精準模式');
   return parts.join('、')||'預設';
@@ -715,7 +718,7 @@ $('setupAdvanced').onclick=()=>{
   try{localStorage.setItem('setupAdvancedOpen',advancedOpen?'1':'0')}catch{}
   showAdvanced();
 };
-['asrEngine','cloudRefine','quality'].forEach(id=>$(id).addEventListener('change',showAdvanced));
+['cloudRefine','quality'].forEach(id=>$(id).addEventListener('change',showAdvanced));
 Object.keys(mobilePanels).forEach(view=>{
   $(`${view}Tab`).onclick=()=>setMobileView(view);
   $(`${view}Tab`).onkeydown=event=>{

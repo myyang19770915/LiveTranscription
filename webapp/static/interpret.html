@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>即時口譯 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261115d"><link rel="stylesheet" href="/assets/admin.css?v=20261117a"><link rel="stylesheet" href="/assets/interpret.css?v=20261117b"></head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>即時口譯</small></span></a>
+  <div class="topbar-actions">
+    <a class="ghost-button" href="/">即時會議</a>
+    <div id="account" class="account"></div>
+    <button id="themeToggle" class="icon-button" type="button" aria-label="切換深淺主題" title="切換深淺主題"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="sun" d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/><path class="moon" d="M20.4 15.2A8.4 8.4 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/></svg></button>
+  </div>
+</header>
+
+<main class="page interpret">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">LIVE INTERPRETING · 管理員測試</p>
+      <h1>即時口譯</h1>
+      <p class="lead">說話後直接聽到譯音、看到譯文（雲端翻譯服務）。原文由語橋辨識：中文、中英混合、粵語用本機辨識，其他語言用雲端辨識。<strong>每次中斷都會存成你自己的紀錄</strong>，別人看不到。</p>
+    </div>
+    <div class="status-row" aria-live="polite">
+      <span class="pill" id="statePill"><i></i><span id="state">未連線</span></span>
+      <span class="stat">已送 <b id="sent">0:00.0</b></span>
+      <span class="stat">翻譯約 <b id="cost">$0.000</b></span>
+    </div>
+  </div>
+
+  <section class="card controls" aria-label="口譯設定">
+    <label class="field">音源
+      <select id="source" class="input compact"><option value="mic">麥克風</option><option value="tab">瀏覽器分頁音訊</option></select></label>
+    <label class="field">說話語言
+      <select id="sourceLang" class="input compact">
+        <optgroup label="本機辨識">
+          <option value="zh" selected>中文</option><option value="auto">中英混合</option><option value="yue">粵語</option></optgroup>
+        <optgroup label="雲端辨識">
+          <option value="en">English 英文</option><option value="ja">日本語 日文</option><option value="ko">한국어 韓文</option>
+          <option value="vi">Tiếng Việt 越南文</option><option value="th">ไทย 泰文</option><option value="id">Bahasa Indonesia 印尼文</option>
+          <option value="ms">Bahasa Melayu 馬來文</option><option value="fr">Français 法文</option><option value="de">Deutsch 德文</option>
+          <option value="es">Español 西班牙文</option><option value="pt">Português 葡萄牙文</option><option value="it">Italiano 義大利文</option>
+          <option value="ru">Русский 俄文</option><option value="ar">العربية 阿拉伯文</option><option value="hi">हिन्दी 印地文</option>
+          <option value="tr">Türkçe 土耳其文</option><option value="nl">Nederlands 荷蘭文</option><option value="pl">Polski 波蘭文</option></optgroup>
+      </select></label>
+    <label class="field">輸出語言
+      <select id="target" class="input compact"></select></label>
+    <label class="speak" title="關掉時只看譯文、不出聲；譯音照樣存檔，之後可以重播。用喇叭時建議關掉或戴耳機，避免譯音被麥克風收回去。連線中也可以切換。">
+      <input id="playOut" type="checkbox" checked> 同步播放譯音</label>
+    <button id="connect" class="primary-button" type="button">連線</button>
+    <p class="note">翻譯每小時約 <span id="price">2.04</span> 美元（依譯音長度估算，不是帳單）；原文用雲端辨識時另計雲端辨識費用。每次連線只能翻成一種語言；說的話已經是輸出語言時，可能不會翻譯。</p>
+  </section>
+
+  <p id="error" class="alert" role="alert" hidden></p>
+
+  <section class="card wave-card" aria-labelledby="waveTitle">
+    <div class="wave-head">
+      <div>
+        <h2 id="waveTitle">即時翻譯波形</h2>
+        <p class="hint">上方是送出的原音，下方是譯音。結束後點或拖動波形，放開處開始播放，播放內容依標示中的按鈕。</p>
+      </div>
+      <div class="legend"><span class="in">原音</span><span class="out">譯音</span></div>
+    </div>
+    <div class="replay" role="group" aria-label="重播">
+      <button id="replayBoth" class="mode-button" type="button" disabled>播放整段（原音＋譯音）</button>
+      <button id="replayOut" class="mode-button" type="button" disabled>只聽譯音</button>
+      <button id="replayIn" class="mode-button" type="button" disabled>只聽原音</button>
+    </div>
+    <div class="wave"><canvas id="wave" aria-label="原音與譯音的波形"></canvas></div>
+    <p id="loaded" class="loaded" hidden></p>
+    <p class="hint stats">首段譯音 <b id="firstAudio">—</b>　首段譯文 <b id="firstText">—</b>　譯音累計 <b id="outLen">0.0 秒</b></p>
+  </section>
+
+  <section class="texts">
+    <div class="card text-card"><h2>原文 <small id="srcEngine"></small></h2><div id="srcText" class="text"><span class="hint">連線後顯示。</span></div></div>
+    <div class="card text-card"><h2>譯文</h2><div id="outText" class="text"></div></div>
+  </section>
+
+  <section class="card history" aria-labelledby="historyTitle">
+    <h2 id="historyTitle">我的紀錄</h2>
+    <p class="hint">每次中斷後自動存檔（原音、譯音、原文、譯文），只有你看得到。按「載入」可重看波形與文字、重複播放。</p>
+    <div class="table-wrap"><table><thead><tr><th>時間</th><th>語言</th><th>長度</th><th>花費</th><th>內容</th><th><span class="sr-only">動作</span></th></tr></thead><tbody id="historyRows"></tbody></table></div>
+    <p id="historyEmpty" class="empty-note">還沒有紀錄。</p>
+  </section>
+</main>
+
+<script src="/assets/return-path.js?v=20261113c"></script>
+<script src="/assets/account.js?v=20261115a"></script>
+<script src="/assets/interpret.js?v=20261117q"></script>
+</body>
+</html>

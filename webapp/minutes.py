@@ -38,7 +38,7 @@ KINDS = ("decision", "action", "question", "risk")
 LABELS = {"decision": "決議", "action": "待辦", "question": "待確認問題", "risk": "風險"}
 WEEKDAYS = "一二三四五六日"
 
-NOT_CONFIGURED = "紀要模型未設定"
+NOT_CONFIGURED = "紀要功能尚未設定"
 NO_SEGMENTS = "這場會議沒有段落，無法產生紀要"
 RUNNING = "紀要正在產生中"
 INTERRUPTED = "產生中斷，請重新產生"

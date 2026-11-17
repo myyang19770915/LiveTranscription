@@ -33,7 +33,7 @@ A team member SHALL be able to start minutes generation for a meeting that has s
 #### Scenario: Minutes model not configured
 
 - **WHEN** neither `MINUTES_URL` nor `TRANSLATE_REFINE_URL` is set and a member starts generation
-- **THEN** the system responds 400 with 紀要模型未設定 and does not start
+- **THEN** the system responds 400 with 紀要功能尚未設定 and does not start
 
 
 <!-- @trace
@@ -74,6 +74,60 @@ code:
   - webapp/static/speakers.css
 tests:
   - docker/diarize/test_server.py
+  - webapp/test_server.py
+-->
+
+
+<!-- @trace
+source: plain-wording-no-tech-names
+updated: 2026-11-17
+code:
+  - webapp/static/ask.js
+  - webapp/static/privacy-note.js
+  - bench/interpret_e2e.mjs
+  - bench/series_e2e.mjs
+  - gpt-realtime-translate_demoUI.png
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - bench/README.md
+  - README.md
+  - webapp/static/meetings.html
+  - webapp/static/admin.html
+  - lab/realtime-translate/index.html
+  - webapp/server.py
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - bench/qa_e2e.mjs
+  - webapp/static/app.js
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - webapp/static/interpret.css
+  - webapp/static/metrics.js
+  - webapp/static/refine.css
+  - webapp/static/index.html
+  - bench/translate_e2e.mjs
+  - webapp/migrations/019_interpret_usage.sql
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - chang01.png
+  - webapp/static/minutes.js
+  - webapp/static/interpret.js
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/interpret.py
+  - bench/ui_polish_e2e.mjs
+  - webapp/interpret_usage.py
+  - .env.example
+  - webapp/static/admin.css
+  - webapp/static/ask.html
+  - bench/privacy_e2e.mjs
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/qa.py
+  - lab/realtime-translate/costs.jsonl
+  - webapp/static/minutes.html
+  - webapp/static/interpret.html
+  - webapp/minutes.py
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - compose.yaml
+  - lab/realtime-translate/server.py
+  - webapp/static/metrics.html
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+tests:
   - webapp/test_server.py
 -->
 

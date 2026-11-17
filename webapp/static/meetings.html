@@ -50,7 +50,7 @@
 const $=id=>document.getElementById(id);
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
 const LANG={zh:'中文',en:'英文',ja:'日文',zh_ja:'中日雙向',auto:'中英自動',ko:'韓文',yue:'粵語',id:'印尼文'};
-const ENGINE={local:'本機',hybrid:'混合',mai:'雲端 MAI'};
+const ENGINE={local:'本機',hybrid:'混合',mai:'雲端'};
 const FILTERS=['q','team','creator','from','to'];
 const pad=n=>String(n).padStart(2,'0');
 function clock(ms){const s=Math.round(ms/1000);return s>=3600?`${Math.floor(s/3600)}:${pad(Math.floor(s/60)%60)}:${pad(s%60)}`:`${pad(Math.floor(s/60))}:${pad(s%60)}`}

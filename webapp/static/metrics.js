@@ -5,7 +5,7 @@ function el(tag,props={},...children){const node=Object.assign(document.createEl
 const SVG='http://www.w3.org/2000/svg';
 function svg(tag,attrs={},...children){const node=document.createElementNS(SVG,tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);node.append(...children.filter(Boolean));return node}
 let params=new URLSearchParams(location.search),latest=0,teamsLoaded=false;
-const ENGINES={local:'本機',mai:'雲端 MAI',hybrid:'混合'};
+const ENGINES={local:'本機',mai:'雲端',hybrid:'混合'};
 const LANGUAGES={zh_ja:'中日雙向',auto:'中英自動',zh:'中文',en:'English',ja:'日本語',ko:'한국어',yue:'粵語'};
 const pct=r=>r==null?'—':`${Math.round(r*1000)/10}%`;
 const md=iso=>{const [,m,d]=iso.split('-').map(Number);return `${m}/${d}`};

@@ -21,6 +21,8 @@ from starlette.websockets import WebSocketState
 import auth
 import db
 import diarize
+import interpret
+import interpret_usage
 import mai_asr
 import mai_usage
 import mailer
@@ -163,6 +165,8 @@ app.include_router(mailer.router)
 app.include_router(series.router)
 app.include_router(metrics.router)
 app.include_router(mai_usage.router)
+app.include_router(interpret_usage.router)
+app.include_router(interpret.router)
 app.include_router(search.router)
 app.include_router(qa.router)
 app.include_router(diarize.router)

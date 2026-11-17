@@ -108,6 +108,10 @@ button:disabled { opacity: .6; cursor: wait; }
 .member-actions .text-button.danger { color: var(--danger); }   /* 移出團隊 reads as destructive next to 移除照片 (ui-review-fixes) */
 
 .create { padding: 20px; margin-bottom: 16px; }
+.interpret-entry-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.interpret-entry-head .label { margin: 0; }
+.interpret-entry .summary { white-space: normal; }
+.interpret-entry .secondary-button { display: inline-flex; align-items: center; text-decoration: none; }
 .alert { margin: 0 0 16px; padding: 12px 16px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius: var(--radius-control); background: var(--danger-soft); color: var(--danger); font-size: 14px; }
 
 /* Teams */

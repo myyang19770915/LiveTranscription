@@ -5,6 +5,8 @@
 //   - visual-tokens: the shape/shadow/spacing/type tokens resolve in both themes; no stray border-radius value in webapp/static
 //   - meeting-setup-layout: 進階 folds by default on wide windows, remembers being unfolded, sums up the options in use,
 //     keeps every setting while folded, and the phone settings dialog is unchanged
+//   - engine-auto-and-mode-help: the spoken language decides the engine (no selector; an old stored choice is ignored), the
+//     engine text and the privacy notice follow the language, and 雲端精修 and 精準模式 each explain what they do
 //   - phone-mic-and-layout: on phones the setup area is the language row alone (精準模式 moves into the dialog), and an
 //     insecure page (http on a hostname, asr.example.test mapped to the app) explains why the microphone is unavailable
 //   - loading-feedback: search and Q&A show the loading row only after 200 ms, with placeholder lines only when there
@@ -93,18 +95,20 @@ try {
     check('no storage: 進階 starts folded', await page.getAttribute('#setupAdvanced', 'aria-expanded') === 'false' && !await visible(page, '#asrEngineRow'));
     await context.close();
   }
-  const SUMMARY = [['local', '0', '0', '預設'], ['local', '0', '1', '精準模式'], ['mai', '1', '0', '雲端 MAI、雲端精修'], ['hybrid', '0', '1', '混合辨識、精準模式']];
-  for (const [asrEngine, cloudRefine, quality, want] of SUMMARY) {
-    const {context, page} = await open({storage: {asrEngine, cloudRefine, quality}});
+  // The engine is not in the summary: the spoken language decides it.
+  const SUMMARY = [['zh', '0', '0', '預設'], ['ja', '0', '0', '預設'], ['zh', '0', '1', '精準模式'], ['ja', '1', '0', '雲端精修'], ['ja', '1', '1', '精準模式']];
+  for (const [language, cloudRefine, quality, want] of SUMMARY) {
+    const {context, page} = await open({storage: {cloudRefine, quality}});
     await loadMeeting(page);
+    await page.selectOption('#language', language);
     const folded = await page.evaluate(() => ({summary: document.getElementById('advancedSummary').textContent, visible: getComputedStyle(document.getElementById('advancedSummary')).display !== 'none',
       engine: asrEngine(), refine: cloudRefineOn(), quality: qualityChosen()}));
-    check(`summary ${asrEngine}/${cloudRefine}/${quality} reads ${want}`, folded.summary === want && folded.visible, folded.summary);
+    check(`summary ${language}/${cloudRefine}/${quality} reads ${want}`, folded.summary === want && folded.visible, folded.summary);
     await page.click('#setupAdvanced');
     const open_ = await page.evaluate(() => ({engine: asrEngine(), refine: cloudRefineOn(), quality: qualityChosen(), summaryShown: getComputedStyle(document.getElementById('advancedSummary')).display !== 'none'}));
-    check(`${asrEngine}/${cloudRefine}/${quality}: folding keeps every setting`, folded.engine === open_.engine && folded.refine === open_.refine && folded.quality === open_.quality
-      && folded.engine === asrEngine && folded.quality === (quality === '1'), [folded, open_]);
-    check(`${asrEngine}/${cloudRefine}/${quality}: summary hidden while unfolded`, !open_.summaryShown);
+    check(`${language}/${cloudRefine}/${quality}: folding keeps every setting`, folded.engine === open_.engine && folded.refine === open_.refine && folded.quality === open_.quality
+      && folded.engine === (language === 'zh' ? 'local' : 'mai') && folded.quality === (quality === '1'), [folded, open_]);
+    check(`${language}/${cloudRefine}/${quality}: summary hidden while unfolded`, !open_.summaryShown);
     await context.close();
   }
   {
@@ -117,17 +121,18 @@ try {
     await context.close();
   }
   {
-    // Folding keeps the settings: start a meeting folded with 精準模式 and 雲端 MAI on, and read what it sends.
-    const {context, page} = await open({storage: {asrEngine: 'mai', quality: '1', cloudRefine: '0'}});
+    // Folding keeps the settings: start a meeting folded with 精準模式 on in Japanese (雲端 MAI), and read what it sends.
+    const {context, page} = await open({storage: {quality: '1', cloudRefine: '0'}});
     await page.route('**/api/meetings', route => route.request().method() === 'POST'
       ? route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({id: '00000000-0000-0000-0000-0000000000e2'})}) : route.continue());
     let started = null;
     await page.routeWebSocket('**/ws/transcribe', ws => ws.onMessage(message => { if (started === null && typeof message === 'string') { started = JSON.parse(message); ws.close(); } }));
     await loadMeeting(page);
     check('start check: 進階 folded before starting', await page.getAttribute('#setupAdvanced', 'aria-expanded') === 'false');
+    await page.selectOption('#language', 'ja');
     await page.click('#start');
     for (let i = 0; i < 50 && started === null; i++) await sleep(100);
-    check('folded: the meeting starts with 精準模式 on and the chosen engine', started?.quality === true && started?.engine === 'mai' && started?.refine === false, started && {quality: started.quality, engine: started.engine, refine: started.refine});
+    check('folded: the meeting starts with 精準模式 on and the engine of the language (ja: mai)', started?.quality === true && started?.engine === 'mai' && started?.refine === false, started && {quality: started.quality, engine: started.engine, refine: started.refine});
     await context.close();
   }
   {
@@ -139,6 +144,77 @@ try {
     const look = await page.evaluate(() => { const s = getComputedStyle(document.getElementById('setupAdvanced'), '::after'); return {opacity: getComputedStyle(document.getElementById('setupAdvanced')).opacity, chevron: s.content}; });
     check('500px: 進階 looks like a heading (full strength, no chevron)', look.opacity === '1' && (look.chevron === 'none' || look.chevron === 'normal'), look);
     await page.screenshot({path: join(out, 'meeting-dialog-500.png')});
+    await context.close();
+  }
+
+  // --- engine-auto-and-mode-help ---
+  const LOCAL_TEXT = '本機（語橋主機）', MAI_TEXT = '雲端辨識（音訊會傳送到外部服務）';
+  const REFINE = ['只改寫譯文：每句定稿後幾秒內由雲端服務帶前後文重譯，原文不變', '傳送文字到外部服務 · 適合辨識已正確、想要譯文更通順'];
+  const QUALITY = ['重新辨識再翻譯：語句結束後把音訊交給較準的辨識重新修字、斷句、翻譯，取代即時結果，約慢 10–25 秒', '傳送音訊與文字到外部服務 · 適合重要會議、需要準確紀錄；已包含雲端精修'];
+  const COVERED = '精準模式已包含，不需另外開啟';
+  // Start a meeting in `language` and return the engine sent to POST /api/meetings and in the stream header.
+  const startIn = async (language, {storage = {}, width = 1280, mai = true} = {}) => {
+    const {context, page} = await open({width, storage});
+    if (!mai) await page.route('**/api/config', async route => { const r = await route.fetch(); route.fulfill({response: r, json: {...await r.json(), mai: false}}); });
+    let meeting = null, started = null;
+    await page.route('**/api/meetings', route => { if (route.request().method() !== 'POST') return route.continue(); meeting = route.request().postDataJSON();
+      route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({id: '00000000-0000-0000-0000-0000000000e4'})}); });
+    await page.routeWebSocket('**/ws/transcribe', ws => ws.onMessage(message => { if (started === null && typeof message === 'string') { started = JSON.parse(message); ws.close(); } }));
+    await page.goto(`${app}/`); await page.waitForFunction(() => !document.getElementById('setupAdvanced').hidden, null, {timeout: 10000});
+    await page.selectOption('#language', language);
+    const row = await page.evaluate(() => ({hidden: document.getElementById('asrEngineRow').hidden, text: document.getElementById('asrEngineValue').textContent}));
+    await page.click(width > 760 ? '#start' : '#mobileActionSlot #start');
+    for (let i = 0; i < 50 && started === null; i++) await sleep(100);
+    await context.close();
+    return {row, meeting: meeting?.engine, stream: started?.engine};
+  };
+  {
+    const {context, page} = await open();
+    await loadMeeting(page);
+    check('no engine selector on the meeting page', await page.locator('#asrEngine, select[id*="ngine"]').count() === 0);
+    await context.close();
+  }
+  for (const [language, mai, text, engine] of [['zh', true, LOCAL_TEXT, 'local'], ['yue', true, LOCAL_TEXT, 'local'], ['auto', true, LOCAL_TEXT, 'local'],
+    ['zh_ja', true, LOCAL_TEXT, 'local'], ['ja', true, MAI_TEXT, 'mai'], ['en', true, MAI_TEXT, 'mai'], ['ja', false, null, 'local']]) {
+    const r = await startIn(language, {mai});
+    check(`engine by language: ${language}${mai ? '' : ' without MAI'} → ${text ?? '(row hidden)'}, sends ${engine}`,
+      (text === null ? r.row.hidden : !r.row.hidden && r.row.text === text) && r.meeting === engine && r.stream === engine, r);
+  }
+  {
+    const r = await startIn('zh', {storage: {asrEngine: 'mai'}});
+    check('an old stored asrEngine=mai is ignored: 中文 starts with local', r.row.text === LOCAL_TEXT && r.meeting === 'local' && r.stream === 'local', r);
+  }
+  {
+    const {context, page} = await open({storage: {cloudRefine: '0', quality: '0'}});
+    await page.route('**/api/config', async route => { const r = await route.fetch(); route.fulfill({response: r, json: {...await r.json(), cloudTranslate: false}}); });
+    await loadMeeting(page);
+    await page.selectOption('#language', 'zh'); await page.selectOption('#targetLanguage', 'ja');
+    const note = async () => ({label: await page.textContent('#secureLabel'), engine: await page.textContent('#asrEngineValue'), header: await page.textContent('#privacyNote')});
+    const zh = await note();
+    check('中文 → 日本語: 本機 and 自架主機', zh.engine === LOCAL_TEXT && zh.label === '自架主機', zh);
+    await page.click('#swap');
+    const swapped = await note();
+    check('swap to 日本語 → 中文: the engine text and the privacy notice change without a reload',
+      await page.inputValue('#language') === 'ja' && swapped.engine === MAI_TEXT && swapped.label === '雲端辨識' && swapped.header.includes('音訊會傳送到外部服務'), swapped);
+    await context.close();
+  }
+  const explanations = page => page.evaluate(() => Object.fromEntries(['cloudRefineRow', 'qualityRow'].map(id => [id,
+    [...document.querySelectorAll(`#${id} .toggle-text small`)].map(s => ({text: s.textContent, shown: s.getBoundingClientRect().height > 0 && s.scrollWidth <= s.clientWidth + 1}))])));
+  for (const width of [1280, 390]) {
+    const {context, page} = await open({width, storage: {setupAdvancedOpen: '1', quality: '0'}});
+    await page.goto(`${app}/`); await sleep(1500);
+    if (width <= 760) await page.click('#mobileSettingsOpen');
+    const seen = await explanations(page);
+    const ok = (rows, want) => rows.length === 2 && rows.every((r, i) => r.text === want[i] && r.shown);
+    check(`${width}px: 雲端精修 shows both explanation lines`, ok(seen.cloudRefineRow, REFINE), seen.cloudRefineRow);
+    check(`${width}px: 精準模式 shows both explanation lines`, ok(seen.qualityRow, QUALITY), seen.qualityRow);
+    await page.screenshot({path: join(out, `mode-help-${width}.png`)});
+    if (width === 1280) {
+      await page.check('#quality');
+      check('checking 精準模式: 雲端精修 is disabled and says 精準模式 covers it', await page.isDisabled('#cloudRefine') && await page.textContent('#cloudRefineFit') === COVERED);
+      await page.uncheck('#quality');
+      check('unchecking 精準模式: 雲端精修 says what it sends again', !await page.isDisabled('#cloudRefine') && await page.textContent('#cloudRefineFit') === REFINE[1]);
+    }
     await context.close();
   }
 
@@ -167,15 +243,16 @@ try {
   }
   // Starting from the phone dialog sends the same settings as on a wide window.
   {
-    const {context, page} = await open({width: 390, storage: {asrEngine: 'mai', quality: '1', cloudRefine: '0'}});
+    const {context, page} = await open({width: 390, storage: {quality: '1', cloudRefine: '0'}});
     await page.route('**/api/meetings', route => route.request().method() === 'POST'
       ? route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({id: '00000000-0000-0000-0000-0000000000e3'})}) : route.continue());
     let started = null;
     await page.routeWebSocket('**/ws/transcribe', ws => ws.onMessage(message => { if (started === null && typeof message === 'string') { started = JSON.parse(message); ws.close(); } }));
     await page.goto(`${app}/`); await sleep(1500);
+    await page.selectOption('#language', 'ja');
     await page.click('#mobileActionSlot #start');
     for (let i = 0; i < 50 && started === null; i++) await sleep(100);
-    check('390px: the meeting starts with 精準模式 on and the chosen engine', started?.quality === true && started?.engine === 'mai' && started?.refine === false, started && {quality: started.quality, engine: started.engine, refine: started.refine});
+    check('390px: the meeting starts with 精準模式 on and the engine of the language (ja: mai)', started?.quality === true && started?.engine === 'mai' && started?.refine === false, started && {quality: started.quality, engine: started.engine, refine: started.refine});
     await context.close();
   }
   const NEED = '需要 https 連線才能使用麥克風';

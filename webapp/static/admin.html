@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261115d"><link rel="stylesheet" href="/assets/admin.css?v=20261115c"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261115d"><link rel="stylesheet" href="/assets/admin.css?v=20261117a"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>團隊管理</small></span></a>
@@ -15,15 +15,23 @@
     <div>
       <p class="eyebrow">TEAMS</p>
       <h1>團隊管理</h1>
-      <p class="lead">每場會議屬於一個團隊，<strong>不同團隊的會議紀錄互相看不到</strong>。成員可以先用 LDAP 帳號加入，對方第一次登入時就會生效。</p>
+      <p class="lead">每場會議屬於一個團隊，<strong>不同團隊的會議紀錄互相看不到</strong>。成員可以先用公司帳號加入，對方第一次登入時就會生效。</p>
     </div>
     <p id="summary" class="summary" aria-live="polite"></p>
   </div>
 
   <section id="maiUsage" class="create card" aria-labelledby="maiUsageTitle" hidden>
-    <h2 id="maiUsageTitle" class="label">雲端辨識（Azure MAI）用量</h2>
+    <h2 id="maiUsageTitle" class="label">雲端辨識用量</h2>
     <p id="maiUsageText" class="summary"></p>
     <p id="maiUsageWarn" class="alert" role="alert" hidden></p>
+  </section>
+
+  <section id="interpretCard" class="create card interpret-entry" aria-labelledby="interpretTitle">
+    <div class="interpret-entry-head">
+      <h2 id="interpretTitle" class="label">即時口譯用量</h2>
+      <a class="secondary-button compact" href="/interpret">即時口譯</a>
+    </div>
+    <p id="interpretUsageText" class="summary">讀取中…</p>
   </section>
 
   <form id="createTeam" class="create card">
@@ -53,6 +61,11 @@ function showMaiUsage(usage){
   $('maiUsageWarn').textContent=warn;$('maiUsageWarn').hidden=!warn;
 }
 fetch('/api/admin/mai-usage').then(response=>response.ok?response.json():null).then(showMaiUsage).catch(()=>{});
+// 即時口譯 (realtime-interpret): the translated speech is billed by its length; it is not part of the MAI budget.
+function showInterpretUsage(usage){
+  $('interpretUsageText').textContent=usage?`累計收到 ${(usage.seconds/3600).toFixed(2)} 小時的譯音，約 ${usage.usd.toFixed(2)} 美元（每小時 ${usage.usdPerHour} 美元，不算進雲端辨識的上限）。金額依譯音長度估算，不是帳單。`:'用量暫時讀不到。';
+}
+fetch('/api/admin/interpret-usage').then(response=>response.ok?response.json():null).then(showInterpretUsage).catch(()=>showInterpretUsage(null));
 async function call(method,url,body){
   const response=await fetch(url,{method,headers:body?{'content-type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
   if(!response.ok){const detail=(await response.json().catch(()=>({}))).detail;throw new Error(typeof detail==='string'?detail:'操作失敗，請再試一次')}
@@ -123,7 +136,7 @@ function teamCard(team){
   };
   const list=team.members.length?el('ul',{className:'members'},...team.members.map(member=>memberRow(team,member)))
     :el('p',{className:'empty-members',textContent:'還沒有成員。加入成員後，他們才能用這個團隊開會。'});
-  const username=el('input',{className:'input',placeholder:'輸入 LDAP 帳號',autocomplete:'off',autocapitalize:'none',spellcheck:false,ariaLabel:`加入「${team.name}」的帳號`});
+  const username=el('input',{className:'input',placeholder:'輸入公司帳號',autocomplete:'off',autocapitalize:'none',spellcheck:false,ariaLabel:`加入「${team.name}」的帳號`});
   const add=el('button',{type:'submit',className:'secondary-button',textContent:'加入成員'});
   const addForm=el('form',{className:'row add-member',onsubmit:event=>{event.preventDefault();if(username.value.trim())act(()=>call('POST',`/api/admin/teams/${team.id}/members`,{username:username.value}),add)}},username,add);
   return el('article',{className:'card team'},head,list,addForm);
