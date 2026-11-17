@@ -8,7 +8,7 @@ The live page tells the user where meeting audio and text are processed, because
 
 ### Requirement: The live page states where audio and text go
 
-The live page SHALL show a privacy notice in its header and the same label in its footer, made of a short label and a sentence chosen by the current recognition engine, the cloud refinement choice and whether the translation model is an external service (`cloudTranslate` of `/api/config`) as in the example table. The recognition engine SHALL be the one the spoken language decides (`local` or `mai`, as meeting-setup-layout specifies); when no cloud engine is configured it SHALL count as `local`. The notice SHALL be updated as soon as the spoken language or the cloud refinement choice changes, and after the page has applied the remembered choices. When the cloud refinement checkbox is hidden, refinement SHALL count as off. When the translation model is external, the notice SHALL never say that text stays on the host. Until the page has read `/api/config` the notice SHALL show 資料去向 and 確認中…, and when that request fails the page SHALL treat the translation model as external. The live page and the sign-in page SHALL NOT state that audio stays on the user's device or that processing is end-to-end local, and SHALL NOT name a server folder as the place where recordings are stored. The `hybrid` rows of the table remain the wording `PrivacyNote.text` gives callers that pass `hybrid`; the live page itself SHALL pass only `local` or `mai`.
+The live page SHALL show a privacy notice in its header and the same label in its footer, made of a short label and a sentence chosen by the current recognition engine, the cloud refinement choice and whether the translation model is an external service (`cloudTranslate` of `/api/config`) as in the example table. In 即時口譯 mode (realtime-interpret) the notice SHALL instead show the label 雲端口譯 and the sentence 音訊會傳送到外部服務, whatever the engine, refinement and translation settings. The recognition engine SHALL be the one the spoken language decides (`local` or `mai`, as meeting-setup-layout specifies); when no cloud engine is configured it SHALL count as `local`. The notice SHALL be updated as soon as the mode, the spoken language or the cloud refinement choice changes, and after the page has applied the remembered choices. When the cloud refinement checkbox is hidden, refinement SHALL count as off. When the translation model is external, the notice SHALL never say that text stays on the host. Until the page has read `/api/config` the notice SHALL show 資料去向 and 確認中…, and when that request fails the page SHALL treat the translation model as external. The live page and the sign-in page SHALL NOT state that audio stays on the user's device or that processing is end-to-end local, and SHALL NOT name a server folder as the place where recordings are stored. The `hybrid` rows of the table remain the wording `PrivacyNote.text` gives callers that pass `hybrid`; the live page itself SHALL pass only `local` or `mai`.
 
 #### Scenario: Notice follows the choices
 
@@ -51,70 +51,57 @@ The live page SHALL show a privacy notice in its header and the same label in it
 - **WHEN** `/api/config` reports `cloudTranslate` true, the engine is local and cloud refinement is off
 - **THEN** the notice shows 雲端翻譯 and 文字會傳送到外部服務
 
+#### Scenario: Interpret mode
 
-<!-- @trace
-source: engine-auto-and-mode-help
-updated: 2026-11-15
-code:
-  - bench/README.md
-  - webapp/static/refine.css
-  - bench/translate_e2e.mjs
-  - webapp/static/app.js
-  - bench/ui_polish_e2e.mjs
-  - webapp/static/index.html
-  - chang01.png
--->
+- **WHEN** a granted user switches to 即時口譯 with 中文 as the spoken language and no external translation
+- **THEN** the notice shows 雲端口譯 and 音訊會傳送到外部服務, and switching back to 即時翻譯 shows 自架主機 again
 
 
 <!-- @trace
-source: plain-wording-no-tech-names
+source: interpret-mode-on-home
 updated: 2026-11-17
 code:
-  - webapp/static/ask.js
-  - webapp/static/privacy-note.js
-  - bench/interpret_e2e.mjs
-  - bench/series_e2e.mjs
-  - gpt-realtime-translate_demoUI.png
-  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
-  - bench/README.md
-  - README.md
-  - webapp/static/meetings.html
-  - webapp/static/admin.html
-  - lab/realtime-translate/index.html
-  - webapp/server.py
-  - lab/realtime-translate/sessions/20261116-232831/input.wav
-  - bench/qa_e2e.mjs
   - webapp/static/app.js
-  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
-  - webapp/static/interpret.css
-  - webapp/static/metrics.js
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
   - webapp/static/refine.css
-  - webapp/static/index.html
-  - bench/translate_e2e.mjs
-  - webapp/migrations/019_interpret_usage.sql
-  - lab/realtime-translate/sessions/20261117-174651/session.json
-  - chang01.png
-  - webapp/static/minutes.js
-  - webapp/static/interpret.js
-  - lab/realtime-translate/sessions/20261116-232831/session.json
-  - webapp/interpret.py
-  - bench/ui_polish_e2e.mjs
-  - webapp/interpret_usage.py
-  - .env.example
-  - webapp/static/admin.css
-  - webapp/static/ask.html
-  - bench/privacy_e2e.mjs
   - lab/realtime-translate/sessions/20261117-174651/input.wav
-  - webapp/qa.py
-  - lab/realtime-translate/costs.jsonl
+  - webapp/static/interpret-mode.js
+  - lab/realtime-translate/index.html
+  - webapp/migrations/020_interpret_access.sql
+  - webapp/static/admin.css
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - webapp/records_retention.py
+  - bench/privacy_e2e.mjs
+  - webapp/interpret_usage.py
+  - webapp/static/interpret-langs.js
+  - bench/translate_e2e.mjs
+  - webapp/server.py
+  - webapp/interpret.py
+  - webapp/static/review.html
+  - lab/realtime-translate/server.py
+  - webapp/static/meetings.html
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/static/ask.html
+  - bench/interpret_e2e.mjs
+  - chang01.png
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - webapp/static/admin.html
+  - gpt-realtime-translate_demoUI.png
+  - webapp/static/metrics.html
+  - webapp/static/interpret.css
+  - README.md
+  - webapp/static/index.html
   - webapp/static/minutes.html
   - webapp/static/interpret.html
-  - webapp/minutes.py
-  - lab/realtime-translate/sessions/20261116-232831/output.wav
-  - compose.yaml
-  - lab/realtime-translate/server.py
-  - webapp/static/metrics.html
-  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - lab/realtime-translate/costs.jsonl
+  - webapp/static/interpret.js
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - webapp/static/account.js
+  - webapp/static/actions.html
+  - webapp/static/search.html
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
 tests:
   - webapp/test_server.py
 -->

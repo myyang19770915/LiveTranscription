@@ -24,7 +24,7 @@ try {
   await page.goto(`${app}/actions`); await page.waitForSelector('#account a');
   check('header links to the metrics page', await page.locator('#account a[href="/metrics"]').isVisible());
   await page.click('#account a[href="/metrics"]'); await page.waitForSelector('.tile');
-  check('no link to the page it is on', await page.locator('#account a[href="/metrics"]').count() === 0);
+  check('the link of the page it is on is kept, marked', await page.locator('#account a[href="/metrics"][aria-current="page"]').count() === 1);
 
   // Tiles: label, value (a percentage, a duration or —), and what it was computed from.
   const tiles = await page.locator('.tile').evaluateAll(t => t.map(n => [n.querySelector('.tile-label').textContent, n.querySelector('.tile-value').textContent, n.querySelector('.tile-note').textContent]));

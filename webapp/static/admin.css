@@ -9,41 +9,7 @@ body {
 [hidden] { display: none !important; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
-/* Top bar */
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px max(20px, calc((100vw - 1080px) / 2));
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--page) 88%, transparent);
-  backdrop-filter: blur(10px);
-}
-.brand { display: flex; align-items: center; gap: 11px; color: var(--text); text-decoration: none; }
-.brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: var(--radius-control); border: 1px solid var(--border); background: var(--panel); }
-.brand b { display: block; font-size: 15px; }
-.brand small { display: block; color: var(--muted); font-size: 12px; }
-.topbar-actions { display: flex; align-items: center; gap: 8px; }
-.account { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-.account b { font-size: 14px; font-weight: 600; padding-right: 4px; }
-.account a, .account button, .ghost-button {   /* account.js links: 待辦看板, 團隊管理 (never the current page) */
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--panel);
-  color: var(--text);
-  font-size: 14px;
-  text-decoration: none;
-  cursor: pointer;
-}
-.account a:hover, .account button:hover, .ghost-button:hover { border-color: var(--field-border); }
+/* The page header (.topbar, .brand, .account, the avatar menu) is in topbar.css, shared by every page. */
 .icon-button {
   width: 36px; height: 36px;
   display: grid; place-items: center;
@@ -57,7 +23,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 :root[data-theme="light"] .icon-button .moon { display: inline; }
 
 /* Page */
-.page { width: min(1080px, 100%); margin: 0 auto; padding: 40px 20px 64px; }
+/* One page width for every page (ui-consistency-pass, visual-tokens): the content lines up with the header's brand. */
+.page { width: min(calc(var(--page-width) + 2 * var(--page-gutter)), 100%); margin: 0 auto; padding: 40px var(--page-gutter) 64px; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .eyebrow { margin: 0 0 8px; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .18em; }
 h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
@@ -97,7 +64,7 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
   transition: transform .15s ease, box-shadow .15s ease;
 }
 .primary-button { border: 0; background: var(--accent); color: var(--accent-ink); }
-.primary-button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 22px var(--accent-soft); }
+.primary-button:hover:not(:disabled) { box-shadow: 0 8px 22px var(--accent-soft); }   /* no movement on hover */
 .primary-button.compact, .secondary-button.compact { height: 40px; padding: 0 16px; font-size: 14px; }
 .secondary-button { border: 1.5px solid var(--accent); background: transparent; color: var(--accent); }
 .secondary-button:hover:not(:disabled) { background: var(--accent-soft); }
@@ -108,10 +75,13 @@ button:disabled { opacity: .6; cursor: wait; }
 .member-actions .text-button.danger { color: var(--danger); }   /* 移出團隊 reads as destructive next to 移除照片 (ui-review-fixes) */
 
 .create { padding: 20px; margin-bottom: 16px; }
-.interpret-entry-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-.interpret-entry-head .label { margin: 0; }
-.interpret-entry .summary { white-space: normal; }
-.interpret-entry .secondary-button { display: inline-flex; align-items: center; text-decoration: none; }
+.interpret-entry .summary, .create .summary { white-space: normal; }   /* card text wraps; only the page-head count stays on one line */
+.interpret-entry .members { margin: 10px 0; }
+.usage-users { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.usage-users li { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.usage-users span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.retention-field { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; white-space: nowrap; }
+.retention-field .input, .row .retention-field .input { flex: none; width: 90px; }   /* not the phone .row rule's full width */
 .alert { margin: 0 0 16px; padding: 12px 16px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius: var(--radius-control); background: var(--danger-soft); color: var(--danger); font-size: 14px; }
 
 /* Teams */
@@ -144,12 +114,7 @@ button:disabled { opacity: .6; cursor: wait; }
 .empty p { margin: 8px 0 0; color: var(--muted); }
 
 @media (max-width: 640px) {
-  .topbar { padding: 12px 16px; }
-  .brand small, .ghost-button, .account-name, .account a[href="/admin"], .account a[href="/metrics"] { display: none; }
-  .account a, .account button { padding: 0 9px; font-size: 13px; }   /* 搜尋 and 待辦看板 stay reachable on phones */
-  .brand { gap: 8px; }
-  .account, .topbar-actions { gap: 6px; }
-  .page { padding: 28px 16px 48px; }
+  .page { padding: 28px var(--page-gutter) 48px; }
   .page-head { flex-direction: column; align-items: flex-start; gap: 8px; }
   .row { flex-direction: column; }
   .row .input { flex: none; width: 100%; }
@@ -158,18 +123,12 @@ button:disabled { opacity: .6; cursor: wait; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
-/* Own avatar in the header and its menu (avatar-self-service). */
-.account-me { position: relative; display: inline-flex; }
-.account .account-avatar { width: 36px; padding: 0; justify-content: center; overflow: hidden; border-radius: 50%; }
-.account-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.account-initial { color: var(--accent); font-weight: 700; }
-.account-menu { position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; min-width: 140px; display: grid; gap: 2px; padding: 6px;
-  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel); box-shadow: 0 12px 32px rgb(0 0 0 / .18); }
-.account-menu[hidden] { display: none; }
-.account .account-menu button { width: 100%; height: 34px; justify-content: flex-start; border: 0; border-radius: var(--radius-control); background: transparent; }
-.account .account-menu button:hover, .account .account-menu button:focus-visible { background: var(--accent-soft); }
-.account-menu .menu-phone { display: none; }   /* only the meeting page's phone header needs them (accounts.css) */
-.account-menu .menu-nav { display: none; }
-/* site-navigation: at 640px the header hides 成效指標 and 團隊管理 (above); the avatar menu offers them and 會議紀錄. */
-@media (max-width: 640px) { .account .account-menu .menu-nav { display: flex; } }
-.account-menu-error { max-width: 220px; margin: 4px 6px; color: var(--danger); font-size: 13px; white-space: normal; }
+
+/* Dropdowns on every sub-page look alike (ui-consistency-pass): no browser arrow, one chevron in the theme's muted colour. */
+:root { --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238da2b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); }
+:root[data-theme="light"] { --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23556578' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); }
+main select:not([multiple]) {
+  appearance: none !important; -webkit-appearance: none !important;
+  background-image: var(--chevron) !important; background-repeat: no-repeat !important; background-position: right 10px center !important; background-size: 14px !important;
+  padding-right: 32px !important; cursor: pointer;
+}

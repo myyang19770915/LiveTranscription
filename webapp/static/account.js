@@ -158,6 +158,17 @@ window.AvatarPhoto=(()=>{
   return {crop,upload,remove,pick,initial};
 })();
 
+// The header's page links (site-navigation). /review and /minutes belong to 會議紀錄, /ask to 搜尋.
+const NAV_LINKS=[{key:'live',href:'/',text:'即時會議'},{key:'meetings',href:'/meetings',text:'會議紀錄'},
+  {key:'interpret',href:'/interpret',text:'我的紀錄',narrow:true},{key:'actions',href:'/actions',text:'待辦看板'},
+  {key:'metrics',href:'/metrics',text:'成效指標',narrow:true},{key:'admin',href:'/admin',text:'團隊管理',admin:true,narrow:true},
+  {key:'search',href:'/search',text:'搜尋'}];
+function currentNav(path=location.pathname){
+  if(path==='/')return 'live';
+  if(['/meetings','/review','/minutes'].includes(path)||path.startsWith('/meetings/'))return 'meetings';
+  if(path==='/ask')return 'search';
+  return NAV_LINKS.find(n=>n.href===path)?.key||'';
+}
 window.accountReady=fetch('/api/me').then(response=>{
   if(response.status===401){location.replace(ReturnPath.loginUrl(location.pathname,location.search));return new Promise(()=>{})}
   return response.json();
@@ -169,20 +180,22 @@ window.accountReady=fetch('/api/me').then(response=>{
     name.append(make('b',{textContent:me.displayName||me.username}));
     const signOut=async()=>{await fetch('/api/logout',{method:'POST'});location.replace('/login')};
     const out=make('button',{type:'button',className:'account-logout',textContent:'登出',onclick:signOut});
-    const link=(href,text)=>make('a',{href,textContent:text});
-    const links=[location.pathname==='/'?link('/meetings','會議紀錄'):null,location.pathname!=='/actions'?link('/actions','待辦看板'):null,
-      location.pathname!=='/metrics'?link('/metrics','成效指標'):null,
-      me.admin&&location.pathname!=='/admin'?link('/admin','團隊管理'):null].filter(Boolean);
-    // Search (meeting-search): a text button like the others, shown on phones too; / opens it from any page.
-    const search=location.pathname==='/search'?null:make('a',{href:'/search',className:'account-search',title:'搜尋（/）',textContent:'搜尋'});
-    slot.replaceChildren(...[search,...links,ownAvatar(me,make,signOut),name,out].filter(Boolean));
+    // The same links in the same order on every page (ui-consistency-pass); the current page's link stays, marked.
+    const here=currentNav();
+    const links=NAV_LINKS.filter(n=>!n.admin||me.admin).map(n=>{
+      const a=make('a',{href:n.href,textContent:n.text,className:n.key==='search'?'nav-link account-search':'nav-link'});
+      a.dataset.nav=n.key;if(n.key==='search')a.title='搜尋（/）';
+      if(n.key===here){a.classList.add('current');a.setAttribute('aria-current','page')}
+      return a;
+    });
+    slot.replaceChildren(...links,ownAvatar(me,make,signOut,here),name,out);
   }
   return me;
 });
 
 // The header avatar and its menu: 更換照片, and 移除照片 when there is a photo.
 // phoneItems: 待辦看板 and 登出 for a header too narrow for their buttons (the meeting page on phones, accounts.css).
-function ownAvatar(me,make,signOut){
+function ownAvatar(me,make,signOut,here=''){
   const wrap=make('span',{className:'account-me'});
   const button=make('button',{type:'button',className:'account-avatar',title:'更換我的照片',ariaLabel:'我的照片'});
   button.setAttribute('aria-haspopup','menu');button.setAttribute('aria-expanded','false');
@@ -227,12 +240,10 @@ function ownAvatar(me,make,signOut){
       })),
       me.avatarUrl?item('移除照片',()=>run(async()=>{await AvatarPhoto.remove('/api/me/avatar');changed(null);close()})):null,
       item('我的 Email',()=>{close();emailDialog(me,make)}),
-      // Page links the header hides on narrow windows (site-navigation); accounts.css / admin.css show each one only
-      // at the widths where its header link is hidden. 會議紀錄 is never a header link outside the meeting page.
-      !['/','/meetings'].includes(location.pathname)?item('會議紀錄',()=>{location.href='/meetings'},'menu-nav menu-meetings'):null,
-      location.pathname!=='/actions'?item('待辦看板',()=>{location.href='/actions'},'menu-phone'):null,
-      location.pathname!=='/metrics'?item('成效指標',()=>{location.href='/metrics'},'menu-nav menu-metrics'):null,
-      me.admin&&location.pathname!=='/admin'?item('團隊管理',()=>{location.href='/admin'},'menu-nav menu-admin'):null,
+      // Page links the header hides on narrow windows (site-navigation): topbar.css shows each one only at the widths
+      // where its header link is hidden (900px: the `narrow` ones; 700px: all but 搜尋). Never the current page.
+      ...NAV_LINKS.filter(n=>n.key!=='search'&&n.key!==here&&(!n.admin||me.admin))
+        .map(n=>item(n.text,()=>{location.href=n.href},`menu-nav menu-${n.key}${n.narrow?' at-900':''}`)),
       item('登出',signOut,'menu-phone'),
       message].filter(Boolean));
   }

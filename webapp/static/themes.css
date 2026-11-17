@@ -1,4 +1,3 @@
-.nav-actions { display: flex; align-items: center; gap: 9px; }
 .theme-toggle {   /* icon only, like the other pages' toggle (meeting-setup-layout) */
   width: 38px;
   height: 38px;
@@ -23,16 +22,7 @@
 
 /* Light theme (brand-palette-blue): colours come from tokens.css; only the layout differences stay here. */
 :root[data-theme="light"] .ambient { display: none; }
-:root[data-theme="light"] main {
-  width: min(1480px, calc(100% - 32px));
-  min-height: calc(100vh - 32px);
-  margin: 16px auto;
-  padding: 24px 42px 20px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-frame);
-  background: color-mix(in srgb, var(--surface) 55%, var(--page));
-  box-shadow: 0 16px 60px rgb(0 0 0 / .04);
-}
+/* Switching the theme changes only colours, never the size or position of anything (ui-consistency-pass). */
 :root[data-theme="light"] .controls :disabled { opacity: .48; }
 .translation-draft { display: block; margin-top: 14px; padding: 12px 16px; border-left: 3px solid var(--mint); border-radius: 0 var(--radius-control) var(--radius-control) 0; background: var(--accent-soft); color: var(--text); opacity: .84; }
 .translation-draft .unsure { opacity: .55; }   /* the end of a draft: the next draft may still change it */
@@ -42,11 +32,6 @@
 
 .translation-card .state-chip { min-width: 66px; text-align: center; }
 
-@media (max-width: 760px) {
-  :root[data-theme="light"] main { width: calc(100% - 16px); min-height: calc(100vh - 16px); margin: 8px auto; padding: 16px 14px 20px; border-radius: var(--radius-feature); }
-  :root[data-theme="light"] header { padding-top: 28px; }
-}
 @media (max-width: 430px) {
-  .nav-actions { gap: 6px; }
   .status { gap: 6px; padding: 7px 9px; font-size: 10px; }
 }

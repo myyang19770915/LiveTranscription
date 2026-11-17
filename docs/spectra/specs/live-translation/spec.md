@@ -8,16 +8,16 @@ Lets a signed-in user use the live page for translation only — a conversation 
 
 ### Requirement: Translate-only sessions
 
-The live page SHALL offer a mode switch between 開會 and 即時翻譯, remembered in the browser. In 即時翻譯 mode the team, topic and series fields and the series panel SHALL be hidden, the start button SHALL read 開始翻譯, and starting SHALL NOT require membership of any team. A translate-only session SHALL create no meeting record, store no transcript, segments or recording on the server and SHALL NOT appear in the meeting list; the transcript and the browser-side recording SHALL stay available for download from the page until the next session starts. The mode SHALL NOT change while a session is running.
+The live page SHALL offer a mode switch between 開會, 即時翻譯 and 即時口譯 (realtime-interpret), remembered in the browser. In 即時翻譯 mode the team, topic and series fields and the series panel SHALL be hidden, the start button SHALL read 開始翻譯, and starting SHALL NOT require membership of any team. A translate-only session SHALL create no meeting record and SHALL NOT appear in the meeting list; it SHALL be saved as the user's own record (realtime-interpret, `kind` `translate`) holding the audio sent, the source text and the translation, and the page SHALL say so with 存成你的紀錄，只有你看得到 instead of saying that nothing is kept. The transcript and the browser-side recording SHALL stay available for download from the page until the next session starts. The mode SHALL NOT change while a session is running.
 
 In 即時翻譯 mode, continuous Chinese or Japanese speech without a sentence end or pause SHALL be finalized for translation at the last settled clause boundary (a comma followed by at least 8 further characters) once the untranslated text reaches 40 characters, each segment at least 16 characters, while clauses the segmentation rules consider unfinished (connectives such as 因為, 如果; open endings such as 的, 就) stay joined. 開會 mode SHALL keep the 100-character threshold.
 
-The `/ws/transcribe` handshake SHALL accept `mode: "translate"` without a `meeting_id`: the gateway SHALL forward audio to the chosen engine and return recognition events without `audioMs`, SHALL write no audio file, and SHALL still require a signed-in user and a same-origin request. A handshake without `mode` SHALL keep the existing meeting checks.
+The `/ws/transcribe` handshake SHALL accept `mode: "translate"` and `mode: "interpret"` without a `meeting_id`: the gateway SHALL forward audio to the chosen engine and return recognition events without `audioMs`, SHALL write nothing under `output/teams`, and SHALL still require a signed-in user and a same-origin request. With `mode: "translate"` the gateway SHALL write the audio it forwards, as it arrives, into a working folder under `output/interpret/<username>/` and keep the last `displayText` it sent as the source text; when it starts writing it SHALL send `{"record": <token>}`, a random token valid for this connection only, and when the connection ends with any audio it SHALL save the record, with the last translation received for the token, and send `{"saved": <id>}` before closing. With `mode: "interpret"` it SHALL save nothing, since `/ws/interpret` saves that session. While the session runs the page SHALL send its translation every 30 seconds when it has changed with `PUT /api/interpret/live/<token>/translation` (`{"text"}`, at most 200000 characters; 404 for a token that is unknown or another user's); a failed request SHALL be retried at the next 30 seconds without stopping the session. After `saved` the page SHALL send its full translation once more with `PUT /api/interpret/sessions/<id>/translation`; when that fails the page SHALL say 譯文沒有存到紀錄，可以先匯出. A handshake without `mode` SHALL keep the existing meeting checks.
 
 #### Scenario: Translating a video
 
-- **WHEN** a user switches to 即時翻譯, chooses 分頁／系統聲音 and presses 開始翻譯
-- **THEN** the transcript and translation appear as during a meeting, the meeting list has no new entry afterwards, and 匯出逐字稿 downloads the text
+- **WHEN** a user switches to 即時翻譯, chooses 分頁／系統聲音, presses 開始翻譯 and later stops
+- **THEN** the transcript and translation appear as during a meeting, the meeting list has no new entry afterwards, 匯出逐字稿 downloads the text, and 我的紀錄 lists a 即時翻譯 record with that source text and translation
 
 #### Scenario: Continuous speech is finalized in subtitle-sized segments
 
@@ -29,10 +29,20 @@ The `/ws/transcribe` handshake SHALL accept `mode: "translate"` without a `meeti
 - **WHEN** a user who belongs to no team switches to 即時翻譯 and presses 開始翻譯
 - **THEN** the session starts
 
-#### Scenario: Translate handshake stores nothing
+#### Scenario: Translate handshake saves a record, not a meeting
 
-- **WHEN** a signed-in client opens `/ws/transcribe` with `{"mode": "translate", "language": "zh"}` and sends audio
-- **THEN** recognition events come back without `audioMs`, no row is added to `meetings`, and no file is written under `output/teams`
+- **WHEN** a signed-in client opens `/ws/transcribe` with `{"mode": "translate", "language": "zh"}`, sends one second of audio and ends the stream
+- **THEN** recognition events come back without `audioMs`, the client receives `{"saved": <id>}`, `output/interpret/<username>/<id>/input.wav` lasts 1.0 second, no row is added to `meetings`, and no file is written under `output/teams`
+
+#### Scenario: The translation is saved during the session
+
+- **WHEN** a 即時翻譯 session runs for 70 seconds and its tab is closed without stopping
+- **THEN** the page has sent the translation at 30 and 60 seconds, and the saved record holds the translation as of 60 seconds
+
+#### Scenario: Interpret handshake saves nothing
+
+- **WHEN** a signed-in client opens `/ws/transcribe` with `{"mode": "interpret", "language": "en", "engine": "mai"}` and sends audio
+- **THEN** recognition events come back, no `saved` event is sent, and no folder is written under `output/interpret`
 
 #### Scenario: Meeting handshake unchanged
 
@@ -48,24 +58,52 @@ The `/ws/transcribe` handshake SHALL accept `mode: "translate"` without a `meeti
 
 
 <!-- @trace
-source: live-subtitle-segments
-updated: 2026-11-08
+source: interpret-mode-on-home
+updated: 2026-11-17
 code:
-  - webapp/static/segmentation.js
-  - README.md
-  - bench/README.md
-  - bench/run.py
-  - webapp/replay_browser.py
-  - webapp/static/index.html
-  - webapp/replay_inject.js
-  - 20261108_143903.mp4
   - webapp/static/app.js
-  - meeting-2026-11-01T00-16-53.txt
-  - 20261029_185428.mp4
-  - webapp/static/subtitles.js
-  - bench/segcheck.js
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - webapp/static/refine.css
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/static/interpret-mode.js
+  - lab/realtime-translate/index.html
+  - webapp/migrations/020_interpret_access.sql
+  - webapp/static/admin.css
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - webapp/records_retention.py
+  - bench/privacy_e2e.mjs
+  - webapp/interpret_usage.py
+  - webapp/static/interpret-langs.js
   - bench/translate_e2e.mjs
-  - webapp/static/overlay.js
+  - webapp/server.py
+  - webapp/interpret.py
+  - webapp/static/review.html
+  - lab/realtime-translate/server.py
+  - webapp/static/meetings.html
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/static/ask.html
+  - bench/interpret_e2e.mjs
+  - chang01.png
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - webapp/static/admin.html
+  - gpt-realtime-translate_demoUI.png
+  - webapp/static/metrics.html
+  - webapp/static/interpret.css
+  - README.md
+  - webapp/static/index.html
+  - webapp/static/minutes.html
+  - webapp/static/interpret.html
+  - lab/realtime-translate/costs.jsonl
+  - webapp/static/interpret.js
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - webapp/static/account.js
+  - webapp/static/actions.html
+  - webapp/static/search.html
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+tests:
+  - webapp/test_server.py
 -->
 
 ---

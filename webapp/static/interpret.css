@@ -54,7 +54,8 @@
 .history table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .history th, .history td { padding: 10px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
 .history th { color: var(--muted); font-size: 13px; font-weight: 600; }
-.history td { font-variant-numeric: tabular-nums; }
+.history td { font-variant-numeric: tabular-nums; white-space: nowrap; }   /* one line per record */
+.history td:has(.preview) { white-space: normal; width: 100%; }
 .history tr.current td { background: var(--accent-soft); }
 .history .preview { display: block; max-width: 360px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 .history .acts { white-space: nowrap; text-align: right; }
@@ -73,12 +74,15 @@
   .texts { grid-template-columns: 1fr; }
   .wave { height: 180px; }
   .wave-head { flex-direction: column; gap: 8px; }
-  /* 我的紀錄 as stacked rows: time and languages, then length and cost, then the actions. */
+  /* 我的紀錄 as stacked rows: time, kind and languages, then length and cost, then the actions; no preview. */
   .history thead { display: none; }
   .history table, .history tbody, .history tr { display: block; }
   .history tr { padding: 10px 0; border-bottom: 1px solid var(--border); }
   .history td { display: block; padding: 2px 4px; border: 0; }
-  .history td:nth-child(3), .history td:nth-child(4) { display: inline-block; color: var(--muted); }
-  .history td:nth-child(5) { display: none; }
+  .history td.kind, .history td.length, .history td.cost { display: inline-block; color: var(--muted); }
+  .history td.what { display: none; }
   .history .acts { text-align: left; margin-top: 4px; white-space: normal; }
 }
+
+/* 我的紀錄 (interpret-mode-on-home): the kind column stays on one line. */
+.history td.kind { white-space: nowrap; }

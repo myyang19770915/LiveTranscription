@@ -29,11 +29,13 @@ from zoneinfo import ZoneInfo
 
 import websockets
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 from opencc import OpenCC
+from pydantic import BaseModel
 from starlette.websockets import WebSocketState
 
 import auth
+import db
 import interpret_usage
 import stream_limits
 import team_access
@@ -56,8 +58,11 @@ SOURCE_LANGUAGES = frozenset({"zh", "auto", "yue", "en", "ja", "ko", "vi", "th",
 LOCAL_SOURCES = frozenset({"zh", "auto", "yue"})   # recognized by the local Confucius engine; the rest by MAI
 RATE = 24000
 BYTES_PER_SECOND = RATE * 2
-NOT_CONFIGURED = "即時口譯尚未設定"     # close reason (4503) the page reads
-UNREACHABLE = "連不上翻譯服務，請稍後再試。"      # error event when the translation service cannot be reached
+NOT_CONFIGURED = "即時口譯尚未設定"                         # close reason (4503) the page reads
+NO_ACCESS = "即時口譯需要申請權限，請聯絡系統管理員"         # close reason (4403) for a user not granted
+UNREACHABLE = "連不上翻譯服務，請稍後再試。"                 # error event when the translation service cannot be reached
+USERNAME = re.compile(r"[a-z0-9_][a-z0-9._-]{0,63}")         # an account that may be granted interpreting
+MAX_TEXT = 200000           # characters of source or translation kept for a record
 FLUSH_SECONDS = 8          # after session.close: how long the rest of the translation may take
 SESSION_ID = re.compile(r"\d{8}-\d{6}(-\d+)?")
 FILES = ("input.wav", "output.wav", "transcript.txt")
@@ -77,6 +82,15 @@ TO_TAIWAN = _Taiwan("s2twp")
 
 def configured() -> bool:
     return bool(ENDPOINT and KEY)
+
+
+async def allowed(user: auth.User) -> bool:
+    """Interpreting is for system administrators and the accounts they grant (interpret-mode-on-home)."""
+    if user.admin:
+        return True
+    async with db.connect() as conn:
+        row = await (await conn.execute("SELECT 1 FROM interpret_access WHERE username = %s", (user.username,))).fetchone()
+    return row is not None
 
 
 def azure_url() -> str:
@@ -118,7 +132,7 @@ def bars_of(input_pcm_blocks, output_pcm_blocks) -> dict:
 
 def wav_blocks(path: Path):
     with wave.open(str(path), "rb") as source:
-        while block := source.readframes(BAR):
+        while block := source.readframes(source.getframerate() // 10):
             yield block
 
 
@@ -126,7 +140,10 @@ class Recording:
     """One session on its own clock (from 已連線), written to disk as it arrives: the audio sent, the translated pieces
     each at the time it arrived, the waveform values and the texts. Only counts and waveform values stay in memory."""
 
-    def __init__(self, folder_of_user: Path, meta: dict):
+    def __init__(self, folder_of_user: Path, meta: dict, rate: int = RATE, output: bool = True):
+        """`rate` and `output`: 24 kHz with translated audio for 即時口譯; a 即時翻譯 record (live-translation) is the
+        16 kHz audio sent to recognition, with no output.wav."""
+        self.rate, self.bar, self.with_output = rate, rate // 10, output
         self.started = datetime.now(ZoneInfo(team_access.MEETING_TIMEZONE))
         self.meta, self.t0 = {"startedAt": self.started.strftime("%Y-%m-%d %H:%M:%S")} | meta, time.monotonic()
         self.folder_of_user, self.folder, self.writers = folder_of_user, None, {}
@@ -143,7 +160,7 @@ class Recording:
 
     @property
     def input_seconds(self) -> float:
-        return self.input_bytes / BYTES_PER_SECOND
+        return self.input_bytes / (2 * self.rate)
 
     @property
     def output_seconds(self) -> float:
@@ -155,12 +172,12 @@ class Recording:
         self.folder_of_user.mkdir(parents=True, exist_ok=True)
         self.folder = self.folder_of_user / f".recording-{self.started.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(4)}"
         self.folder.mkdir()
-        for name in ("input.wav", "output.wav"):
+        for name in ("input.wav", "output.wav") if self.with_output else ("input.wav",):
             file = open(self.folder / name, "wb", buffering=0)   # unbuffered: on disk as it arrives
             out = wave.open(file, "wb")
             out.setnchannels(1)
             out.setsampwidth(2)
-            out.setframerate(RATE)
+            out.setframerate(self.rate)
             self.writers[name] = (out, file)
 
     def add_input(self, pcm: bytes) -> None:
@@ -168,8 +185,8 @@ class Recording:
         self.writers["input.wav"][0].writeframes(pcm)
         self.input_bytes += len(pcm)
         data = self.rest + pcm
-        whole = len(data) // (2 * BAR) * (2 * BAR)
-        self.input_bars += [rms(data[i:i + 2 * BAR]) for i in range(0, whole, 2 * BAR)]
+        whole = len(data) // (2 * self.bar) * (2 * self.bar)
+        self.input_bars += [rms(data[i:i + 2 * self.bar]) for i in range(0, whole, 2 * self.bar)]
         self.rest = data[whole:]
 
     def add_piece(self, arrived: float, pcm: bytes) -> None:
@@ -221,21 +238,84 @@ class Recording:
         return sid
 
 
+LIVE: dict[str, tuple[str, "Recording"]] = {}   # token -> (owner, the 即時翻譯 record being written)
+
+
+def live_open(username: str, rec: Recording) -> str:
+    token = secrets.token_hex(8)
+    LIVE[token] = (username, rec)
+    return token
+
+
+def live_close(token: str) -> None:
+    LIVE.pop(token, None)
+
+
+class LiveText(BaseModel):
+    text: str
+
+
+@router.put("/api/interpret/live/{token}/translation")
+async def live_translation(token: str, body: LiveText, user: auth.CurrentUser):
+    owner, rec = LIVE.get(token, (None, None))
+    if owner != user.username:
+        raise HTTPException(status_code=404, detail="找不到進行中的翻譯")
+    if len(body.text) > MAX_TEXT:
+        raise HTTPException(status_code=422, detail="譯文太長")
+    rec.translation = [body.text]
+    return {"kept": len(body.text)}
+
+
 @router.get("/interpret")
-async def page(user: auth.CurrentUser):
-    if not user.admin:
-        return HTMLResponse(team_access.FORBIDDEN_PAGE.replace("團隊管理只開放給系統管理員。", "即時口譯只開放給系統管理員。"), status_code=403)
+async def page(_user: auth.CurrentUser):
+    """我的紀錄: every signed-in user's own 即時翻譯 and 即時口譯 records; sessions run from the live page."""
     return FileResponse(auth.STATIC_DIR / "interpret.html", headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/api/interpret/config")
-async def config(_admin: team_access.Admin):
-    return {"configured": configured(), "usdPerHour": interpret_usage.USD_PER_HOUR, "targets": list(TARGETS)}
+async def config(user: auth.CurrentUser):
+    import records_retention   # it reads this module's record folders
+    return {"configured": configured(), "allowed": await allowed(user), "usdPerHour": interpret_usage.USD_PER_HOUR,
+            "targets": list(TARGETS), "retentionDays": await records_retention.days()}
+
+
+class Grant(BaseModel):
+    username: str
+
+
+@router.get("/api/admin/interpret-access")
+async def access_list(_admin: team_access.Admin):
+    async with db.connect() as conn:
+        rows = await (await conn.execute("SELECT username, granted_by, granted_at FROM interpret_access ORDER BY username")).fetchall()
+    return [{"username": r["username"], "grantedBy": r["granted_by"], "grantedAt": r["granted_at"].isoformat()} for r in rows]
+
+
+@router.post("/api/admin/interpret-access")
+async def access_grant(body: Grant, admin: team_access.Admin):
+    username = body.username.strip().lower()
+    if not USERNAME.fullmatch(username):
+        raise HTTPException(status_code=422, detail="帳號格式不正確")
+    async with db.connect() as conn:
+        await conn.execute("INSERT INTO interpret_access (username, granted_by) VALUES (%s, %s) ON CONFLICT (username) DO NOTHING",
+                           (username, admin.username))
+    return {"username": username}
+
+
+@router.delete("/api/admin/interpret-access/{username}")
+async def access_withdraw(username: str, _admin: team_access.Admin):
+    if not USERNAME.fullmatch(username.strip().lower()):
+        raise HTTPException(status_code=422, detail="帳號格式不正確")
+    async with db.connect() as conn:
+        result = await conn.execute("DELETE FROM interpret_access WHERE username = %s", (username.strip().lower(),))
+    if not result.rowcount:
+        raise HTTPException(status_code=404, detail="這個帳號沒有即時口譯權限")
+    return {"withdrawn": username.strip().lower()}
 
 
 @router.get("/api/interpret/sessions")
-async def sessions(admin: team_access.Admin):
-    items, folder = [], user_dir(admin.username)
+async def sessions(user: auth.CurrentUser):
+    """The user's own records of both kinds (即時翻譯 and 即時口譯), newest first."""
+    items, folder = [], user_dir(user.username)
     if folder.is_dir():
         for sub in sorted(folder.iterdir(), reverse=True):
             if not SESSION_ID.fullmatch(sub.name):
@@ -245,34 +325,60 @@ async def sessions(admin: team_access.Admin):
             except (OSError, ValueError):
                 continue
             items.append({k: data.get(k) for k in ("id", "startedAt", "target", "sourceLang", "engine", "inputSeconds", "outputSeconds", "usd")}
-                         | {"preview": (data.get("translation") or data.get("sourceText") or "")[:60]})
+                         | {"kind": data.get("kind") or "interpret", "preview": (data.get("translation") or data.get("sourceText") or "")[:60]})
     return items
 
 
 @router.get("/api/interpret/sessions/{sid}")
-async def session(sid: str, admin: team_access.Admin):
-    return json.loads((session_dir(admin, sid) / "session.json").read_text(encoding="utf-8"))
+async def session(sid: str, user: auth.CurrentUser):
+    data = json.loads((session_dir(user, sid) / "session.json").read_text(encoding="utf-8"))
+    return {"kind": "interpret"} | data   # saved before kinds existed: interpreting
+
+
+class Translation(BaseModel):
+    text: str
+
+
+def write_translation(folder: Path, text: str) -> None:
+    """The translation of a 即時翻譯 record, from the page: session.json and transcript.txt."""
+    data = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    data["translation"] = text
+    (folder / "session.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    (folder / "transcript.txt").write_text(f"原文：\n{data.get('sourceText', '')}\n\n譯文（{data.get('target', '')}）：\n{text}\n", encoding="utf-8")
+
+
+@router.put("/api/interpret/sessions/{sid}/translation")
+async def session_translation(sid: str, body: Translation, user: auth.CurrentUser):
+    folder = session_dir(user, sid)
+    if len(body.text) > MAX_TEXT:
+        raise HTTPException(status_code=422, detail="譯文太長")
+    if json.loads((folder / "session.json").read_text(encoding="utf-8")).get("kind") != "translate":
+        raise HTTPException(status_code=409, detail="即時口譯紀錄的譯文由口譯產生，不能修改")
+    await asyncio.to_thread(write_translation, folder, body.text)
+    return {"saved": sid}
 
 
 @router.get("/api/interpret/sessions/{sid}/bars")
-async def session_bars(sid: str, admin: team_access.Admin):
-    folder = session_dir(admin, sid)
+async def session_bars(sid: str, user: auth.CurrentUser):
+    folder = session_dir(user, sid)
     try:
         return json.loads((folder / "bars.json").read_text(encoding="utf-8"))
     except FileNotFoundError:   # saved before the waveform was kept: read it from the audio
-        return await asyncio.to_thread(lambda: bars_of(wav_blocks(folder / "input.wav"), wav_blocks(folder / "output.wav")))
+        output = folder / "output.wav"
+        return await asyncio.to_thread(lambda: bars_of(wav_blocks(folder / "input.wav"), wav_blocks(output) if output.exists() else ()))
 
 
 @router.get("/api/interpret/sessions/{sid}/{name}")
-async def session_file(sid: str, name: str, admin: team_access.Admin):
-    if name not in FILES:
+async def session_file(sid: str, name: str, user: auth.CurrentUser):
+    path = session_dir(user, sid) / name
+    if name not in FILES or not path.is_file():   # a 即時翻譯 record has no output.wav
         raise HTTPException(status_code=404, detail="找不到這個檔案")
-    return FileResponse(session_dir(admin, sid) / name, filename=f"interpret-{sid}-{name}", headers={"Cache-Control": "no-store"})
+    return FileResponse(path, filename=f"interpret-{sid}-{name}", headers={"Cache-Control": "no-store"})
 
 
 @router.delete("/api/interpret/sessions/{sid}")
-async def delete_session(sid: str, admin: team_access.Admin):
-    shutil.rmtree(session_dir(admin, sid))
+async def delete_session(sid: str, user: auth.CurrentUser):
+    shutil.rmtree(session_dir(user, sid))
     return {"deleted": sid}
 
 
@@ -288,8 +394,14 @@ async def interpret(browser: WebSocket):
     if user is None:
         await _close(browser, 4401, "請先登入")
         return
-    if not user.admin:
-        await _close(browser, 4403, "即時口譯只開放給系統管理員")
+    try:
+        permitted = await allowed(user)
+    except Exception as error:   # noqa: BLE001 - database unreachable: do not reach the translation service
+        logger.warning("interpret: access check failed: %s", type(error).__name__)
+        await _close(browser, 1011, "access check failed")
+        return
+    if not permitted:
+        await _close(browser, 4403, NO_ACCESS)
         return
     if not stream_limits.take_place(user.username):
         await _close(browser, 4429, stream_limits.TOO_MANY.format(n=stream_limits.MAX_STREAMS_PER_USER))
@@ -336,25 +448,27 @@ async def _run(browser: WebSocket, user: auth.User) -> None:
         session["audio"]["input"] = {"transcription": {"model": TRANSCRIBE}}
     await azure.send(json.dumps({"type": "session.update", "session": session}))
     await tell({"type": "status", "state": "connected"})
-    rec = Recording(user_dir(user.username), {"target": target, "sourceLang": source_lang, "engine": "local" if source_lang in LOCAL_SOURCES else "mai"})
+    rec = Recording(user_dir(user.username), {"kind": "interpret", "target": target, "sourceLang": source_lang, "engine": "local" if source_lang in LOCAL_SOURCES else "mai"})
     limit = stream_limits.max_stream_bytes() * RATE // 16000   # the same hours as /ws/transcribe, at 24 kHz
     stop_code = None
     token, checked = browser.cookies.get(auth.SESSION_COOKIE), time.monotonic()
 
-    async def still_allowed() -> bool:
-        """Re-check the session every STREAM_RECHECK_MINUTES, as /ws/transcribe does; when the database cannot answer,
-        keep going and try again 30 seconds later."""
+    async def refused() -> tuple[int, str] | None:
+        """Re-check the session and the access every STREAM_RECHECK_MINUTES, as /ws/transcribe does; when the
+        database cannot answer, keep going and try again 30 seconds later. Returns the close code when refused."""
         nonlocal checked
         if time.monotonic() - checked < stream_limits.STREAM_RECHECK_MINUTES * 60:
-            return True
+            return None
         checked = time.monotonic()
         try:
             current = await auth.session_user(token)
+            if current is None:
+                return (4401, "session ended")
+            return None if await allowed(current) else (4403, NO_ACCESS)
         except Exception as error:   # noqa: BLE001 - database unreachable
             logger.warning("interpret: access check failed, retrying in 30 s: %s", error)
             checked -= stream_limits.STREAM_RECHECK_MINUTES * 60 - stream_limits.RECHECK_RETRY_SECONDS
-            return True
-        return current is not None and current.admin
+            return None
 
     async def upstream() -> None:
         nonlocal stop_code
@@ -364,8 +478,8 @@ async def _run(browser: WebSocket, user: auth.User) -> None:
                 return
             pcm = message.get("bytes")
             if pcm:
-                if not await still_allowed():
-                    stop_code = (4401, "session ended")
+                if refusal := await refused():
+                    stop_code = refusal
                     return
                 if rec.input_bytes + len(pcm) > limit:
                     text = stream_limits.TOO_LONG.format(hours=stream_limits.MAX_STREAM_HOURS)
@@ -431,7 +545,7 @@ async def _run(browser: WebSocket, user: auth.User) -> None:
         with contextlib.suppress(OSError):
             rec.close()   # what was written stays in the working folder
         await tell({"type": "error", "message": "存檔失敗"})
-    await interpret_usage.add("live", seconds)
+    await interpret_usage.add("live", seconds, user.username)
     await tell({"type": "status", "state": "closed", "saved": saved, "usd": usd,
                 "inputSeconds": round(rec.input_seconds, 1), "outputSeconds": round(seconds, 1)})
     code, reason = stop_code or (1000, "")

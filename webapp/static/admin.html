@@ -1,10 +1,9 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261115d"><link rel="stylesheet" href="/assets/admin.css?v=20261117a"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261118a"><link rel="stylesheet" href="/assets/admin.css?v=20261118f"><link rel="stylesheet" href="/assets/topbar.css?v=20261118d"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>團隊管理</small></span></a>
   <div class="topbar-actions">
-    <a class="ghost-button" href="/">即時會議</a>
     <div id="account" class="account"></div>
     <button id="themeToggle" class="icon-button" type="button" aria-label="切換深淺主題" title="切換深淺主題"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="sun" d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/><path class="moon" d="M20.4 15.2A8.4 8.4 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/></svg></button>
   </div>
@@ -27,11 +26,29 @@
   </section>
 
   <section id="interpretCard" class="create card interpret-entry" aria-labelledby="interpretTitle">
-    <div class="interpret-entry-head">
-      <h2 id="interpretTitle" class="label">即時口譯用量</h2>
-      <a class="secondary-button compact" href="/interpret">即時口譯</a>
-    </div>
+    <h2 id="interpretTitle" class="label">即時口譯用量</h2>
     <p id="interpretUsageText" class="summary">讀取中…</p>
+    <ul id="interpretByUser" class="usage-users" hidden></ul>
+  </section>
+
+  <section id="interpretAccess" class="create card interpret-entry" aria-labelledby="accessTitle">
+    <h2 id="accessTitle" class="label">即時口譯權限</h2>
+    <p class="summary">即時口譯在首頁「即時口譯」模式使用。系統管理員一律可用；其他人要在這裡加入帳號才能使用。</p>
+    <ul id="accessList" class="members"></ul>
+    <form id="accessForm" class="row add-member">
+      <input id="accessName" class="input" placeholder="輸入公司帳號" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="開放即時口譯的帳號">
+      <button class="secondary-button" type="submit">開放權限</button>
+    </form>
+  </section>
+
+  <section id="retention" class="create card interpret-entry" aria-labelledby="retentionTitle">
+    <h2 id="retentionTitle" class="label">紀錄保存期限</h2>
+    <p class="summary">即時翻譯與即時口譯紀錄超過天數會自動刪除。</p>
+    <form id="retentionForm" class="row">
+      <label class="retention-field">保存 <input id="retentionDays" class="input compact" type="number" min="1" max="3650" step="1" required aria-label="保存天數"> 天</label>
+      <button class="secondary-button" type="submit">儲存</button>
+    </form>
+    <p id="retentionNote" class="summary" aria-live="polite"></p>
   </section>
 
   <form id="createTeam" class="create card">
@@ -47,7 +64,7 @@
 </main>
 
 <script src="/assets/return-path.js?v=20261113c"></script>
-<script src="/assets/account.js?v=20261115a"></script>
+<script src="/assets/account.js?v=20261118b"></script>
 <script>
 const $=id=>document.getElementById(id);
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
@@ -64,6 +81,11 @@ fetch('/api/admin/mai-usage').then(response=>response.ok?response.json():null).t
 // 即時口譯 (realtime-interpret): the translated speech is billed by its length; it is not part of the MAI budget.
 function showInterpretUsage(usage){
   $('interpretUsageText').textContent=usage?`累計收到 ${(usage.seconds/3600).toFixed(2)} 小時的譯音，約 ${usage.usd.toFixed(2)} 美元（每小時 ${usage.usdPerHour} 美元，不算進雲端辨識的上限）。金額依譯音長度估算，不是帳單。`:'用量暫時讀不到。';
+  // Per user (interpret-mode-on-home); '' is usage entered by hand before users were recorded.
+  const users=Object.entries(usage?.byUser||{}).sort((a,b)=>b[1]-a[1]);
+  $('interpretByUser').hidden=!users.length;
+  $('interpretByUser').replaceChildren(...users.map(([name,seconds])=>el('li',{},el('b',{textContent:name||'（未記名）'}),
+    el('span',{textContent:`${(seconds/3600).toFixed(2)} 小時，約 ${(seconds/3600*usage.usdPerHour).toFixed(2)} 美元`}))));
 }
 fetch('/api/admin/interpret-usage').then(response=>response.ok?response.json():null).then(showInterpretUsage).catch(()=>showInterpretUsage(null));
 async function call(method,url,body){
@@ -149,6 +171,21 @@ async function load(){
   $('teams').replaceChildren(...(teams.length?teams.map(teamCard):[el('div',{className:'card empty'},
     el('b',{textContent:'還沒有任何團隊'}),el('p',{textContent:'在上方輸入名稱建立第一個團隊，再把成員加進去。'}))]));
 }
+// 即時口譯權限 (interpret-mode-on-home): administrators grant the accounts that may interpret.
+async function loadAccess(){
+  const granted=await call('GET','/api/admin/interpret-access');
+  $('accessList').replaceChildren(...(granted.length?granted.map(g=>el('li',{className:'member'},
+    el('span',{className:'member-text'},el('b',{textContent:g.username}),el('small',{textContent:`由 ${g.grantedBy} 開放`})),
+    el('span',{className:'member-actions'},confirmButton('移除',`確定移除 ${g.username} 的即時口譯權限？`,async()=>{await call('DELETE',`/api/admin/interpret-access/${encodeURIComponent(g.username)}`);await loadAccess()}))))
+    :[el('li',{className:'empty-members',textContent:'還沒有開放給任何人。'})]));
+}
+$('accessForm').onsubmit=event=>{event.preventDefault();const name=$('accessName').value.trim();if(!name)return;
+  act(async()=>{await call('POST','/api/admin/interpret-access',{username:name});$('accessName').value='';await loadAccess()},event.submitter)};
+loadAccess().catch(error=>showError(error.message));
+// 紀錄保存期限: how many days saved 即時翻譯 / 即時口譯 records are kept.
+call('GET','/api/admin/records-retention').then(r=>{$('retentionDays').value=r.days}).catch(error=>showError(error.message));
+$('retentionForm').onsubmit=event=>{event.preventDefault();const days=Number($('retentionDays').value);
+  act(async()=>{const r=await call('PUT','/api/admin/records-retention',{days});$('retentionDays').value=r.days;$('retentionNote').textContent=`已儲存：保存 ${r.days} 天，較舊的紀錄已刪除。`},event.submitter)};
 $('createTeam').onsubmit=event=>{event.preventDefault();const button=event.submitter;act(async()=>{await call('POST','/api/admin/teams',{name:$('teamName').value});$('teamName').value=''},button)};
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
 load().catch(error=>showError(error.message));

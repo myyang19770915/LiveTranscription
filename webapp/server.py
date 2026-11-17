@@ -23,6 +23,7 @@ import db
 import diarize
 import interpret
 import interpret_usage
+import records_retention
 import mai_asr
 import mai_usage
 import mailer
@@ -143,9 +144,11 @@ async def lifespan(_app: FastAPI):
     diarizing = asyncio.create_task(diarize.worker()) if diarize.configured() else None
     # Due-date reminders to action item owners (action-reminders); without SMTP_HOST nothing is mailed.
     reminding = asyncio.create_task(reminders.worker()) if mailer.configured() else None
+    # Saved 即時翻譯 / 即時口譯 records past their days (interpret-mode-on-home): now and every 6 hours.
+    retention = asyncio.create_task(records_retention.worker())
     logger.info("system administrators (ADMIN_USERS): %s", ", ".join(sorted(auth.ADMIN_USERS)) or "none")
     yield
-    for task in (indexing, diarizing, reminding):
+    for task in (indexing, diarizing, reminding, retention):
         if task:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -166,6 +169,7 @@ app.include_router(series.router)
 app.include_router(metrics.router)
 app.include_router(mai_usage.router)
 app.include_router(interpret_usage.router)
+app.include_router(records_retention.router)
 app.include_router(interpret.router)
 app.include_router(search.router)
 app.include_router(qa.router)
@@ -579,6 +583,7 @@ class TranscriptDisplay:
         self.chinese = language in ("auto", "zhen", "zh", "Chinese", "yue", "Cantonese")
         self.raw = self.pair_text = self.detected = ""
         self.quality = None   # 精準模式: told what the browser is shown, to compare with its own recognition
+        self.on_text = None   # 即時翻譯's record (live-translation): keeps the last text the browser was shown
 
     def render(self, text: str) -> str:
         return apply_aliases(repair_asr(strip_context_echo(text, self.glossary)), self.glossary)
@@ -608,6 +613,8 @@ class TranscriptDisplay:
                 payload["displayText"] = self.render(TO_TRADITIONAL.convert(self.raw) if self.chinese else self.raw)
         if self.quality is not None and isinstance(payload.get("displayText"), str):
             self.quality.live(payload["displayText"])
+        if self.on_text is not None and isinstance(payload.get("displayText"), str):
+            self.on_text(payload["displayText"])
 
     def tentative(self, text: str) -> str:
         """MAI's intermediate (not yet confirmed) text as the browser shows it: Traditional script for Chinese."""
@@ -619,6 +626,46 @@ class TranscriptDisplay:
         中日雙向 builds its text per chunk, so it is never rewritten."""
         if not self.bilingual:
             self.raw = self.raw[:start] + text
+
+
+class TranslateRecord:
+    """A 即時翻譯 session saved as the user's own record (live-translation): the 16 kHz audio sent to recognition,
+    written as it arrives, the last text shown, and the translation the page sends every 30 seconds. The page learns
+    the token for those requests with {"record": <token>} and the saved id with {"saved": <id>}."""
+
+    def __init__(self, browser: WebSocket, username: str, meta: dict):
+        self.browser, self.done = browser, False
+        self.rec = interpret.Recording(interpret.user_dir(username), meta, rate=16000, output=False)
+        self.token = interpret.live_open(username, self.rec)
+
+    def text(self, shown: str) -> None:
+        self.rec.source = shown[:interpret.MAX_TEXT]
+
+    def audio(self, pcm: bytes) -> None:
+        first = self.rec.input_bytes == 0
+        self.rec.add_input(pcm)
+        if first:
+            asyncio.get_running_loop().create_task(self._tell({"record": self.token}))
+
+    async def _tell(self, payload: dict) -> None:
+        if self.browser.client_state == WebSocketState.CONNECTED:
+            with contextlib.suppress(Exception):
+                await self.browser.send_text(json.dumps(payload))
+
+    async def finish(self) -> None:
+        if self.done:
+            return
+        self.done = True
+        interpret.live_close(self.token)
+        try:
+            saved = await asyncio.to_thread(self.rec.save, 0.0)
+        except OSError as error:
+            logger.error("translate record not saved: %s", error)
+            with contextlib.suppress(OSError):
+                self.rec.close()
+            return
+        if saved:
+            await self._tell({"saved": saved})
 
 
 async def finish_recording(audio: "meeting_audio.MeetingAudio", meeting_id) -> None:
@@ -640,7 +687,7 @@ async def transcribe(browser: WebSocket):
         # The reason is what the live page shows (stream-limits).
         await browser.close(code=4429, reason=stream_limits.TOO_MANY.format(n=stream_limits.MAX_STREAMS_PER_USER))
         return
-    audio, meeting, quality = None, None, None
+    audio, meeting, quality, record = None, None, None, None
     try:
         try:
             raw_header = await asyncio.wait_for(browser.receive_text(), stream_limits.STREAM_HEADER_TIMEOUT)
@@ -648,8 +695,9 @@ async def transcribe(browser: WebSocket):
             await browser.close(code=4408, reason=stream_limits.NO_START)
             return
         header = json.loads(raw_header)
-        # 即時翻譯 (live-translation): no meeting, nothing kept — audio goes to the engine and the events come back.
-        translate_only = header.get("mode") == "translate"
+        # 即時翻譯 and the source text of 即時口譯 (live-translation, interpret-mode-on-home): no meeting. 即時翻譯 is
+        # saved as the user's own record; 即時口譯's source keeps nothing here, /ws/interpret saves that session.
+        translate_only = header.get("mode") in ("translate", "interpret")
         if not translate_only:
             # The meeting must belong to one of the user's teams before any audio leaves for ASR or MAI.
             try:
@@ -681,12 +729,19 @@ async def transcribe(browser: WebSocket):
                                                LANGUAGES.get(language, (None,))[0] or "zhen")
             display.quality = quality
             guarded = quality_pass.TeeReceiver(guarded, quality.feed)
+        if header.get("mode") == "translate":
+            record = TranslateRecord(browser, user.username, {"kind": "translate", "target": str(header.get("target", ""))[:16],
+                                                               "sourceLang": language, "engine": asr_engine(str(header.get("engine", "")), language)})
+            display.on_text = record.text
+            guarded = quality_pass.TeeReceiver(guarded, record.audio)
         if asr_engine(str(header.get("engine", "")), language) == "mai":
             # Audio goes to Azure; text goes to the cloud text model only when 雲端精修 is on.
             cloud_marks = PUNCTUATE_MAI and bool(header.get("refine")) and language == "zh" and bool(REFINE_URL and REFINE_MODEL)
             await mai_asr.MaiBridge(guarded, language, display, punctuate_item if cloud_marks else None).run()
             if quality is not None and browser.client_state == WebSocketState.CONNECTED:
                 await quality.finish()   # the last sentences, then the connection closes
+            if record is not None:
+                await record.finish()
             if browser.client_state == WebSocketState.CONNECTED:
                 await browser.close()
             return
@@ -743,9 +798,13 @@ async def transcribe(browser: WebSocket):
                 task.result()
             if quality is not None and browser.client_state == WebSocketState.CONNECTED:
                 await quality.finish()   # the last sentences, then the connection closes
+            if record is not None:
+                await record.finish()
             if browser.client_state == WebSocketState.CONNECTED:
                 await browser.close()
     except stream_limits.StreamStopped as stop:
+        if record is not None:
+            await record.finish()   # saved, and the page told so, before the connection closes
         if browser.client_state == WebSocketState.CONNECTED:
             await browser.close(code=stop.code, reason=stop.reason)
     except (WebSocketDisconnect, websockets.ConnectionClosed):
@@ -761,3 +820,5 @@ async def transcribe(browser: WebSocket):
         stream_limits.free_place(user.username)
         if audio is not None:
             await asyncio.shield(finish_recording(audio, meeting["id"]))
+        if record is not None:
+            await asyncio.shield(record.finish())   # the browser left or the stream stopped: keep what there is

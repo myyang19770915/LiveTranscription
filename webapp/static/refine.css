@@ -6,8 +6,6 @@ body {
     var(--bg);
 }
 
-main { width: min(1360px, 100%); padding: 24px 40px 18px; }
-nav { min-height: 42px; }
 .brand { gap: 12px; }
 .brand-mark { width: 40px; height: 40px; border-radius: var(--radius-card); }
 .brand-mark img { width: 32px; height: 32px; object-fit: contain; display: block; }
@@ -127,7 +125,7 @@ body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-
   border-radius: var(--radius-control);
   box-shadow: 0 6px 20px var(--accent-soft);
 }
-.primary:hover { box-shadow: 0 10px 28px var(--accent-soft); }
+.primary:hover { box-shadow: 0 10px 28px var(--accent-soft); transform: none; }   /* no movement on hover */
 .button-copy b { font-size: 13px; }
 
 .live-bar {
@@ -321,3 +319,23 @@ button:focus-visible, select:focus-visible, input:focus-visible {
   .controls.translate.advanced-folded:has(#setupAdvanced:not([hidden])) { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "h-adv h-adv h-adv h-adv"     "context context context context"; }
 }
 .setup-toggle:disabled, .mobile-settings-fields .setup-toggle:disabled { opacity: 1; cursor: default; color: var(--mint); }   /* a heading on phones, not a dimmed control */
+
+/* 即時口譯 mode of the live page (interpret-mode-on-home): its own options; the text-translation options do not apply. */
+.interpret-only { display: none; }
+body.interpret-mode .interpret-only { display: flex; }
+body.interpret-mode #refineGroup, body.interpret-mode #setupAdvanced, body.interpret-mode #asrEngineRow, body.interpret-mode .context-field,
+body.interpret-mode #cloudRefineRow, body.interpret-mode #qualityRow { display: none; }   /* phones move the two rows into the settings dialog */
+.mode-btn[data-locked="1"] { cursor: not-allowed; }
+.saved-link { color: var(--accent); text-decoration: none; font-size: 10px; }
+.saved-link:hover { text-decoration: underline; }
+/* 即時口譯's settings (ui-consistency-pass): no 會議情境 or advanced rows; 同步播放譯音 sits in the start button's row. */
+#interpretPlayRow { grid-area: play; align-items: center; min-width: 0; }
+#interpretPlayRow .toggle-desc { display: none; }   /* the title attribute keeps the explanation */
+.controls.interpret { grid-template-areas: "mode mode mode mode mode mode" "h-audio h-audio h-audio h-audio h-audio h-audio"
+  "source swap target audio mic test" "hint hint hint hint play start" !important; }
+@media (min-width: 761px) and (max-width: 1180px) {   /* phones: mobile.css's one-row layout and the settings dialog */
+  .controls.interpret { grid-template-areas: "mode mode mode mode" "h-audio h-audio h-audio h-audio" "source swap target audio"
+    "mic test play start" "hint hint hint hint" !important; }
+}
+/* The live page shares the page width with every other page (ui-consistency-pass, visual-tokens). */
+main { width: min(calc(var(--page-width) + 2 * var(--page-gutter)), 100%); padding: 6px var(--page-gutter) 22px; }

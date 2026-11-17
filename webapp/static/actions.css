@@ -1,6 +1,6 @@
 /* Action board (Jira-style, jira-style-board) and the action status control (also used on the minutes page).
    Builds on tokens.css, admin.css, review.css. */
-.board-page { width: min(1440px, 100%); }
+/* .board-page uses the shared page width (admin.css .page); with the detail panel open it makes room on the right. */
 .board-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 .board-head-actions { display: flex; align-items: center; gap: 14px; }
 .board-head-actions .summary { margin: 0; }
@@ -108,7 +108,7 @@
 .detail-value select.input { appearance: auto; }
 .detail-value a { color: var(--accent); overflow-wrap: anywhere; }
 .detail-hint { margin: 0; }
-@media (min-width: 1200px) { body.detail-open .board-page { width: auto; max-width: 1440px; margin-right: 480px; margin-left: max(0px, calc((100vw - 480px - 1440px) / 2)); } }
+@media (min-width: 1200px) { body.detail-open .board-page { width: auto; max-width: calc(var(--page-width) + 2 * var(--page-gutter)); margin-right: 480px; margin-left: max(0px, calc((100vw - 480px - calc(var(--page-width) + 2 * var(--page-gutter))) / 2)); } }
 
 /* Status control */
 .status-control { display: grid; gap: 6px; }
@@ -133,10 +133,18 @@
   .toolbar-gap { display: none; }
   .board-search { width: 100%; }
 }
+/* Phones: search and people each take a row, 團隊 and 分組 share one; the quick filters scroll sideways in one line. */
+@media (max-width: 640px) {
+  .board-toolbar .toolbar-row:first-child { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .board-toolbar .toolbar-row:first-child > .board-search, .board-toolbar .toolbar-row:first-child > .avatar-filter { grid-column: 1 / -1; }
+  .board-toolbar .toolbar-select { min-width: 0; }
+  .board-toolbar .toolbar-select select { flex: 1; min-width: 0; }
+  .quick-filters { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+  .quick-filters > * { flex: none; }
+}
 
 /* The contrast colour (brand-palette-blue): the one action that adds something. */
-#create { border-color: var(--accent-2); background: var(--accent-2); color: var(--accent-2-ink); }
-#create:hover { filter: brightness(1.06); }
+/* 新增待辦 uses the shared primary blue (ui-consistency-pass), like every other page's main action. */
 
 /* Due-date e-mail reminders (action-reminders). */
 .issue-muted { display: inline-flex; color: var(--muted); }

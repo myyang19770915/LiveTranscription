@@ -114,7 +114,7 @@ try {
   await context.close();
 
   // --- Avatar menu page links (site-navigation example table). ---
-  const NAV = ['會議紀錄', '待辦看板', '成效指標', '團隊管理'];
+  const NAV = ['即時會議', '會議紀錄', '我的紀錄', '待辦看板', '成效指標', '團隊管理'];   // ui-consistency-pass: one rule on every page
   const menuLinks = async (token, width, path) => {
     const {context: c, page: p} = await signedIn(token, width);
     await p.goto(`${app}${path}`);
@@ -125,12 +125,10 @@ try {
     return links.filter(text => NAV.includes(text));
   };
   const rows = [
-    [500, `/meetings/${meetingId}`, 'admin', ['會議紀錄', '成效指標', '團隊管理']],
-    [500, '/actions', 'member', ['會議紀錄', '成效指標']],
-    [500, '/metrics', 'admin', ['會議紀錄', '團隊管理']],
-    [500, '/', 'admin', ['待辦看板', '成效指標', '團隊管理']],
-    [850, '/', 'admin', ['成效指標']],
-    [700, '/actions', 'admin', []],
+    [500, `/meetings/${meetingId}`, 'admin', ['即時會議', '我的紀錄', '待辦看板', '成效指標', '團隊管理']],
+    [500, '/actions', 'member', ['即時會議', '會議紀錄', '我的紀錄', '成效指標']],
+    [500, '/actions', 'admin', ['即時會議', '會議紀錄', '我的紀錄', '成效指標', '團隊管理']],
+    [850, '/', 'admin', ['我的紀錄', '成效指標', '團隊管理']],
     [1280, '/actions', 'admin', []],
   ];
   for (const [width, path, user, want] of rows) {

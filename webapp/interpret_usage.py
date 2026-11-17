@@ -1,7 +1,7 @@
 """How much translated audio came back from Azure GPT-Realtime-Translate, and what it costs (realtime-interpret).
 
 The 即時口譯 page is billed by the length of the translated speech (Global Output, USD per hour). Each finished
-session adds its seconds to one row per date and purpose; nothing else is kept. The cost is an estimate
+session adds its seconds to one row per date, purpose and user; nothing else is kept. The cost is an estimate
 (seconds x price), not the bill, and it is not part of the MAI budget (mai-usage).
 
 Usage outside the app (the lab test bench) is entered by hand, in the app container:
@@ -30,24 +30,24 @@ def cost(seconds: float) -> float:
     return round(seconds / 3600 * USD_PER_HOUR, 2)
 
 
-async def record(purpose: str, seconds: float) -> float:
-    """Add to today's row of this purpose; returns the seconds recorded in all rows."""
+async def record(purpose: str, seconds: float, username: str = "") -> float:
+    """Add to today's row of this purpose and user ('' when entered by hand); returns the seconds in all rows."""
     if not mai_usage.PURPOSE.fullmatch(purpose) or not (math.isfinite(seconds) and seconds > 0):
         raise ValueError("purpose: 1-40 of a-z, 0-9 and '-'; seconds: more than 0")
     today = datetime.now(ZoneInfo(team_access.MEETING_TIMEZONE)).date()
     async with db.connect() as conn:
-        await conn.execute("INSERT INTO interpret_usage (day, purpose, seconds) VALUES (%s, %s, %s) "
-                           "ON CONFLICT (day, purpose) DO UPDATE SET seconds = interpret_usage.seconds + EXCLUDED.seconds",
-                           (today, purpose, seconds))
+        await conn.execute("INSERT INTO interpret_usage (day, purpose, username, seconds) VALUES (%s, %s, %s, %s) "
+                           "ON CONFLICT (day, purpose, username) DO UPDATE SET seconds = interpret_usage.seconds + EXCLUDED.seconds",
+                           (today, purpose, username, seconds))
         return (await (await conn.execute("SELECT coalesce(sum(seconds), 0) AS seconds FROM interpret_usage")).fetchone())["seconds"]
 
 
-async def add(purpose: str, seconds: float) -> bool:
+async def add(purpose: str, seconds: float, username: str = "") -> bool:
     """record() for a session: saving the session goes on whatever happens here."""
     if not seconds > 0:
         return True
     try:
-        await record(purpose, seconds)
+        await record(purpose, seconds, username)
         return True
     except Exception as error:   # the database is down, or the table is not there yet
         logger.warning("interpret usage not recorded (%.1f s, %s): %s", seconds, purpose, type(error).__name__)
@@ -57,9 +57,11 @@ async def add(purpose: str, seconds: float) -> bool:
 async def summary() -> dict:
     async with db.connect() as conn:
         rows = await (await conn.execute("SELECT purpose, sum(seconds) AS seconds FROM interpret_usage GROUP BY purpose ORDER BY purpose")).fetchall()
+        users = await (await conn.execute("SELECT username, sum(seconds) AS seconds FROM interpret_usage GROUP BY username ORDER BY username")).fetchall()
     seconds = sum(row["seconds"] for row in rows)
     return {"seconds": round(seconds, 1), "usd": cost(seconds), "usdPerHour": USD_PER_HOUR,
-            "byPurpose": {row["purpose"]: round(row["seconds"], 1) for row in rows}}
+            "byPurpose": {row["purpose"]: round(row["seconds"], 1) for row in rows},
+            "byUser": {row["username"]: round(row["seconds"], 1) for row in users}}
 
 
 @router.get("/api/admin/interpret-usage")

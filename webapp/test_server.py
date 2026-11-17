@@ -19,6 +19,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import httpx
 import psycopg
@@ -37,6 +38,8 @@ import mailer
 import meeting_audio
 import minutes
 import qa
+import records_retention
+import team_access
 import chunk_asr
 import mai_usage
 import quality_pass
@@ -805,6 +808,24 @@ class AudioAfter(FakeUpstream):
         await self.heard.wait()
         async for message in super().__aiter__():
             yield message
+
+
+class AudioUntilEos(AudioAfter):
+    """AudioAfter that stays open until the page sends the end-of-stream text, as ASR does."""
+
+    def __init__(self, wait):
+        super().__init__(wait)
+        self.ended = asyncio.Event()
+
+    async def send(self, message):
+        await super().send(message)
+        if isinstance(message, str) and message.endswith("_EOS"):
+            self.ended.set()
+
+    async def __aiter__(self):
+        async for message in super().__aiter__():
+            yield message
+        await self.ended.wait()
 
 
 class MeetingTimelineTests(AccountTestCase):
@@ -3860,7 +3881,9 @@ class QualityStreamTests(AccountTestCase):
                 websocket.send_bytes(audio)
                 with contextlib.suppress(WebSocketDisconnect):
                     while True:
-                        messages.append(websocket.receive_json())
+                        message = websocket.receive_json()
+                        if not {"record", "saved"} & message.keys():   # 即時翻譯's own record (tested on its own)
+                            messages.append(message)
         return messages
 
     def test_config_reports_quality_only_when_both_models_are_set(self):
@@ -4150,20 +4173,83 @@ class MeetingOwnershipTests(AccountTestCase):
                 upstream.assert_not_called()
                 mai.assert_not_called()
 
-    def test_translate_only_session_keeps_nothing_and_needs_no_team(self):
-        # live-translation: a user in no team translates a video; nothing is stored, events carry no audio time.
-        upstream = FakeUpstream([{"msg": {"text": "你好", "language": "Chinese"}}])
+    def test_translate_session_is_saved_as_a_record_not_a_meeting(self):
+        # live-translation: a user in no team translates a video; it becomes the user's own record, not a meeting.
+        upstream = AudioUntilEos(32000)
         self.ldap.add("dave", "pw-dave")   # in no team at all
         with patch("server.websockets.connect", return_value=upstream):
             with self.signed_in("dave").websocket_connect("/ws/transcribe") as websocket:
-                websocket.send_json({"mode": "translate", "language": "zh"})
-                websocket.send_bytes(b"\x00\x01" * 160)
-                event = websocket.receive_json()
-        self.assertEqual(event["displayText"], "你好")
-        self.assertNotIn("audioMs", event)
+                websocket.send_json({"mode": "translate", "language": "zh", "target": "en"})
+                websocket.send_bytes(b"\x00\x01" * 16000)   # one second at 16 kHz
+                events = [websocket.receive_json(), websocket.receive_json()]
+                token = next(e["record"] for e in events if "record" in e)
+                shown = next(e for e in events if "displayText" in e)
+                # The page sends its translation every 30 seconds while the session runs.
+                self.assertEqual(self.signed_in("bob").put(f"/api/interpret/live/{token}/translation", json={"text": "x"}).status_code, 404)
+                self.assertEqual(self.signed_in("dave").put(f"/api/interpret/live/{token}/translation", json={"text": "This meeting"}).status_code, 200)
+                websocket.send_text("YOUDAO_ONETIME_ASR_STREAM_EOS")
+                saved = websocket.receive_json()["saved"]
+        self.assertEqual(shown["displayText"], "這個會議")
+        self.assertNotIn("audioMs", shown)
         self.assertEqual(self.query("SELECT count(*) FROM meetings"), [(0,)])
-        self.assertEqual(list(self.output.rglob("*")), [])   # no audio.wav, no meeting folder
+        self.assertFalse((self.output / "teams").exists())   # no audio.wav, no meeting folder
         self.assertIs(json.loads(upstream.sent[0])["retain"], False)   # the ASR request log keeps no text either
+        folder = self.output / "interpret" / "dave" / saved
+        data = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+        self.assertEqual((data["kind"], data["sourceText"], data["translation"], data["inputSeconds"], data["usd"]),
+                         ("translate", "這個會議", "This meeting", 1.0, 0.0))
+        with wave.open(str(folder / "input.wav")) as audio:
+            self.assertEqual((audio.getframerate(), audio.getnframes()), (16000, 16000))
+        self.assertFalse((folder / "output.wav").exists())
+        self.assertEqual(json.loads((folder / "bars.json").read_text())["output"], [])
+        self.assertEqual(self.signed_in("dave").put(f"/api/interpret/live/{token}/translation", json={"text": "x"}).status_code, 404)   # over
+
+    def test_a_translate_session_stopped_by_its_limit_is_saved_first(self):
+        # The stream limit closes the connection; the page still learns the record's id before it does.
+        with patch("server.websockets.connect", return_value=AudioUntilEos(10 ** 9)), patch("stream_limits.max_stream_bytes", return_value=3200):
+            with self.signed_in("alice").websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"mode": "translate", "language": "zh", "target": "en"})
+                websocket.send_bytes(b"\x00\x01" * 1600)
+                websocket.send_bytes(b"\x00\x01" * 1600)   # over the limit
+                events = []
+                with self.assertRaises(WebSocketDisconnect) as closed:
+                    while True:
+                        events.append(websocket.receive_json())
+        self.assertEqual(closed.exception.code, 4413)
+        saved = [e["saved"] for e in events if "saved" in e]
+        self.assertEqual(len(saved), 1)
+        self.assertTrue((self.output / "interpret" / "alice" / saved[0] / "input.wav").is_file())
+
+    def test_a_closed_tab_keeps_the_last_translation_sent(self):
+        upstream = AudioUntilEos(3200)
+        with patch("server.websockets.connect", return_value=upstream):
+            with self.signed_in("alice").websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"mode": "translate", "language": "zh", "target": "en"})
+                websocket.send_bytes(b"\x00\x01" * 1600)
+                token = next(e["record"] for e in (websocket.receive_json(), websocket.receive_json()) if "record" in e)
+                self.assertEqual(self.signed_in("alice").put(f"/api/interpret/live/{token}/translation", json={"text": "This meeting"}).status_code, 200)
+            # the tab went away without the end of the stream
+        for _ in range(50):
+            saved = [p for p in (self.output / "interpret" / "alice").iterdir() if not p.name.startswith(".")]
+            if saved:
+                break
+            time.sleep(0.05)
+        data = json.loads((saved[0] / "session.json").read_text(encoding="utf-8"))
+        self.assertEqual((data["kind"], data["translation"], data["sourceText"]), ("translate", "This meeting", "這個會議"))
+
+    def test_interpret_source_saves_nothing(self):
+        upstream = AudioAfter(3200)
+        with patch("server.websockets.connect", return_value=upstream):
+            with self.signed_in("alice").websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"mode": "interpret", "language": "zh"})
+                websocket.send_bytes(b"\x00\x01" * 1600)
+                event = websocket.receive_json()
+                with contextlib.suppress(WebSocketDisconnect):
+                    while True:
+                        self.assertNotIn("saved", websocket.receive_json())
+        self.assertEqual(event["displayText"], "這個會議")
+        self.assertEqual(self.query("SELECT count(*) FROM meetings"), [(0,)])
+        self.assertEqual(list(self.output.rglob("*")), [])
 
     def test_meeting_list_shows_only_the_users_teams(self):
         mine, theirs = self.team("研發", "alice"), self.team("業務", "bob")
@@ -5511,14 +5597,113 @@ class InterpretTests(AccountTestCase):
 
     def test_who_can_open_the_page(self):
         self.assertEqual(self.signed_in("admin").get("/interpret").status_code, 200)
-        member = self.signed_in("alice").get("/interpret")
-        self.assertEqual(member.status_code, 403)
-        self.assertIn("沒有權限", member.text)
+        member = self.signed_in("alice").get("/interpret")   # 我的紀錄: every user's own records
+        self.assertEqual(member.status_code, 200)
+        self.assertIn("我的紀錄", member.text)
         anonymous = TestClient(app).get("/interpret", follow_redirects=False)
         self.assertEqual((anonymous.status_code, anonymous.headers["location"]), (303, "/login?next=%2Finterpret"))
-        for path in ("/api/interpret/config", "/api/interpret/sessions", "/api/admin/interpret-usage"):
+        for path in ("/api/admin/interpret-usage", "/api/admin/interpret-access"):
             self.assertEqual(self.signed_in("alice").get(path).status_code, 403, path)
             self.assertEqual(TestClient(app).get(path).status_code, 401, path)
+        self.assertEqual(self.signed_in("alice").get("/api/interpret/sessions").json(), [])   # every user has records
+        self.assertEqual(TestClient(app).get("/api/interpret/sessions").status_code, 401)
+        self.assertFalse(self.signed_in("alice").get("/api/interpret/config").json()["allowed"])
+        self.assertEqual(TestClient(app).get("/api/interpret/config").status_code, 401)
+
+    # --- Interpreting is open to granted users
+
+    def test_who_may_interpret(self):
+        admin = self.signed_in("admin")
+        self.assertEqual(admin.post("/api/admin/interpret-access", json={"username": " Alice "}).json(), {"username": "alice"})
+        self.assertEqual(self.query("SELECT username, granted_by FROM interpret_access"), [("alice", "admin")])
+        for user, expected in (("admin", True), ("alice", True), ("bob", False)):
+            self.assertEqual(self.signed_in(user).get("/api/interpret/config").json()["allowed"], expected, user)
+        self.assertEqual(admin.post("/api/admin/interpret-access", json={"username": "Bad Name"}).status_code, 422)
+        self.assertEqual(self.signed_in("alice").post("/api/admin/interpret-access", json={"username": "bob"}).status_code, 403)
+        self.assertEqual([g["username"] for g in admin.get("/api/admin/interpret-access").json()], ["alice"])
+        messages, _, calls = self.run_session([], client=self.signed_in("alice"))
+        self.assertEqual((messages[0], len(calls)), ({"type": "status", "state": "connected"}, 1))   # granted: interprets
+        self.assertEqual(admin.delete("/api/admin/interpret-access/alice").status_code, 200)
+        self.assertEqual(admin.delete("/api/admin/interpret-access/alice").status_code, 404)
+        self.assertEqual(admin.delete("/api/admin/interpret-access/Bad%20Name").status_code, 422)
+        self.assertFalse(self.signed_in("alice").get("/api/interpret/config").json()["allowed"])
+        connect, calls = self.connect_with(FakeAzureTranslate([]))
+        with connect, self.signed_in("alice").websocket_connect("/ws/interpret") as websocket:
+            self.assertEqual(self.closed_code(websocket), 4403)
+        self.assertEqual(calls, [])
+
+    def test_every_user_sees_only_their_own_records(self):
+        self.signed_in("admin").post("/api/admin/interpret-access", json={"username": "alice"})
+        sid = self.run_session([{"type": "session.output_transcript.delta", "delta": "Hi"}], client=self.signed_in("alice"))[0][-1]["saved"]
+        self.signed_in("admin").delete("/api/admin/interpret-access/alice")   # records stay readable without access
+        alice, bob = self.signed_in("alice"), self.signed_in("bob")
+        listed = alice.get("/api/interpret/sessions").json()
+        self.assertEqual([(s["id"], s["kind"]) for s in listed], [(sid, "interpret")])
+        self.assertEqual(alice.get(f"/api/interpret/sessions/{sid}").json()["kind"], "interpret")
+        self.assertEqual(bob.get("/api/interpret/sessions").json(), [])
+        for path in (f"/api/interpret/sessions/{sid}", f"/api/interpret/sessions/{sid}/bars", f"/api/interpret/sessions/{sid}/input.wav"):
+            self.assertEqual(bob.get(path).status_code, 404, path)
+            self.assertEqual(alice.get(path).status_code, 200, path)
+        self.assertEqual(bob.put(f"/api/interpret/sessions/{sid}/translation", json={"text": "x"}).status_code, 404)
+        self.assertEqual(alice.put(f"/api/interpret/sessions/{sid}/translation", json={"text": "x"}).status_code, 409)   # interpreting
+        # A 即時翻譯 record: its translation comes from the page, and it has no translated audio.
+        folder = self.output / "interpret" / "alice" / sid
+        data = json.loads((folder / "session.json").read_text(encoding="utf-8")) | {"kind": "translate", "sourceText": "大家好"}
+        (folder / "session.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        (folder / "output.wav").unlink()
+        self.assertEqual(alice.put(f"/api/interpret/sessions/{sid}/translation", json={"text": "Hello everyone."}).status_code, 200)
+        self.assertEqual(alice.get(f"/api/interpret/sessions/{sid}").json()["translation"], "Hello everyone.")
+        self.assertIn("Hello everyone.", (folder / "transcript.txt").read_text(encoding="utf-8"))
+        self.assertEqual(alice.put(f"/api/interpret/sessions/{sid}/translation", json={"text": "x" * 200001}).status_code, 422)
+        self.assertEqual(alice.get(f"/api/interpret/sessions/{sid}/output.wav").status_code, 404)
+        (folder / "bars.json").unlink()
+        self.assertEqual(alice.get(f"/api/interpret/sessions/{sid}/bars").json()["output"], [])
+        self.assertEqual(alice.delete(f"/api/interpret/sessions/{sid}").status_code, 200)
+
+    # --- Saved records are kept for a set number of days
+
+    def test_which_folders_a_90_day_sweep_deletes(self):
+        owner, now = self.output / "interpret" / "alice", time.time()
+        expected = {"20260818-235959": False, "20260819-000000": True, "20261117-101500": True,
+                    ".recording-20261115-aaaa": False, ".recording-20261117-bbbb": True}
+        for name in expected:
+            (owner / name).mkdir(parents=True)
+        os.utime(owner / ".recording-20261115-aaaa", (now - 2 * 86400, now - 2 * 86400))
+        self.assertEqual(records_retention.sweep_folders(90, date(2026, 11, 17), now), 2)
+        self.assertEqual({name: (owner / name).exists() for name in expected}, expected)
+
+    def test_an_administrator_changes_the_period(self):
+        admin, today = self.signed_in("admin"), datetime.now(ZoneInfo(team_access.MEETING_TIMEZONE)).date()
+        self.assertEqual(admin.get("/api/admin/records-retention").json(), {"days": 90})
+        self.assertEqual(self.signed_in("alice").get("/api/interpret/config").json()["retentionDays"], 90)
+        owner = self.output / "interpret" / "alice"
+        old, kept = (today - timedelta(days=31)).strftime("%Y%m%d-120000"), (today - timedelta(days=30)).strftime("%Y%m%d-000000")
+        for name in (old, kept):
+            (owner / name).mkdir(parents=True)
+        for body in ({"days": 0}, {"days": "90"}, {"days": 3651}, {"days": 30.5}):
+            self.assertEqual(admin.put("/api/admin/records-retention", json=body).status_code, 422, body)
+        self.assertEqual(self.signed_in("alice").put("/api/admin/records-retention", json={"days": 30}).status_code, 403)
+        self.assertTrue((owner / old).exists())   # nothing changed yet
+        self.assertEqual(admin.put("/api/admin/records-retention", json={"days": 30}).json(), {"days": 30})
+        self.assertEqual((admin.get("/api/admin/records-retention").json(), (owner / old).exists(), (owner / kept).exists()),
+                         ({"days": 30}, False, True))   # swept right away
+        self.assertEqual(self.signed_in("alice").get("/api/interpret/config").json()["retentionDays"], 30)
+        self.assertEqual(self.query("SELECT updated_by FROM app_settings"), [("admin",)])
+
+    def test_access_withdrawn_during_a_session(self):
+        self.signed_in("admin").post("/api/admin/interpret-access", json={"username": "alice"})
+        connect, _ = self.connect_with(FakeAzureTranslate([{"type": "session.output_transcript.delta", "delta": "Hi"}]))
+        with connect, patch("stream_limits.STREAM_RECHECK_MINUTES", 0), \
+                self.signed_in("alice").websocket_connect("/ws/interpret") as websocket:
+            websocket.send_json({"target": "en", "sourceLang": "zh"})
+            websocket.receive_json()
+            websocket.send_bytes(b"\x01\x00" * 2400)
+            self.assertEqual(websocket.receive_json(), {"type": "out", "delta": "Hi"})   # the first chunk is in
+            with psycopg.connect(TEST_DATABASE_URL, autocommit=True) as conn:
+                conn.execute("DELETE FROM interpret_access")
+            websocket.send_bytes(b"\x01\x00" * 2400)
+            self.assertEqual(self.closed_code(websocket), 4403)
+        self.assertEqual(len(list((self.output / "interpret" / "alice").iterdir())), 1)   # what there was is saved
 
     def test_the_config_names_the_languages_and_never_the_key(self):
         response = self.signed_in("admin").get("/api/interpret/config")
@@ -5636,7 +5821,7 @@ class InterpretTests(AccountTestCase):
         with wave.open(str(folder / "input.wav")) as audio:
             self.assertEqual((audio.getframerate(), audio.getnframes()), (24000, 240000))
         self.assertIn("你好。", (folder / "transcript.txt").read_text(encoding="utf-8"))
-        self.assertEqual(self.query("SELECT purpose, seconds FROM interpret_usage"), [("live", 15.4)])
+        self.assertEqual(self.query("SELECT purpose, username, seconds FROM interpret_usage"), [("live", "admin", 15.4)])
         self.assertNotIn(self.KEY, "".join(p.read_text(encoding="utf-8") for p in folder.glob("*.json")))
 
     def test_a_session_is_saved_when_the_usage_cannot_be_written(self):
@@ -5769,7 +5954,7 @@ class InterpretTests(AccountTestCase):
         with patch("auth.ADMIN_USERS", frozenset({"admin", "bob"})):
             self.assertEqual(self.signed_in("bob").get(f"/api/interpret/sessions/{sid}/bars").status_code, 404)
         self.assertEqual(owner.get("/api/interpret/sessions/2026-11-17/bars").status_code, 404)
-        self.assertEqual(self.signed_in("alice").get(f"/api/interpret/sessions/{sid}/bars").status_code, 403)
+        self.assertEqual(self.signed_in("alice").get(f"/api/interpret/sessions/{sid}/bars").status_code, 404)   # not hers
         part = owner.get(f"/api/interpret/sessions/{sid}/input.wav", headers={"Range": "bytes=44-4843"})   # replay seeks
         self.assertEqual((part.status_code, len(part.content)), (206, 4800))
 
@@ -5830,10 +6015,11 @@ class InterpretTests(AccountTestCase):
         self.assertEqual(interpret_usage.main(["add", "129", "lab"]), 0)
         for argv in (["add", "-5", "lab"], ["add", "inf", "lab"], ["add", "nan", "lab"], ["add", "60", "Lab Run"]):
             self.assertEqual(interpret_usage.main(argv), 2, argv)
-        asyncio.run(interpret_usage.record("live", 1800))
+        asyncio.run(interpret_usage.record("live", 1800, "alice"))
         self.assertEqual(self.signed_in("alice").get("/api/admin/interpret-usage").status_code, 403)
         usage = self.signed_in("admin").get("/api/admin/interpret-usage").json()
         self.assertEqual((usage["seconds"], usage["usd"], usage["usdPerHour"], usage["byPurpose"]), (1929, 1.09, 2.04, {"lab": 129, "live": 1800}))
+        self.assertEqual(usage["byUser"], {"": 129, "alice": 1800})   # usage per user; '' = entered by hand
         self.assertEqual(asyncio.run(mai_usage.summary())["seconds"], 0)   # not part of the MAI budget
 
 

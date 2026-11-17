@@ -129,7 +129,7 @@ try {
     await popup.close(); await page.waitForTimeout(300);
     check('closing the window resets the button', (await page.getAttribute('#subtitles', 'aria-pressed')) === 'false');
   }
-  check('the footer note says nothing is stored', (await page.textContent('#storeNote')).includes('不存到伺服器'));
+  check("the footer note says the session is saved as the user's own record", (await page.textContent('#storeNote')) === '存成你的紀錄，只有你看得到');
   check('the engine note says the spoken language decides the engine', (await page.textContent('#asrEngineRow .field-note')).startsWith('依語音語言自動選擇'));
   // The cloud engine's tentative text (mai-intermediate): shown after the confirmed transcript, part of the current speech, never exported.
   const tentativeEvent = text => JSON.stringify({status: 'success', msg: {text: '', reset: false, speech_end: false, language: ''}, tentative: text});

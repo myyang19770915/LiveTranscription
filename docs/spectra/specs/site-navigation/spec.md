@@ -8,7 +8,7 @@ The page header links every signed-in page to the others. On narrow screens the 
 
 ### Requirement: Hidden header links stay reachable on narrow screens
 
-Whenever the page header hides one of the page links 待辦看板 (`/actions`), 成效指標 (`/metrics`) or 團隊管理 (`/admin`) because the window is narrow, the signed-in user's avatar menu SHALL offer it instead. On a narrow window the menu SHALL also offer 會議紀錄 (`/meetings`) on every page except `/` (whose header keeps that link) and `/meetings`. The header hides links at these widths: on the meeting page (`/`) 待辦看板 and 團隊管理 at 760px or less and 成效指標 at 900px or less; on every other signed-in page 成效指標 and 團隊管理 at 640px or less. A destination SHALL NOT be offered on its own page, 團隊管理 SHALL NOT be offered to a user who is not an administrator, and the menu SHALL NOT offer a link the header is showing.
+Whenever the page header hides one of its page links because the window is narrow, the signed-in user's avatar menu SHALL offer it instead. Every page SHALL hide the same links at the same widths: 我的紀錄 (`/interpret`), 成效指標 (`/metrics`) and 團隊管理 (`/admin`) at 900px or less, and every link except 搜尋, together with 登出, at 700px or less. A destination SHALL NOT be offered on its own page, 團隊管理 SHALL NOT be offered to a user who is not an administrator, and the menu SHALL NOT offer a link the header is showing.
 
 #### Scenario: Narrow window menu
 
@@ -19,47 +19,159 @@ Whenever the page header hides one of the page links 待辦看板 (`/actions`), 
 
 | Width | Page | User | Menu page links |
 | ----- | ---- | ---- | --------------- |
-| 500px | `/meetings/<id>` (review) | administrator | 會議紀錄, 成效指標, 團隊管理 |
-| 500px | `/actions` | member | 會議紀錄, 成效指標 |
-| 500px | `/metrics` | administrator | 會議紀錄, 團隊管理 |
-| 500px | `/` | administrator | 待辦看板, 團隊管理, 成效指標 |
-| 850px | `/` | administrator | 成效指標 |
-| 700px | `/actions` | administrator | none |
+| 500px | `/review?…` | administrator | 即時會議, 我的紀錄, 待辦看板, 成效指標, 團隊管理 |
+| 500px | `/actions` | member | 即時會議, 會議紀錄, 我的紀錄, 成效指標 |
+| 500px | `/actions` | administrator | 即時會議, 會議紀錄, 我的紀錄, 成效指標, 團隊管理 |
+| 850px | `/` | administrator | 我的紀錄, 成效指標, 團隊管理 |
 | 1280px | `/actions` | administrator | none |
 
+
 <!-- @trace
-source: ui-review-fixes
-updated: 2026-11-15
+source: ui-consistency-pass
+updated: 2026-11-17
 code:
-  - webapp/static/review.html
-  - docs/ui-review-shots/qa-answer.jpeg
-  - webapp/static/meetings.html
-  - docs/ui-review-shots/minutes-empty.jpeg
-  - docs/ui-review-shots/search-results.jpeg
-  - webapp/static/accounts.css
-  - webapp/static/not-found.html
-  - docs/ui-review-shots/metrics.jpeg
-  - webapp/static/search.html
-  - docs/ui-review-shots/team-management.jpeg
-  - docs/ui-review-codex.md
-  - webapp/static/minutes.html
-  - chang01.png
-  - bench/ui_review_e2e.mjs
-  - webapp/static/admin.css
-  - docs/ui-review-shots/meetings-list.jpeg
-  - docs/ui-review-shots/mobile-transcript-review.jpeg
-  - webapp/static/account.js
-  - docs/ui-review-shots/meeting-live.jpeg
-  - webapp/static/ask.html
-  - bench/README.md
-  - webapp/static/actions.html
-  - webapp/static/admin.html
-  - docs/ui-review-shots/login-dark.jpeg
-  - webapp/static/index.html
+  - bench/ui_consistency_e2e.mjs
+  - lab/realtime-translate/costs.jsonl
+  - webapp/static/interpret.html
   - webapp/static/metrics.html
-  - docs/ui-review-shots/404-page.jpeg
+  - chang01.png
+  - webapp/migrations/020_interpret_access.sql
+  - webapp/static/actions.css
+  - webapp/static/ask.html
+  - webapp/static/search.html
+  - webapp/static/interpret-mode.js
+  - bench/translate_e2e.mjs
+  - webapp/static/admin.html
+  - webapp/static/tokens.css
+  - webapp/server.py
+  - gpt-realtime-translate_demoUI.png
+  - lab/realtime-translate/server.py
+  - webapp/static/ask.css
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - bench/metrics_e2e.mjs
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - lab/realtime-translate/index.html
+  - bench/ui_review_e2e.mjs
+  - webapp/static/accounts.css
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/static/minutes.html
+  - webapp/static/actions.html
+  - webapp/interpret_usage.py
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - webapp/static/account.js
+  - webapp/static/interpret.css
+  - webapp/static/search.css
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - webapp/static/admin.css
+  - bench/privacy_e2e.mjs
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - webapp/static/app.js
+  - webapp/static/metrics.css
+  - webapp/static/topbar.css
+  - webapp/static/meetings.html
+  - webapp/static/login.html
+  - webapp/static/refine.css
+  - bench/actions_e2e.mjs
+  - webapp/static/not-found.html
+  - webapp/records_retention.py
+  - webapp/static/index.html
+  - webapp/static/interpret-langs.js
   - webapp/static/review.css
-  - docs/ui-review-shots/actions-board.jpeg
+  - webapp/interpret.py
+  - webapp/static/mobile.css
+  - webapp/static/review.html
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/static/themes.css
+  - README.md
+  - bench/interpret_e2e.mjs
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - webapp/static/interpret.js
+tests:
+  - webapp/test_server.py
+-->
+
+---
+### Requirement: Every page shows the same header in the same place
+
+Every signed-in page (the live page and `/meetings`, `/interpret`, `/actions`, `/metrics`, `/search`, `/ask`, `/admin`, `/review`, `/minutes`) SHALL show one header with the brand on the left and, on the right, the links 即時會議, 會議紀錄, 我的紀錄, 待辦看板, 成效指標, 團隊管理 (system administrators only) and 搜尋 in this order, then the account and the theme button. The link of the current page SHALL stay in its place, marked as current (`aria-current="page"` and a distinct style); `/review` and `/minutes` count as 會議紀錄 and `/ask` as 搜尋. No page SHALL add a page-specific button to the header. At the same window width the brand and the theme button SHALL be at the same position on every page (within 1 px), and hovering a header button SHALL NOT move it. On the live page the service status SHALL stand next to the brand, not among the links. The sign-in page SHALL use the same round theme button.
+
+#### Scenario: Moving between pages
+
+- **WHEN** an administrator at 1440 px wide goes from the live page to 會議紀錄 and then to 團隊管理
+- **THEN** the header links read 即時會議 會議紀錄 我的紀錄 待辦看板 成效指標 團隊管理 搜尋 on all three pages, the brand and the theme button do not move, and the marked link is 即時會議, then 會議紀錄, then 團隊管理
+
+##### Example: the marked link
+
+| Page | Marked link |
+| ---- | ----------- |
+| `/` | 即時會議 |
+| `/meetings`, `/review?…`, `/minutes?…` | 會議紀錄 |
+| `/interpret` | 我的紀錄 |
+| `/search`, `/ask` | 搜尋 |
+| `/admin` | 團隊管理 |
+
+<!-- @trace
+source: ui-consistency-pass
+updated: 2026-11-17
+code:
+  - bench/ui_consistency_e2e.mjs
+  - lab/realtime-translate/costs.jsonl
+  - webapp/static/interpret.html
+  - webapp/static/metrics.html
+  - chang01.png
+  - webapp/migrations/020_interpret_access.sql
+  - webapp/static/actions.css
+  - webapp/static/ask.html
+  - webapp/static/search.html
+  - webapp/static/interpret-mode.js
+  - bench/translate_e2e.mjs
+  - webapp/static/admin.html
+  - webapp/static/tokens.css
+  - webapp/server.py
+  - gpt-realtime-translate_demoUI.png
+  - lab/realtime-translate/server.py
+  - webapp/static/ask.css
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - bench/metrics_e2e.mjs
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - lab/realtime-translate/index.html
+  - bench/ui_review_e2e.mjs
+  - webapp/static/accounts.css
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/static/minutes.html
+  - webapp/static/actions.html
+  - webapp/interpret_usage.py
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - webapp/static/account.js
+  - webapp/static/interpret.css
+  - webapp/static/search.css
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - webapp/static/admin.css
+  - bench/privacy_e2e.mjs
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - webapp/static/app.js
+  - webapp/static/metrics.css
+  - webapp/static/topbar.css
+  - webapp/static/meetings.html
+  - webapp/static/login.html
+  - webapp/static/refine.css
+  - bench/actions_e2e.mjs
+  - webapp/static/not-found.html
+  - webapp/records_retention.py
+  - webapp/static/index.html
+  - webapp/static/interpret-langs.js
+  - webapp/static/review.css
+  - webapp/interpret.py
+  - webapp/static/mobile.css
+  - webapp/static/review.html
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/static/themes.css
+  - README.md
+  - bench/interpret_e2e.mjs
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - webapp/static/interpret.js
 tests:
   - webapp/test_server.py
 -->

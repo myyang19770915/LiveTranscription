@@ -1,6 +1,8 @@
 /* Colour tokens for every page, one set per theme (brand-palette-blue: lake blue + warm orange; contrast checked: fields 3:1+,
    accent against its ink 4.5:1+). The meeting page aliases its older names (--bg, --surface, --line, --mint…) to these in styles.css. */
 :root {
+  --page-width: 1280px;          /* ui-consistency-pass: the header and every page's content share this width */
+  --page-gutter: 24px;           /* at least this much space on each side (16px on phones, below) */
   --sub-now: #ffd86b;            /* subtitles: the speech being translated now and its draft (dark panels) */
   color-scheme: dark;
   --page: #0d141c;
@@ -87,3 +89,5 @@ code, kbd { font-family: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mon
 .loading-lines i:nth-child(3) { width: 62%; }
 @keyframes loading-pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .spinner, .loading-lines i { animation: none; } }
+
+@media (max-width: 700px) { :root { --page-gutter: 16px; } }

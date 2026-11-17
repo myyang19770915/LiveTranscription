@@ -1,5 +1,5 @@
 /* Full-text search page (meeting-search). Builds on tokens.css and admin.css. */
-.search-page { width: min(960px, 100%); }
+.search-page p, .search-page .lead { max-width: 72ch; }   /* the page width is shared (admin.css .page); long lines stay readable */
 .search-page h1 { margin: 0 0 16px; }
 /* Title with the 全文搜尋｜問答 switch (meeting-qa), shared by /search and /ask. */
 .search-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-bottom: 16px; }

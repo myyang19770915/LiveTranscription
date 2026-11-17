@@ -1,0 +1,70 @@
+/* The page header, the same on every page (ui-consistency-pass): brand on the left, then on the right the page links
+   (account.js), the account and the theme button. It spans the window; its content stays within --page-width, so the
+   brand lines up with the left edge of every page's content. Loaded after each page's own styles. */
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 14px; min-height: 62px;
+  padding: 12px max(var(--page-gutter), calc((100% - var(--page-width)) / 2));
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+.topbar .brand { flex: none; display: flex; align-items: center; gap: 11px; color: var(--text); text-decoration: none; white-space: nowrap; }
+.topbar .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel); }
+.topbar .brand b { display: block; font-size: 15px; letter-spacing: 0; }
+.topbar .brand small { display: block; margin: 0; color: var(--muted); font-size: 12px; letter-spacing: 0; text-transform: none; }
+.topbar-status { display: flex; align-items: center; gap: 8px; min-width: 0; }   /* the live page's service status */
+.topbar-status .status { height: 36px; padding: 0 12px; }   /* the same height as the links, so every header is equally tall */
+.topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+/* Page links and the account (account.js). A link never moves: hovering changes colour only. */
+.account { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; white-space: nowrap; }
+.account .account-name b { color: var(--text); font-size: 14px; font-weight: 600; padding: 0 2px; }
+.account > a, .account > button, .account .account-avatar {
+  height: 36px; display: inline-flex; align-items: center; padding: 0 13px;
+  border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--panel);
+  color: var(--text); font: inherit; font-size: 14px; text-decoration: none; cursor: pointer;
+  transform: none; transition: border-color .15s, background-color .15s, color .15s;
+}
+.account > a:hover, .account > button:hover, .account .account-avatar:hover { border-color: var(--field-border); transform: none; }
+.account > a.current { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+/* The theme button: one round icon button on every page, the sign-in page included. */
+.topbar #themeToggle, .auth-theme {
+  flex: none; width: 36px; height: 36px; min-width: 0; min-height: 0; padding: 0; display: grid; place-items: center;
+  border: 1px solid var(--border); border-radius: 50%; background: var(--panel); color: var(--muted); cursor: pointer;
+  transform: none; transition: border-color .15s, color .15s;
+}
+.topbar #themeToggle:hover, .auth-theme:hover { color: var(--text); border-color: var(--field-border); transform: none; background: var(--panel); }
+.topbar #themeToggle svg, .auth-theme svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.topbar #themeToggle .theme-label, .auth-theme .theme-label, .auth-theme span { display: none; }
+
+/* Own avatar and its menu (avatar-self-service). */
+.account-me { position: relative; display: inline-flex; }
+.account .account-avatar { width: 36px; padding: 0; justify-content: center; overflow: hidden; border-radius: 50%; }
+.account-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.account-initial { color: var(--accent); font-weight: 700; }
+.account-menu { position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; min-width: 150px; display: grid; gap: 2px; padding: 6px;
+  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel); box-shadow: 0 12px 32px rgb(0 0 0 / .18); }
+.account-menu[hidden] { display: none; }
+.account .account-menu button { width: 100%; height: 34px; display: flex; align-items: center; justify-content: flex-start; padding: 0 10px;
+  border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
+.account .account-menu button:hover, .account .account-menu button:focus-visible { background: var(--accent-soft); }
+.account-menu-error { max-width: 220px; margin: 4px 6px; color: var(--danger); font-size: 13px; white-space: normal; }
+
+/* Narrow windows (site-navigation): the same rule on every page. The menu offers exactly the links the header hides. */
+.account .account-menu .menu-nav, .account .account-menu .menu-phone { display: none; }
+@media (max-width: 1100px) { .account .account-name { display: none; } }
+@media (max-width: 900px) {
+  .account > a[data-nav="interpret"], .account > a[data-nav="metrics"], .account > a[data-nav="admin"] { display: none; }
+  .account .account-menu .menu-nav.at-900 { display: flex; }
+}
+@media (max-width: 700px) {
+  .topbar { gap: 8px; padding-top: 10px; padding-bottom: 10px; }
+  .topbar .brand { gap: 8px; }
+  .topbar .brand small { display: none; }
+  .account > a:not([data-nav="search"]), .account > .account-logout { display: none; }
+  .account > a { padding: 0 11px; }
+  .account .account-menu .menu-nav, .account .account-menu .menu-phone { display: flex; }
+  .topbar-actions { gap: 6px; }
+}

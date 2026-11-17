@@ -453,15 +453,16 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 - **`embed` 停掉時**：問答只用關鍵字找資料，回答下方會註明，換句話說的問題可能找不到。紀要模型未設定時問答無法使用。
 - 問題與篩選會寫在網址，但打開網址不會自動送出（每次問答都會呼叫模型）。問答內容不會保存。問題與找到的資料會送到紀要模型服務。
 
-## 即時口譯（管理員）
+## 即時口譯與我的紀錄
 
-團隊管理頁的「即時口譯」（`/interpret`，只開放系統管理員）用 Azure GPT-Realtime-Translate 做即時口譯：說話後直接聽到譯音、看到譯文。
+首頁的第三個模式「即時口譯」用 Azure GPT-Realtime-Translate 做即時口譯：說話後直接聽到譯音、看到譯文。系統管理員一律可用，其他人要由管理員在團隊管理頁的「即時口譯權限」加入帳號（`/api/admin/interpret-access`）；沒有權限的人看得到按鈕但不能按。口譯模式下原始逐字稿是語橋辨識的原文，翻譯欄、浮動字幕、畫面＋字幕都是口譯譯文，不另做文字翻譯；雲端精修、精準模式、中日雙向不適用。
 
 - **原文**：由語橋辨識，跟即時翻譯模式相同：中文、中英混合、粵語用本機 Confucius，其他語言用雲端 MAI（記在 MAI 用量）。
 - **輸出語言**：模型支援的語言都能選（中文輸出轉成台灣繁體），每次連線只能翻成一種。說的話已經是輸出語言時，模型可能不翻。沒有術語表，也不能選聲音。
 - **同步播放譯音**：取消勾選就只看譯文、不出聲，譯音照樣存檔。
-- **我的紀錄**：每次中斷自動存到 `output/interpret/<帳號>/<日期-時間>/`（`input.wav` 原音、`output.wav` 譯音、`session.json`、`transcript.txt`），只有本人看得到。可載入重播（整段、只聽譯音、只聽原音，點或拖動波形從該處依目前模式播放）、下載、刪除。
-- **費用**：依譯音長度每小時約 2.04 美元（`INTERPRET_USD_PER_HOUR`），記在資料表 `interpret_usage`，團隊管理頁顯示累計，不算進 MAI 上限。系統外的用量以 `docker exec -w /app <app 容器> python -m interpret_usage add <秒數> <用途>` 登記。
+- **我的紀錄**（`/interpret`，每位使用者都能開）：即時口譯與即時翻譯每次結束都存到 `output/interpret/<帳號>/<日期-時間>/`（`input.wav` 原音、口譯才有的 `output.wav` 譯音、`session.json`、`transcript.txt`、`bars.json` 波形），只有本人看得到。音訊邊收邊寫到以 `.recording-` 開頭的暫存資料夾，結束時改名。可載入重播（整段、只聽譯音、只聽原音，點或拖動波形從該處依目前模式播放）、下載、刪除。即時翻譯的譯文由頁面每 30 秒送一次（`PUT /api/interpret/live/<token>/translation`），結束後再送完整的（`PUT /api/interpret/sessions/<id>/translation`）。
+- **保存期限**：預設 90 天，管理員在團隊管理頁「紀錄保存期限」修改（`/api/admin/records-retention`，存在 `app_settings`）。伺服器啟動時與每 6 小時刪除過期紀錄與超過一天的暫存資料夾。
+- **費用**：依譯音長度每小時約 2.04 美元（`INTERPRET_USD_PER_HOUR`），記在資料表 `interpret_usage`，團隊管理頁顯示累計與每人用量，不設上限，不算進 MAI 上限。系統外的用量以 `docker exec -w /app <app 容器> python -m interpret_usage add <秒數> <用途>` 登記。
 - **串流名額**：一次口譯占兩條串流（翻譯與原文辨識），預設上限 2 條（`MAX_STREAMS_PER_USER`），開會中無法同時口譯。
 
 ## 成效指標
@@ -572,7 +573,9 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `POST /api/login`、`POST /api/logout`、`GET /api/me` | LDAP 登入、登出、目前使用者與所屬團隊（含 `email`、`emailSource`：`ldap`／`self`） |
 | `PUT /api/me/email` | 自行填寫或清除（`""`）自己的 Email；來自 LDAP 時 409，格式不符 422 |
 | `GET /admin`、`/api/admin/teams…` | 團隊管理（限系統管理員） |
-| `GET /interpret`、`WS /ws/interpret`、`GET /api/interpret/config`、`GET`／`DELETE /api/interpret/sessions…`、`GET /api/admin/interpret-usage` | 即時口譯（限系統管理員；紀錄只限本人） |
+| `GET /interpret`、`GET /api/interpret/config`、`GET`／`DELETE /api/interpret/sessions…`、`PUT /api/interpret/sessions/<id>/translation`、`PUT /api/interpret/live/<token>/translation` | 我的紀錄（所有登入者；只限本人的紀錄） |
+| `WS /ws/interpret` | 即時口譯（系統管理員與被開放的帳號） |
+| `GET /api/admin/interpret-usage`、`/api/admin/interpret-access`、`/api/admin/records-retention` | 口譯用量、口譯權限、紀錄保存期限（限系統管理員） |
 | `PUT`／`DELETE /api/admin/users/{帳號}/avatar`、`PUT`／`DELETE /api/me/avatar`、`GET /api/users/{帳號}/avatar` | 成員頭像照片（改別人的限系統管理員，`/api/me/avatar` 改自己的，讀取需登入） |
 | `POST /api/meetings`、`GET /api/meetings`、`GET /api/meetings/{id}` | 建立會議（需指定自己的團隊）、列出與讀取自己團隊的會議 |
 | `GET /meetings`、`GET /meetings/{id}` | 會議紀錄列表、會後校對頁 |

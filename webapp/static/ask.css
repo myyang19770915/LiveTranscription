@@ -1,5 +1,6 @@
 /* 問答 page (meeting-qa). Builds on tokens.css, admin.css and search.css (form, filters, busy state, hit styles). */
-.ask-form { align-items: flex-start; }
+.ask-form { align-items: stretch; }   /* the button is as tall as the question box (ui-consistency-pass) */
+.ask-form #askButton { height: auto; min-width: 88px; justify-content: center; }
 .ask-box { height: auto; min-height: 46px; align-items: flex-start; padding: 10px 14px; }
 .ask-box textarea { flex: 1; min-width: 0; max-height: 40vh; border: 0; outline: 0; resize: vertical; background: transparent; color: var(--text);
   font: inherit; font-size: 16px; line-height: 1.5; }

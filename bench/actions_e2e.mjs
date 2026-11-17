@@ -207,7 +207,9 @@ try {
   // 400 px.
   await page.setViewportSize({width: 400, height: 860});
   await page.goto(`${app}/meetings`); await page.waitForSelector('#account a'); await page.waitForSelector('.meeting');
-  check('board link visible on a phone', await page.locator('#account a[href="/actions"]').isVisible());
+  await page.click('.account-avatar');   // on phones the header keeps 搜尋; the other links are in the avatar menu
+  check('board link in the avatar menu on a phone', await page.locator('.account-menu .menu-actions').isVisible());
+  await page.keyboard.press('Escape');
   check('no horizontal scroll on the list at 400 px', !(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)));
   await page.goto(`${app}/actions`); await page.waitForSelector('.board-column');
   check('no horizontal scroll at 400 px', !(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)));

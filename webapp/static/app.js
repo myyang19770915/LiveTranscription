@@ -19,7 +19,7 @@ let translationFailures=0;
 const segmentRecords=new Map();
 // 精準模式 (quality-pass): the gateway's corrected sentences replace live content of the same time range.
 let qualityOn=false,quality=QualityView.create(),qualityDown=false;
-function qualityChosen(){return !$('qualityRow').hidden&&$('quality').checked}
+function qualityChosen(){return !interpretOn()&&!$('qualityRow').hidden&&$('quality').checked}
 function qualityShown(){const finals=finalizedRecords();QualityView.promote(quality,finals);return QualityView.view(quality,{transcript,timeMarks,finals})}
 function shownTranslated(){if(!qualityOn)return translated;const shown=qualityShown();return [...shown.targets,...shown.liveTargets].join('\n\n')}
 // What the meeting keeps: the quality pass's sentences when it is on, the live finalized segments otherwise.
@@ -29,18 +29,56 @@ const incompleteClause=s=>TranslationSegmentation.unfinished(s);
 const startButtonContent = '<span class="record-icon"><i></i></span><span class="button-copy"><b>開始會議</b><small>即時轉錄與翻譯</small></span>';
 const stopButtonContent = '<span class="record-icon"><i></i></span><span class="button-copy"><b>結束會議</b><small>儲存這次記錄</small></span>';
 const translateStartContent = '<span class="record-icon"><i></i></span><span class="button-copy"><b>開始翻譯</b><small>即時轉錄與翻譯</small></span>';
-const translateStopContent = '<span class="record-icon"><i></i></span><span class="button-copy"><b>結束翻譯</b><small>不會存到伺服器</small></span>';
-// 即時翻譯 (live-translation): the same page without a meeting record; nothing is kept on the server.
+const translateStopContent = '<span class="record-icon"><i></i></span><span class="button-copy"><b>結束翻譯</b><small>存成你的紀錄</small></span>';
+const interpretStartContent = '<span class="record-icon"><i></i></span><span class="button-copy"><b>開始口譯</b><small>聽譯音、看譯文</small></span>';
+const interpretStopContent = '<span class="record-icon"><i></i></span><span class="button-copy"><b>結束口譯</b><small>存成你的紀錄</small></span>';
+// The interpreted text so far: finished sentences are the translation, the rest is drawn as the draft.
+function interpretText(full){
+  // Chinese and Japanese end a sentence without a space after it; other languages need one (or the end) after . ! ?
+  const m=/^[\s\S]*(?:[。！？」』）]|[.!?)](?=\s|$))/u.exec(full),done=m?m[0]:'';
+  translated=done.trim();draftText=full.slice(done.length).trim();draftSolid=draftText.length;renderTranslation();
+  $('translateState').textContent='口譯中';$('translateState').className='state-chip active';
+}
+// After a session is saved: 在我的紀錄開啟 next to the footer note.
+function showSaved(id){if(!id)return;$('savedLink').href=`/interpret?id=${encodeURIComponent(id)}`;$('savedLink').textContent=`已存檔・在我的紀錄開啟`;$('savedLink').hidden=false}
+// 即時翻譯's own record: the translation goes to the server every 30 s while it runs (a closed tab loses at most 30 s),
+// then once more in full after the session is saved.
+const LIVE_SAVE_MS=window.YQ_LIVE_SAVE_MS||30000;
+let recordToken='',savedRecord='',sentTranslation='',liveSaveTimer=0;
+function sendLiveTranslation(){
+  const text=visibleTranslation();
+  if(!recordToken||text===sentTranslation)return;
+  fetch(`/api/interpret/live/${recordToken}/translation`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({text})})
+    .then(r=>{if(r.ok)sentTranslation=text}).catch(()=>{});   // tried again at the next interval
+}
+async function saveFinalTranslation(){
+  for(let i=0;i<60&&(activeTranslation||pendingSource().trim()||!savedRecord);i++)await new Promise(r=>setTimeout(r,500));   // the last segments are still being translated
+  if(!savedRecord){if(recordToken)toast('最後一段譯文沒有存到紀錄，可以先匯出',6000);return}   // ended without the saved answer
+  const id=savedRecord;showSaved(id);
+  try{const r=await fetch(`/api/interpret/sessions/${encodeURIComponent(id)}/translation`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({text:visibleTranslation()})});if(!r.ok)throw new Error(r.status)}
+  catch{toast('譯文沒有存到紀錄，可以先匯出',6000)}
+}
+// 即時翻譯 (live-translation) and 即時口譯 (interpret-mode-on-home): the same page without a meeting record; each session
+// is saved as the user's own record (我的紀錄). 即時口譯 also counts as translateOnly(): the same layout, no meeting.
 function translateOnly(){return document.body.classList.contains('translate-mode')}
+function interpretOn(){return document.body.classList.contains('interpret-mode')}
+const MODE_NOTE={meeting:'建立會議紀錄，會後可校對、產生紀要',translate:'不建立會議紀錄；每次結束存成你的紀錄，只有你看得到',
+  interpret:'說話後直接聽到譯音、看到譯文；每次結束存成你的紀錄，只有你看得到'};
 function filePrefix(){return sessionPrefix||(translateOnly()?'translate':'meeting')}   // the mode the session ran in, not the switch now
 function setLiveMode(mode,persist=true){
   if(stream||starting)return;
-  const translate=mode==='translate';
+  if(mode==='interpret'&&!window.InterpretMode?.usable())mode='translate';   // not granted or not set up: 即時翻譯 instead
+  const translate=mode!=='meeting',interpret=mode==='interpret',was=interpretOn();
   document.body.classList.toggle('translate-mode',translate);document.querySelector('.controls').classList.toggle('translate',translate);
+  document.body.classList.toggle('interpret-mode',interpret);document.querySelector('.controls').classList.toggle('interpret',interpret);
+  const hint=document.querySelector('#transcript .empty-state small');   // the empty transcript names this mode's button
+  if(hint)hint.textContent=`點擊「${interpret?'開始口譯':translate?'開始翻譯':'開始會議'}」，逐字稿將即時顯示`;
   for(const b of document.querySelectorAll('.mode-btn'))b.setAttribute('aria-pressed',String(b.dataset.mode===mode));
-  $('modeNote').textContent=translate?'不建立會議紀錄；逐字稿與錄音只留在瀏覽器，可按「匯出」下載':'建立會議紀錄，會後可校對、產生紀要';
-  $('start').innerHTML=translate?translateStartContent:startButtonContent;
-  $('storeNote').textContent=translate?'不存到伺服器，可按匯出下載':'錄音與逐字稿存入會議紀錄';
+  $('modeNote').textContent=MODE_NOTE[mode];
+  $('start').innerHTML=interpret?interpretStartContent:translate?translateStartContent:startButtonContent;
+  $('storeNote').textContent=translate?'存成你的紀錄，只有你看得到':'錄音與逐字稿存入會議紀錄';
+  if(interpret!==was){window.InterpretMode?.activate(interpret);updateTranslationDirection()}
+  showPrivacy();
   if(persist){try{localStorage.setItem('liveMode',mode)}catch{}}
 }
 for (let i=0; i<14; i++) $('wave').appendChild(document.createElement('i'));
@@ -72,6 +110,11 @@ function subtitleParts(){
     const all=[...quality.records,...qualityShown().liveFinals];
     return {done:all.at(-1)?.source||'',pending:quality.done?'':pending+tentative,translation:all.slice(-2).map(s=>s.target).join(' '),draft:quality.done?'':draftText,draftSolid,
       history:all.slice(-SUBTITLE_HISTORY).map(s=>({source:s.source,target:s.target}))};
+  }
+  if(interpretOn()){   // 即時口譯: the interpreted text as sentences; the source is the recognized speech
+    const sentences=window.Subtitles?.sentences(translated)||[];
+    return {done:'',pending:(window.Subtitles?.lastSentences(transcript,2)||'')+tentative,translation:window.Subtitles?.joinSentences(sentences.slice(-2))||'',draft:draftText,draftSolid,
+      history:sentences.slice(-SUBTITLE_HISTORY).map(target=>({source:'',target}))};
   }
   if(!translateOnly()){   // 開會: sentences, as before; the translation is split once for both the last two and the history
     const sentences=window.Subtitles?.sentences(translated)||[];
@@ -125,12 +168,12 @@ function renderTranslation(){
 function updateCounts(){ $('transcriptCount').textContent=`${transcript.length.toLocaleString()} 字`; $('translationCount').textContent=`${visibleTranslation().length.toLocaleString()} 字`; }
 function toast(message,duration=2200){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),duration)}
 const screenAwake=ScreenAwake.create(navigator,document);   // screen-awake: held while a session runs
-function setControls(active){active?screenAwake.hold():screenAwake.release();for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active;const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active||qualityChosen();$('quality').disabled=active;$('swap').disabled=active||pair;$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
+function setControls(active){active?screenAwake.hold():screenAwake.release();for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active||b.dataset.locked==='1';const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active||qualityChosen();$('quality').disabled=active;$('swap').disabled=active||pair||interpretOn();$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
 function updateTranslationDirection(){
   const pair=$('language').value==='zh_ja';
   if(pair){if($('targetLanguage').value!=='zh_ja')fixedTarget=$('targetLanguage').value;$('targetLanguage').value='zh_ja'}
   else if($('targetLanguage').value==='zh_ja')$('targetLanguage').value=fixedTarget;
-  $('targetLanguage').disabled=Boolean(stream)||pair;$('swap').disabled=Boolean(stream)||pair;
+  $('targetLanguage').disabled=Boolean(stream)||pair;$('swap').disabled=Boolean(stream)||pair||interpretOn();   // 即時口譯 translates one way
   direction={source:$('language').value,target:$('targetLanguage').value};
   if(!pair&&direction.source===direction.target){$('targetLanguage').value=direction.source==='en'?'zh':'en';direction.target=$('targetLanguage').value}
   translationEpoch++;activeTranslation?.abort();activeTranslation=null;clearTimeout(translationTimer);clearTimeout(pauseTimer);translated='';draftText='';translationOffset=0;translationHistory=[];flushRequested=false;lastDraftSource='';translationFailures=0;renderTranslation();
@@ -237,7 +280,8 @@ async function startMeeting() {
     if(selectedSource()==='microphone')await refreshMicrophones(stream.getAudioTracks()[0].getSettings().deviceId);
     captureStreams.forEach(media=>media.getTracks().forEach(track=>track.onended=()=>{if(stream && !stopping){stopMeeting(false).then(()=>{setStatus('分享或麥克風已停止','error');setMicStatus('音源已中斷','error')})}}));
     setStatus('正在連線…');
-    sessionPrefix=translate?'translate':'meeting';
+    const interpret=interpretOn();
+    sessionPrefix=interpret?'interpret':translate?'translate':'meeting';$('savedLink').hidden=true;recordToken='';savedRecord='';sentTranslation='';
     if(translate)meetingId='';else{meetingId=await createMeeting(teamId);topicUsed=true;window.MeetingSeries?.started(meetingId)}
     resetMeetingState();
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -245,20 +289,23 @@ async function startMeeting() {
     socket.binaryType = 'arraybuffer';
     await new Promise((resolve, reject) => { socket.onopen=resolve; socket.onerror=()=>reject(new Error('連線失敗')); });
     qualityOn=qualityChosen();
-    socket.send(JSON.stringify({requestId:crypto.randomUUID(),meeting_id:meetingId,mode:translate?'translate':'meeting',language:$('language').value,use_vad:direction.source==='zh_ja',system_prompt:$('context').value,engine:asrEngine(),refine:cloudRefineOn(),quality:qualityOn,target:direction.target}));
+    if(interpret)await window.InterpretMode.start({target:$('targetLanguage').value,sourceLang:$('language').value,onText:interpretText,
+      onError:message=>toast(message,6000),onEnd:(why,saved)=>{if(stream&&!stopping)stopMeeting(false).then(()=>{showSaved(saved);setStatus(why||'口譯已結束',why?'error':'idle')})}});
+    socket.send(JSON.stringify({requestId:crypto.randomUUID(),meeting_id:meetingId,mode:interpret?'interpret':translate?'translate':'meeting',language:$('language').value,use_vad:direction.source==='zh_ja',system_prompt:interpret?'':$('context').value,engine:asrEngine(),refine:cloudRefineOn(),quality:qualityOn,target:direction.target}));
     socket.onmessage = onMessage;
     socket.onclose = onSocketClose;
 
     audioContext = new AudioContext();
     await audioContext.audioWorklet.addModule('/assets/pcm-worklet.js?v=20261108a');
     workletNode = new AudioWorkletNode(audioContext, 'pcm16-processor');
-    workletNode.port.onmessage = ({data}) => { let sum=0;for(let i=0;i<data.length;i++)sum+=data[i]*data[i];$('level').style.transform=`scaleX(${Math.min(1,Math.sqrt(sum/data.length)*5+.03)})`;if(socket?.readyState===WebSocket.OPEN)socket.send(floatToPCM16(resampleTo16k(data,audioContext.sampleRate)).buffer); };
+    workletNode.port.onmessage = ({data}) => { let sum=0;for(let i=0;i<data.length;i++)sum+=data[i]*data[i];$('level').style.transform=`scaleX(${Math.min(1,Math.sqrt(sum/data.length)*5+.03)})`;if(socket?.readyState===WebSocket.OPEN)socket.send(floatToPCM16(resampleTo16k(data,audioContext.sampleRate)).buffer);if(interpretOn())window.InterpretMode.feed(data,audioContext.sampleRate); };
     for(const media of captureStreams){const node=audioContext.createMediaStreamSource(media),gain=audioContext.createGain();gain.gain.value=captureStreams.length>1?0.5:1;node.connect(gain).connect(workletNode);sourceNodes.push(node,gain)}
     startRecording(sourceNodes.filter((_,i)=>i%2));
     const silent=audioContext.createGain();silent.gain.value=0;workletNode.connect(silent).connect(audioContext.destination);sourceNodes.push(silent);
     await audioContext.resume();
     startedAt=Date.now(); timerHandle=setInterval(updateTimer,1000); updateTimer();
-    $('start').innerHTML=translate?translateStopContent:stopButtonContent; $('start').classList.add('stop'); setControls(true); setStatus(translate?'即時翻譯中':'即時轉錄中','live');
+    $('start').innerHTML=interpret?interpretStopContent:translate?translateStopContent:stopButtonContent; $('start').classList.add('stop'); setControls(true); setStatus(interpret?'即時口譯中':translate?'即時翻譯中':'即時轉錄中','live');
+    if(translate&&!interpret)liveSaveTimer=setInterval(sendLiveTranslation,LIVE_SAVE_MS);
   } catch (error) { await stopMeeting(false);setStatus(error.message,'error');setMicStatus(error.status||error.message,'error');toast(error.message,error.status?8000:5000); }
   finally{starting=false;$('start').disabled=false}
 }
@@ -272,6 +319,9 @@ async function stopMeeting(sendEos=true) {
     const closingSocket=socket;
     await new Promise(resolve=>{const timer=setTimeout(()=>{closingSocket.removeEventListener('close',done);toast('辨識收尾逾時，請核對最後一句',5000);resolve()},qualityOn?70000:20000);function done(){clearTimeout(timer);resolve()}closingSocket.addEventListener('close',done,{once:true});closingSocket.send(EOS)});
   }
+  // 即時口譯: the last source text arrived with EOS above; now the interpreter finishes and saves the session.
+  const interpreted=sessionPrefix==='interpret'?await window.InterpretMode.stop():null;
+  clearInterval(liveSaveTimer);
   // 精準模式: no final event (the connection dropped, or the wait ran out) means the rest was not replaced; keep it.
   if(qualityOn&&!quality.done)QualityView.apply(quality,{failed:true,final:true,throughMs:quality.throughMs},finalizedRecords());
   finalizeRemaining=true;
@@ -279,7 +329,7 @@ async function stopMeeting(sendEos=true) {
   try{socket?.close();}catch{} captureStreams.forEach(media=>media.getTracks().forEach(track=>{track.onended=null;track.stop()}));
   try{sourceNodes.forEach(node=>node.disconnect());workletNode?.disconnect();await audioContext?.close();}catch{}
   tentative='';render('transcript',transcript);
-  socket=stream=audioContext=null;captureStreams=[];sourceNodes=[];workletNode=null;clearInterval(timerHandle);$('start').innerHTML=translateOnly()?translateStartContent:startButtonContent;$('start').classList.remove('stop');setControls(false);if(topicUsed){$('topic').value='';topicUsed=false}setMicStatus(`已確認：${$('activeMic').textContent}`,'ok');setStatus(transcript?(translateOnly()?'翻譯已結束；未存到伺服器，可按「匯出」下載':'會議已結束'):'系統待機');scheduleTranslation(true);storeTranscript();if(meetingId)window.MeetingSeries?.ended(meetingId);stopping=false;
+  socket=stream=audioContext=null;captureStreams=[];sourceNodes=[];workletNode=null;clearInterval(timerHandle);$('start').innerHTML=interpretOn()?interpretStartContent:translateOnly()?translateStartContent:startButtonContent;$('start').classList.remove('stop');setControls(false);if(topicUsed){$('topic').value='';topicUsed=false}setMicStatus(`已確認：${$('activeMic').textContent}`,'ok');setStatus(transcript||interpreted?(sessionPrefix==='interpret'?(interpreted?'口譯已結束，已存到我的紀錄':'口譯已結束'):translateOnly()?'翻譯已結束':'會議已結束'):'系統待機');if(interpreted)showSaved(interpreted);scheduleTranslation(true);if(sessionPrefix==='translate')saveFinalTranslation();storeTranscript();if(meetingId)window.MeetingSeries?.ended(meetingId);stopping=false;
 }
 // The meeting audio is kept only in this browser and saved next to the exported transcript.
 function startRecording(gains){
@@ -390,6 +440,8 @@ function sendSegments(id){
 // The recognition connection closed. 4401 mid-meeting (signed out elsewhere): stop first, so the browser recording is
 // kept for download, then say why; 4401 with no meeting running goes to the sign-in page (stream-limits).
 function onSocketClose(event){
+  // 即時口譯: the source text stopped, the interpreting goes on (realtime-interpret); a sign-out still ends everything.
+  if(stream&&!stopping&&sessionPrefix==='interpret'&&event.code!==4401){toast(`原文辨識已停止：${closeMessage(event.code,event.reason)}（口譯照常進行）`,8000);socket=null;return}
   if(stream&&!stopping)return stopMeeting(false).then(()=>setStatus(closeMessage(event.code,event.reason),'error'));
   if(event.code===4401)location.replace(ReturnPath.loginUrl(location.pathname,location.search));
 }
@@ -413,6 +465,8 @@ function updateTimer(){const sec=Math.floor((Date.now()-startedAt)/1000);$('time
 function onMessage(event){
   let data; try{data=JSON.parse(event.data)}catch{return}
   if(data.status==='error'){setStatus(typeof data.msg==='string'?data.msg:'辨識服務錯誤','error');return}
+  if(data.record){recordToken=data.record;return}   // 即時翻譯's record: where the translation goes while it runs
+  if(data.saved){savedRecord=data.saved;return}
   if(data.quality){onQuality(data.quality);return}
   // quality-revision: sentences already kept, corrected with more context; same position, new text.
   if(data.revision){if(qualityOn&&QualityView.revise(quality,data.revision)){render('transcript',transcript);renderTranslation();storeSegments()}return}
@@ -430,6 +484,7 @@ function onMessage(event){
   if(Number.isFinite(data.audioMs))timeMarks.push({end:transcript.length,ms:data.audioMs});
   // ASR resets are decoding events, not proof of a complete semantic sentence.
   render('transcript',transcript); scheduleTranslation(false);
+  if(interpretOn())window.InterpretMode.source(transcript);
 }
 // Names and mishearings learned from this meeting's own transcript, since nobody knows them beforehand.
 // Each pass votes on the server; only repeated findings become translation hints.
@@ -465,7 +520,7 @@ function finalizedRecords(){
   return [...segmentRecords.values()].filter(s=>s.id.startsWith(epoch)&&s.state==='finalized').sort((a,b)=>a.start-b.start);
 }
 // 雲端精修: refinements go to the configured cloud model. Off by default; the choice stays in this browser.
-function cloudRefineOn(){return !$('cloudRefineRow').hidden&&$('cloudRefine').checked&&!qualityChosen()}   // 精準模式 includes it
+function cloudRefineOn(){return !interpretOn()&&!$('cloudRefineRow').hidden&&$('cloudRefine').checked&&!qualityChosen()}   // 精準模式 includes it
 // The spoken language decides the engine (meeting-setup-layout): Chinese and the modes that may contain it stay on the
 // local model, every other language uses MAI when the server offers it. Keep in step with server.asr_engine()'s 混合 rule.
 const LOCAL_ENGINE_LANGUAGES=['zh','yue','auto','zh_ja'];
@@ -520,7 +575,7 @@ fetch('/api/config').then(r=>r.ok?r.json():{cloudTranslate:true}).catch(()=>({cl
 let cloudTranslation=null;   // the translation model is an external service (cloud-translation); null until /api/config answered
 function showPrivacy(){
   if(cloudTranslation===null)return;   // not known yet: the page keeps 資料去向／確認中… instead of a claim that may be false
-  const note=PrivacyNote.text(asrEngine(),cloudRefineOn(),qualityChosen(),cloudTranslation);
+  const note=interpretOn()?{label:'雲端口譯',sentence:'音訊會傳送到外部服務'}:PrivacyNote.text(asrEngine(),cloudRefineOn(),qualityChosen(),cloudTranslation);
   $('privacyNote').replaceChildren(Object.assign(document.createElement('b'),{textContent:note.label}),note.sentence);
   $('secureLabel').textContent=note.label;
 }
@@ -555,7 +610,7 @@ function segmentPlan(force=false){
 }
 function sentenceBoundary(){const plan=segmentPlan();return plan.final?plan.end:0;}
 function scheduleTranslation(force=false){
-  if(!pendingSource().trim())return;
+  if(interpretOn()||!pendingSource().trim())return;   // 即時口譯: the interpreter translates, not the text model
   clearTimeout(pauseTimer);
   if(force)flushRequested=true;
   const boundary=sentenceBoundary();
@@ -639,7 +694,13 @@ $('translateState').onclick=()=>{if($('translateState').getAttribute('role')!=='
 $('translateState').onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();$('translateState').click()}};
 $('start').onclick=()=>stream?stopMeeting():startMeeting();
 for(const b of document.querySelectorAll('.mode-btn'))b.onclick=()=>setLiveMode(b.dataset.mode);
-try{setLiveMode(localStorage.getItem('liveMode')==='translate'?'translate':'meeting',false)}catch{setLiveMode('meeting',false)}
+let rememberedMode='meeting';try{rememberedMode=localStorage.getItem('liveMode')||'meeting'}catch{}
+setLiveMode(rememberedMode==='meeting'?'meeting':'translate',false);
+// 即時口譯 is offered to granted users only; a disabled button explains nothing on hover, so the reason stands next to the modes.
+window.InterpretMode?.ready.then(()=>{
+  if(rememberedMode==='interpret'&&window.InterpretMode.usable())setLiveMode('interpret',false);
+  const why=window.InterpretMode.reason();$('interpretLocked').textContent=why;$('interpretLocked').hidden=!why;
+});
 $('testMic').onclick=toggleMicTest;
 $('audioSource').onchange=updateSourceUI;
 updateSourceUI();
@@ -662,7 +723,7 @@ const mobileQuery=matchMedia('(max-width: 760px), (max-width: 1000px) and (max-h
 const mobilePanels={transcript:$('transcript').closest('article'),translation:$('translation').closest('article')};
 const mobileFollow={transcript:true,translation:true};
 let mobileView='translation';
-const mobileSettingsNodes=[$('modeRow'),$('setupMeeting'),$('teamRow'),$('topicRow'),$('seriesRow'),$('setupAudio'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('setupAdvanced'),$('asrEngineRow'),$('cloudRefineRow'),$('qualityRow')];
+const mobileSettingsNodes=[$('modeRow'),$('setupMeeting'),$('teamRow'),$('topicRow'),$('seriesRow'),$('setupAudio'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('interpretPlayRow'),$('setupAdvanced'),$('asrEngineRow'),$('cloudRefineRow'),$('qualityRow')];
 const movableControls=[...mobileSettingsNodes,$('start')].map(node=>{
   const anchor=document.createComment('responsive-control');node.before(anchor);return{node,anchor};
 });
