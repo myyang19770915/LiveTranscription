@@ -339,3 +339,8 @@ body.interpret-mode #cloudRefineRow, body.interpret-mode #qualityRow { display: 
 }
 /* The live page shares the page width with every other page (ui-consistency-pass, visual-tokens). */
 main { width: min(calc(var(--page-width) + 2 * var(--page-gutter)), 100%); padding: 6px var(--page-gutter) 22px; }
+
+/* 不翻譯（只整理原文） (transcript-only): no translation pane; the transcript takes the whole width, and nothing to refine. */
+body.no-translation .translation-card { display: none; }
+body.no-translation .transcripts { grid-template-columns: 1fr; }
+body.no-translation #cloudRefineRow { display: none; }

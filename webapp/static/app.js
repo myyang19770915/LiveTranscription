@@ -10,7 +10,7 @@ let tentative = '';   // the cloud engine's text not yet confirmed (mai-intermed
 function pendingSource(){return transcript.slice(translationOffset)+tentative}   // the speech being translated now
 let translationFinalNode, translationDraftNode;
 let direction = { source: 'auto', target: 'en' };
-const languageTags = {auto:'AUTO',zh_ja:'中⇄日',zh:'中',en:'EN',ja:'日',ko:'한',fr:'FR',de:'DE',it:'IT',pt:'PT',ru:'RU',es:'ES',ar:'AR'};
+const languageTags = {none:'—',auto:'AUTO',zh_ja:'中⇄日',zh:'中',en:'EN',ja:'日',ko:'한',fr:'FR',de:'DE',it:'IT',pt:'PT',ru:'RU',es:'ES',ar:'AR'};
 const languageSpans=[],utteranceBoundaries=new Set();
 // Gateway audio clock (audioMs) at each transcript length, so finalized spans know their place in the recording.
 const timeMarks=[];
@@ -69,6 +69,8 @@ async function saveFinalTranslation(){
 // 即時翻譯 (live-translation) and 即時口譯 (interpret-mode-on-home): the same page without a meeting record; each session
 // is saved as the user's own record (我的紀錄). 即時口譯 also counts as translateOnly(): the same layout, no meeting.
 function translateOnly(){return document.body.classList.contains('translate-mode')}
+// 不翻譯（只整理原文） (transcript-only): a meeting kept in the spoken language only; no translation request at all.
+function noTranslation(){return direction.target==='none'}
 function interpretOn(){return document.body.classList.contains('interpret-mode')}
 const MODE_NOTE={meeting:'建立會議紀錄，會後可校對、產生紀要',translate:'不建立會議紀錄；每次結束存成你的紀錄，只有你看得到',
   interpret:'說話後直接聽到譯音、看到譯文；每次結束存成你的紀錄，只有你看得到'};
@@ -85,7 +87,15 @@ function setLiveMode(mode,persist=true){
   $('modeNote').textContent=MODE_NOTE[mode];
   $('start').innerHTML=interpret?interpretStartContent:translate?translateStartContent:startButtonContent;
   $('storeNote').textContent=translate?'存成你的紀錄，只有你看得到':'錄音與逐字稿存入會議紀錄';
-  if(interpret!==was){window.InterpretMode?.activate(interpret);updateTranslationDirection()}
+  if(interpret!==was)window.InterpretMode?.activate(interpret);   // 即時口譯 swaps the menu of output languages in and out
+  // 不翻譯 is for meetings only (transcript-only): hidden in the other modes, where a chosen 不翻譯 becomes English; back in
+  // 開會 the remembered choice returns. Done after the swap, on the menu that is shown now.
+  const none=$('targetLanguage').querySelector('option[value="none"]');
+  if(none)none.hidden=translate;
+  if(translate&&$('targetLanguage').value==='none')$('targetLanguage').value='en';
+  else if(!translate&&none&&rememberedTarget&&$('language').value!=='zh_ja'&&$('targetLanguage').querySelector(`option[value="${CSS.escape(rememberedTarget)}"]`))$('targetLanguage').value=rememberedTarget;
+  if(translate&&fixedTarget==='none')fixedTarget='en';
+  updateTranslationDirection();
   showPrivacy();
   if(persist){try{localStorage.setItem('liveMode',mode)}catch{}}
 }
@@ -123,6 +133,11 @@ function subtitleParts(){
     const sentences=window.Subtitles?.sentences(translated)||[];
     return {done:'',pending:(window.Subtitles?.lastSentences(transcript,2)||'')+tentative,translation:window.Subtitles?.joinSentences(sentences.slice(-2))||'',draft:draftText,draftSolid,
       history:sentences.slice(-SUBTITLE_HISTORY).map(target=>({source:'',target}))};
+  }
+  if(noTranslation()){   // 不翻譯: the spoken text is the subtitle, its finished sentences and the rest as the draft
+    const finals=finalizedRecords();
+    return {done:'',pending:'',translation:finals.slice(-2).map(s=>s.source).join(' '),draft:(pending+tentative).trim(),draftSolid:0,
+      history:finals.slice(-SUBTITLE_HISTORY).map(s=>({source:'',target:s.source}))};
   }
   if(!translateOnly()){   // 開會: sentences, as before; the translation is split once for both the last two and the history
     const sentences=window.Subtitles?.sentences(translated)||[];
@@ -176,18 +191,26 @@ function renderTranslation(){
 function updateCounts(){ $('transcriptCount').textContent=`${transcript.length.toLocaleString()} 字`; $('translationCount').textContent=`${visibleTranslation().length.toLocaleString()} 字`; }
 function toast(message,duration=2200){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),duration)}
 const screenAwake=ScreenAwake.create(navigator,document);   // screen-awake: held while a session runs
-function setControls(active){active?screenAwake.hold():screenAwake.release();for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active||b.dataset.locked==='1';const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active||qualityChosen();$('quality').disabled=active;$('swap').disabled=active||pair||interpretOn();$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
+function setControls(active){active?screenAwake.hold():screenAwake.release();for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active||b.dataset.locked==='1';const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active||qualityChosen();$('quality').disabled=active;$('swap').disabled=active||pair||interpretOn()||noTranslation();$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
 function updateTranslationDirection(){
   const pair=$('language').value==='zh_ja';
   if(pair){if($('targetLanguage').value!=='zh_ja')fixedTarget=$('targetLanguage').value;$('targetLanguage').value='zh_ja'}
-  else if($('targetLanguage').value==='zh_ja')$('targetLanguage').value=fixedTarget;
+  else if($('targetLanguage').value==='zh_ja')$('targetLanguage').value=fixedTarget==='none'&&translateOnly()?'en':fixedTarget;
   $('targetLanguage').disabled=Boolean(stream)||pair;$('swap').disabled=Boolean(stream)||pair||interpretOn();   // 即時口譯 translates one way
   direction={source:$('language').value,target:$('targetLanguage').value};
   if(!pair&&direction.source===direction.target){$('targetLanguage').value=direction.source==='en'?'zh':'en';direction.target=$('targetLanguage').value}
+  document.body.classList.toggle('no-translation',noTranslation());
+  if(!translateOnly()){   // 開會's choices are remembered (transcript-only): the spoken language, and 翻譯成 with 不翻譯 included
+    try{localStorage.setItem('meetingLanguage',direction.source)}catch{}
+    if(!pair){rememberedTarget=direction.target;try{localStorage.setItem('meetingTarget',direction.target)}catch{}}
+  }
+  if(noTranslation())$('swap').disabled=true;   // nothing to swap with
   translationEpoch++;activeTranslation?.abort();activeTranslation=null;clearTimeout(translationTimer);clearTimeout(pauseTimer);translated='';draftText='';translationOffset=0;translationHistory=[];flushRequested=false;lastDraftSource='';translationFailures=0;renderTranslation();
   const tags=$('swap').querySelectorAll('.lang-tag');const swapPair=direction.source==='zh_ja';   // 中 ⇆ 日, not 中⇄日 twice
   tags[0].textContent=swapPair?'中':languageTags[direction.source]||direction.source.toUpperCase();tags[1].textContent=swapPair?'日':languageTags[direction.target]||direction.target.toUpperCase();
-  $('targetLabel').textContent=pair?'中日雙向翻譯':`翻譯成 ${$('targetLanguage').selectedOptions[0].textContent}`;
+  $('targetLabel').textContent=pair?'中日雙向翻譯':noTranslation()?'不翻譯':`翻譯成 ${$('targetLanguage').selectedOptions[0].textContent}`;
+  const startNote=$('start').querySelector('.button-copy small');   // 開會: 不翻譯 only transcribes
+  if(startNote&&!translateOnly()&&!stream)startNote.textContent=noTranslation()?'即時轉錄，不翻譯':'即時轉錄與翻譯';
   $('targetLabel').closest('.card-title').querySelector('.language-dot').textContent=languageTags[direction.target]||direction.target.toUpperCase();
   $('translateState').textContent='就緒';$('translateState').className='state-chip';
   if(transcript)scheduleTranslation(true);
@@ -500,7 +523,7 @@ let termPasses=[],learnedTerms='',termCheckedAt=0,termRequest=null;
 function resetLearnedTerms(){termPasses=[];learnedTerms='';termCheckedAt=transcript.length;correctionQueue=[];correctedForms=new Set();$('learnedTerms').hidden=true}
 function learnTerms(){
   // The model serves one request at a time; learn between translations, once per ~300 new characters.
-  if(qualityOn||termRequest||activeTranslation||transcript.length-termCheckedAt<300)return;
+  if(qualityOn||noTranslation()||termRequest||activeTranslation||transcript.length-termCheckedAt<300)return;   // terms only help translation
   const end=transcript.length,passes=termPasses;termCheckedAt=end;
   termRequest=fetch('/api/terms',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:transcript.slice(Math.max(0,end-1500),end),source:direction.source,previous:passes.slice(-40)})})
     .then(response=>response.ok?response.json():null)
@@ -520,7 +543,7 @@ function queueCorrections(forms){
 // re-translated in the gaps with both neighbours, so a span cut mid-clause still reads correctly.
 function queueRefinement(){
   const finals=finalizedRecords(),record=finals.at(-2);
-  if(qualityOn)return;   // the quality pass already re-translates with context
+  if(qualityOn||noTranslation())return;   // the quality pass already re-translates with context; nothing to refine untranslated
   if(record&&!record.refined&&!correctionQueue.includes(record)){record.refined=true;correctionQueue.push(record)}
 }
 function finalizedRecords(){
@@ -528,7 +551,7 @@ function finalizedRecords(){
   return [...segmentRecords.values()].filter(s=>s.id.startsWith(epoch)&&s.state==='finalized').sort((a,b)=>a.start-b.start);
 }
 // 雲端精修: refinements go to the configured cloud model. Off by default; the choice stays in this browser.
-function cloudRefineOn(){return !interpretOn()&&!$('cloudRefineRow').hidden&&$('cloudRefine').checked&&!qualityChosen()}   // 精準模式 includes it
+function cloudRefineOn(){return !interpretOn()&&!noTranslation()&&!$('cloudRefineRow').hidden&&$('cloudRefine').checked&&!qualityChosen()}   // 精準模式 includes it
 // The spoken language decides the engine (meeting-setup-layout): Chinese and the modes that may contain it stay on the
 // local model, every other language uses MAI when the server offers it. Keep in step with server.asr_engine()'s 混合 rule.
 const LOCAL_ENGINE_LANGUAGES=['zh','yue','auto','zh_ja'];
@@ -585,7 +608,7 @@ window.appConfig.then(config=>config||{cloudTranslate:true}).then(({cloudRefine,
 let cloudTranslation=null;   // the translation model is an external service (cloud-translation); null until /api/config answered
 function showPrivacy(){
   if(cloudTranslation===null)return;   // not known yet: the page keeps 資料去向／確認中… instead of a claim that may be false
-  const note=interpretOn()?{label:'雲端口譯',sentence:'音訊會傳送到外部服務'}:PrivacyNote.text(asrEngine(),cloudRefineOn(),qualityChosen(),cloudTranslation);
+  const note=interpretOn()?{label:'雲端口譯',sentence:'音訊會傳送到外部服務'}:PrivacyNote.text(asrEngine(),cloudRefineOn(),qualityChosen(),cloudTranslation&&!noTranslation());
   $('privacyNote').replaceChildren(Object.assign(document.createElement('b'),{textContent:note.label}),note.sentence);
   $('secureLabel').textContent=note.label;
 }
@@ -593,6 +616,7 @@ $('cloudRefine').onchange=()=>{try{localStorage.setItem('cloudRefine',$('cloudRe
 $('quality').onchange=()=>{try{localStorage.setItem('quality',$('quality').checked?'1':'0')}catch{}$('cloudRefine').disabled=qualityChosen();showRefineFit();showPrivacy()};
 let correctionTimer=null;
 async function correctNext(){
+  if(noTranslation())correctionQueue.length=0;   // corrections retranslate: none without a translation
   if(correcting||!correctionQueue.length)return;
   // Live translation has priority on the single model slot; try again in the next gap.
   if(activeTranslation||termRequest){if(!correctionTimer)correctionTimer=setTimeout(()=>{correctionTimer=null;correctNext()},500);return}
@@ -634,7 +658,10 @@ function scheduleTranslation(force=false){
   pauseTimer=setTimeout(()=>{pauseTimer=null;runTranslation()},1000);
 }
 // replay_inject.js wraps this to time every request.
-async function streamTranslation(body,signal){return TranslationContext.translateStream(body,signal)}
+async function streamTranslation(body,signal){
+  if(noTranslation())return {text:'',source:direction.source};   // transcript-only: segments settle as before, untranslated
+  return TranslationContext.translateStream(body,signal);
+}
 async function runTranslation(){
   if(activeTranslation||!pendingSource().trim())return;
   const plan=segmentPlan(flushRequested||finalizeRemaining),segmentEnd=plan.end,final=plan.final;
@@ -705,6 +732,12 @@ $('translateState').onkeydown=event=>{if(event.key==='Enter'||event.key===' '){e
 $('start').onclick=()=>stream?stopMeeting():startMeeting();
 for(const b of document.querySelectorAll('.mode-btn'))b.onclick=()=>setLiveMode(b.dataset.mode);
 let rememberedMode='meeting';try{rememberedMode=localStorage.getItem('liveMode')||'meeting'}catch{}
+let rememberedTarget='';try{rememberedTarget=localStorage.getItem('meetingTarget')||''}catch{}
+if(rememberedMode==='meeting'){
+  let language='';try{language=localStorage.getItem('meetingLanguage')||''}catch{}
+  if(language&&$('language').querySelector(`option[value="${CSS.escape(language)}"]`))$('language').value=language;
+  if(rememberedTarget&&$('targetLanguage').querySelector(`option[value="${CSS.escape(rememberedTarget)}"]`))$('targetLanguage').value=rememberedTarget;
+}
 setLiveMode(rememberedMode==='meeting'?'meeting':'translate',false);
 // 即時口譯 is offered to granted users only; a disabled button explains nothing on hover, so the reason stands next to the modes.
 window.InterpretMode?.ready.then(()=>{

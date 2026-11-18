@@ -93,6 +93,7 @@ async function saveEdit(seq,text,button){
     const updated=await call('POST',`/api/meetings/${meetingId}/segments/${seq}/edit`,{version:segment.version,source:text});
     editing=null;replace(updated);
     if(updated.version===segment.version){notes.set(seq,{text:'原文沒有變更'});render();return}
+    if(meeting?.targetLanguage==='none'){notes.set(seq,{text:'已儲存'});render();return}   // 不翻譯 (transcript-only): nothing to retranslate
     await retranslate(seq,true);
   }catch(error){if(!error.stale){notice(error.message);button.disabled=false}}
 }
@@ -145,7 +146,7 @@ function history(segment){
 }
 function editor(segment){
   const area=el('textarea',{className:'input editor',value:segment.source,rows:3,ariaLabel:'修正後的原文'});
-  const save=el('button',{type:'submit',className:'primary-button compact',textContent:'儲存並重譯'});
+  const save=el('button',{type:'submit',className:'primary-button compact',textContent:meeting?.targetLanguage==='none'?'儲存':'儲存並重譯'});   // 不翻譯 (transcript-only): nothing to retranslate
   const form=el('form',{className:'edit-form',onclick:event=>event.stopPropagation(),onsubmit:event=>{event.preventDefault();save.disabled=true;saveEdit(segment.seq,area.value,save)}},
     area,el('div',{className:'edit-buttons'},save,el('button',{type:'button',className:'text-button',textContent:'取消',onclick:()=>{editing=null;render()}})));
   queueMicrotask(()=>{area.focus();area.setSelectionRange(area.value.length,area.value.length)});
@@ -173,6 +174,10 @@ function render(){
 }
 async function load(){
   meeting=await call('GET',`/api/meetings/${meetingId}`);
+  if(meeting.targetLanguage==='none'){   // 不翻譯 (transcript-only): no retranslation, so no refinement and no word of it
+    $('reviewHint').textContent='點一段就會播放那段錄音。這場會議不翻譯，修正轉錄後按「儲存」即可；每次修改都會留下紀錄。';
+    $('refineRow').hidden=true;
+  }
   segments=meeting.segments;
   MeetingNav.show(meeting);
   if(!segments.length)$('segments').replaceChildren(el('div',{className:'card empty'},el('b',{textContent:'這場會議沒有段落'}),el('p',{textContent:'會議中定稿的段落才會出現在這裡。'})));
@@ -207,6 +212,6 @@ $('renameForm').onsubmit=async event=>{
   }
   catch(error){notice(error.message)}finally{button.disabled=false}
 };
-fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine})=>{$('refineRow').hidden=!cloudRefine}).catch(()=>{});
+fetch('/api/config').then(r=>r.ok?r.json():{}).then(({cloudRefine})=>{$('refineRow').hidden=!cloudRefine||meeting?.targetLanguage==='none'}).catch(()=>{});
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
 load().catch(error=>notice(error.message));

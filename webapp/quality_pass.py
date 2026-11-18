@@ -271,6 +271,30 @@ Every "tgt" is written in {tgt}, whatever language CONTEXT or these instructions
 
 Return JSON only: {{"sentences": [{{"src": "...", "tgt": "...", "lang": "{lang}"}}], "carry": "..."}}"""
 
+REPEAT_MIN = 6         # characters (Chinese, Japanese): a sentence this long that only repeats the end of the one before is dropped
+REPEAT_MIN_WORDS = 3   # the same in words for Latin script: "Next Friday." confirming "...next Friday." stays
+NONE = "none"   # the meeting is not translated (transcript-only): 精準模式 settles the spoken text only
+
+
+def _without_translation(prompt: str) -> str:
+    """SYSTEM without its translation: the same repair, segmentation and carry, each item only "src" and "lang"."""
+    for old, new in (
+            ("return the final transcript and its translation, sentence by sentence.", "return the final transcript, sentence by sentence. Nothing is translated."),
+            ("- CONTEXT: the previous sentences with their translations (already shown to the reader; never repeat or re-translate them).",
+             "- CONTEXT: the previous sentences (already shown to the reader; never repeat them)."),
+            ("A very long sentence may be split at a natural clause boundary only if both halves translate cleanly on their own",
+             "A very long sentence may be split at a natural clause boundary only if both halves read cleanly on their own")):
+        assert prompt.count(old) == 1, old
+        prompt = prompt.replace(old, new)
+    start, end = prompt.index("4. Translate each item"), prompt.index("Return JSON only:")
+    prompt = prompt[:start] + "Write every \"src\" in the language that was spoken, with Traditional characters and Taiwan usage for Chinese.\n\n" + prompt[end:]
+    old = '{{"sentences": [{{"src": "...", "tgt": "...", "lang": "{lang}"}}], "carry": "..."}}'
+    assert prompt.count(old) == 1
+    return prompt.replace(old, '{{"sentences": [{{"src": "...", "lang": "{lang}"}}], "carry": "..."}}')
+
+
+SYSTEM_TRANSCRIPT = _without_translation(SYSTEM)
+
 KANA = re.compile(r"[぀-ヿ]")
 CJK = re.compile(r"[㐀-鿿]")
 
@@ -294,6 +318,9 @@ def target_name(language: str, target: str) -> str:
 
 
 def system_prompt(language: str, target: str) -> str:
+    if target == NONE:
+        src = NAMES.get(language, "Chinese or English (as spoken)")
+        return SYSTEM_TRANSCRIPT.format(src=src, lang=language if language in NAMES else "zh or en")
     if language == "zh_ja":
         return SYSTEM.format(src="Chinese or Japanese (each sentence is one of the two)",
                              tgt="the other of the two languages (Japanese for a Chinese sentence, Chinese (Traditional, Taiwan) for a Japanese one)",
@@ -349,7 +376,7 @@ class QualityPass:
         self.engine = engine or recognizer(language)
         # MAI recognizes in real time: it listens along and is committed at each chunk cut.
         self.mai = chunk_asr.MaiLive(language) if self.engine == "mai" else None
-        self.target = target if target in NAMES else "en"
+        self.target = target if target in NAMES or target == NONE else "en"
         self.chunker, self.live_text = Chunker(), _Live()
         self.waiting: deque[Chunk] = deque()
         self.wake = asyncio.Event()
@@ -366,7 +393,8 @@ class QualityPass:
         self.client = new_client()
         self.sentences_sent = 0         # the id of the last sentence sent
         self.reviser = revise_pass.Reviser(self._ask_revision, self._send_revision, target_name(language, self.target), self.live_text.between,
-                                           convert, lambda text: units(text, in_words(text)), glossary) if REVISE else None
+                                           convert, lambda text: units(text, in_words(text)), glossary,
+                                           translate=self.target != NONE) if REVISE else None
         self.worker = asyncio.create_task(self._run())
 
     # --- input -------------------------------------------------------------------------------------------
@@ -595,9 +623,11 @@ class QualityPass:
         return without_loop(text.rsplit("<asr_text>", 1)[-1])
 
     async def _refine(self, new: str, pause: str, alt: str, last: bool) -> dict:
-        context = "\n".join(f"{s['src']}\n  => {s['tgt']}" for s in self.context) or "(start of meeting)"
+        translating = self.target != NONE
+        context = "\n".join(f"{s['src']}\n  => {s['tgt']}" if translating else s["src"] for s in self.context) or "(start of meeting)"
         user = ((f"TERMS: {self.glossary}\n\n" if self.glossary else "") + f"CONTEXT:\n{context}\n\nCARRY: {self.carry}\nNEW: {new}\nPAUSE: {pause}\n"
-                + (f"ALT: {alt}\n" if alt else "") + f"LAST: {'true' if last else 'false'}\nTRANSLATE INTO: {target_name(self.language, self.target)}")
+                + (f"ALT: {alt}\n" if alt else "") + f"LAST: {'true' if last else 'false'}"
+                + (f"\nTRANSLATE INTO: {target_name(self.language, self.target)}" if translating else ""))
         payload = {"model": MODEL, "max_tokens": 6000, "response_format": {"type": "json_object"},
                    "messages": [{"role": "system", "content": system_prompt(self.language, self.target)}, {"role": "user", "content": user}],
                    **EXTRA}
@@ -607,14 +637,22 @@ class QualityPass:
         answer = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip()))
         if not isinstance(answer, dict) or not isinstance(answer.get("sentences"), list):
             raise Unusable("answer")
+        if not translating:   # transcript-only: no translation is asked for, none is kept
+            answer["sentences"] = [dict(item, tgt="") for item in answer["sentences"] if isinstance(item, dict)]
         items = [item for item in answer["sentences"]
-                 if isinstance(item, dict) and isinstance(item.get("src"), str) and isinstance(item.get("tgt"), str) and item["src"].strip() and item["tgt"].strip()]
-        # A sentence given twice (again in this answer, or the one shown last) counts and is shown once.
+                 if isinstance(item, dict) and isinstance(item.get("src"), str) and isinstance(item.get("tgt"), str) and item["src"].strip()
+                 and (item["tgt"].strip() or not translating)]
+        # A sentence given twice (again in this answer, or the one shown last) counts and is shown once; so does one that
+        # only repeats the end of the sentence before it (measured 2026-11-18: "…或是把零零一到零零九移到封存區嗎？" then
+        # "或是把零零一到零零九移到封存區嗎？" on its own). A short reply ("對。") after the same word is kept.
         shown = said(self.context[-1]["src"]) if self.context else ""
         for item in list(items):
-            if said(item["src"]) == shown:
+            text = said(item["src"])
+            words = in_words(item["src"])
+            if text == shown or (units(item["src"], words) >= (REPEAT_MIN_WORDS if words else REPEAT_MIN) and shown.endswith(text)):
                 items.remove(item)
-            shown = said(item["src"])
+                continue
+            shown = text
         carry = answer.get("carry")
         carry = carry.strip() if isinstance(carry, str) else ""
         # The answer must account for what it was given: the carried sentence and the new text, not just one of them.

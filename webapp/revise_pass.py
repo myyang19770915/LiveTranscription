@@ -41,6 +41,27 @@ Every "tgt" is written in the language named by TRANSLATE INTO; "src" stays in t
 Return JSON only: {"sentences": [{"ids": [1], "src": "...", "tgt": "..."}, {"ids": [2, 3], "src": "...", "tgt": "..."}], "notes": "..."} with every number of WINDOW exactly once, in order."""
 
 
+def _without_translation(prompt: str) -> str:
+    """SYSTEM for a meeting that is not translated (transcript-only): the same corrections and merges of SRC, no TGT."""
+    for old, new in (
+            ("A fast first pass has already shown the reader the sentences of WINDOW (SRC = transcript, TGT = translation).",
+             "A fast first pass has already shown the reader the sentences of WINDOW (SRC = transcript; this meeting is not translated)."),
+            ("(people with role and gender, names and terms with the translation in use, the topic)", "(people with role and gender, names and terms, the topic)"),
+            ("people (name, role, gender and the evidence), names and terms with their translation, the topic.",
+             "people (name, role, gender and the evidence), names and terms, the topic."),
+            ('Every "tgt" is written in the language named by TRANSLATE INTO; "src" stays in the language that was spoken.',
+             '"src" stays in the language that was spoken, with Traditional characters and Taiwan usage for Chinese.'),
+            ('{"sentences": [{"ids": [1], "src": "...", "tgt": "..."}, {"ids": [2, 3], "src": "...", "tgt": "..."}], "notes": "..."}',
+             '{"sentences": [{"ids": [1], "src": "..."}, {"ids": [2, 3], "src": "..."}], "notes": "..."}')):
+        assert prompt.count(old) == 1, old
+        prompt = prompt.replace(old, new)
+    start, end = prompt.index("3. Translation."), prompt.index("4. NOTES.")
+    return prompt[:start] + "3. NOTES." + prompt[end + len("4. NOTES."):]
+
+
+SYSTEM_TRANSCRIPT = _without_translation(SYSTEM)
+
+
 class Refused(Exception):
     """The model answered, but not with a revision of this window. The message is one fixed word."""
 
@@ -55,8 +76,9 @@ class Reviser:
     """One stream's revision. `ask(messages, timeout)` returns the model's parsed JSON answer; `send` takes the event
     for the browser; `alt(start_ms, end_ms)` is the live engine's text of that span; `units(text)` measures text."""
 
-    def __init__(self, ask, send, target_name: str, alt, convert, units, glossary: str = ""):
+    def __init__(self, ask, send, target_name: str, alt, convert, units, glossary: str = "", translate: bool = True):
         self.ask, self.send, self.target_name, self.alt, self.convert, self.units = ask, send, target_name, alt, convert, units
+        self.translate = translate          # False: the meeting is not translated (transcript-only), SRC only
         self.glossary = glossary.strip()
         self.sentences: list[dict] = []     # every sentence sent so far, as revised: id, source, target, lang, startMs, endMs
         self.at = 0                         # sentences before this index are settled (revised or given up)
@@ -144,12 +166,13 @@ class Reviser:
         return gone
 
     def _messages(self, first: int, window: list[dict]) -> list[dict]:
-        before = "\n".join(f"{s['source']}\n  => {s['target']}" for s in self.sentences[max(0, first - BEFORE):first]) or "(start of meeting)"
+        before = "\n".join(f"{s['source']}\n  => {s['target']}" if self.translate else s["source"]
+                           for s in self.sentences[max(0, first - BEFORE):first]) or "(start of meeting)"
         after = " ".join(s["source"] for s in self.sentences[first + len(window):first + len(window) + AFTER]) or "(nothing yet)"
-        numbered = "\n".join(f"{number}. SRC: {s['source']}\n   TGT: {s['target']}" for number, s in enumerate(window, 1))
+        numbered = "\n".join(f"{number}. SRC: {s['source']}" + (f"\n   TGT: {s['target']}" if self.translate else "") for number, s in enumerate(window, 1))
         user = ((f"TERMS: {self.glossary}\n\n" if self.glossary else "") + f"NOTES: {self.notes}\n\nBEFORE:\n{before}\n\nWINDOW:\n{numbered}\n\nAFTER: {after}\n\n"
-                f"ALT: {self.alt(window[0]['startMs'], window[-1]['endMs'])}\n\nTRANSLATE INTO: {self.target_name}")
-        return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
+                f"ALT: {self.alt(window[0]['startMs'], window[-1]['endMs'])}" + (f"\n\nTRANSLATE INTO: {self.target_name}" if self.translate else ""))
+        return [{"role": "system", "content": SYSTEM if self.translate else SYSTEM_TRANSCRIPT}, {"role": "user", "content": user}]
 
     async def _answer(self, window: list[dict], messages: list[dict]) -> tuple[dict, list[list[int]]]:
         """The model's answer and, for each of its items, the numbers of the window's sentences it stands for."""
@@ -163,7 +186,7 @@ class Reviser:
             raise Refused("sentences")
         if any(len(group) > MERGE_MAX or len({window[number - 1]["lang"] for number in group}) > 1 for group in groups):
             raise Refused("merge")
-        if not all(isinstance(item.get(key), str) and item[key].strip() for item in items for key in ("src", "tgt")):
+        if not all(isinstance(item.get(key), str) and item[key].strip() for item in items for key in (("src", "tgt") if self.translate else ("src",))):
             raise Refused("empty")
         if not usable(self.units(" ".join(s["source"] for s in window)), self.units(" ".join(item["src"] for item in items))):
             raise Refused("coverage")
@@ -181,7 +204,7 @@ class Reviser:
         for group, item in zip(groups, answer["sentences"]):
             sentence, taken = window[group[0] - 1], [window[number - 1] for number in group[1:]]
             source = self.convert(item["src"].strip()) if sentence["lang"] == "zh" else item["src"].strip()
-            target = self.convert(item["tgt"].strip()) if sentence.get("targetLang") == "zh" else item["tgt"].strip()
+            target = "" if not self.translate else self.convert(item["tgt"].strip()) if sentence.get("targetLang") == "zh" else item["tgt"].strip()
             if taken or (source, target) != (sentence["source"], sentence["target"]):
                 sentence["source"], sentence["target"] = source, target
                 event = {"id": sentence["id"], "source": source, "target": target}

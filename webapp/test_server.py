@@ -3023,6 +3023,102 @@ def merging(groups, texts=None, notes=""):
     return answer
 
 
+class TranscriptOnlyQualityTest(unittest.TestCase):
+    """transcript-only: with the target "none" 精準模式 and its revision settle the spoken text and translate nothing."""
+
+    def test_quality_settles_the_text_without_translating(self):
+        service = FakeQualityService(["我們下週上線新的系統"], [{"sentences": [{"src": "我们下週上線新的系統。", "lang": "zh"}], "carry": ""}])
+
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service))), \
+                    patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", "text"):
+                quality = quality_pass.QualityPass(send, "zh", "none", "", lambda text: text.replace("们", "們"))
+                quality.feed(tone(3))
+                await quality.finish()
+            return events
+        events = asyncio.run(go())
+        sentences = [s for event in events for s in event["quality"]["sentences"]]
+        self.assertEqual([(s["source"], s["target"], s["lang"]) for s in sentences], [("我們下週上線新的系統。", "", "zh")])
+        system, user = service.chats[0]["messages"][0]["content"], service.user(0)
+        self.assertNotIn("TRANSLATE INTO", user)
+        self.assertNotIn("Translate each item", system)
+        self.assertNotIn('"tgt"', system)
+        self.assertIn('{"sentences": [{"src": "...", "lang": "zh"}], "carry": "..."}', system)
+        self.assertIn("Nothing is translated.", system)
+
+    def test_a_sentence_that_repeats_the_end_of_the_one_before_is_dropped(self):
+        service = FakeQualityService(["要我幫你補一份待辦，或是把零零一到零零九移到封存區嗎"], [{"sentences": [
+            {"src": "要我幫你補一份待辦，或是把零零一到零零九移到封存區嗎？", "lang": "zh"},
+            {"src": "或是把零零一到零零九移到封存區嗎？", "lang": "zh"},   # the end of the one before, again
+            {"src": "對。", "lang": "zh"}, {"src": "對。", "lang": "zh"}], "carry": ""}])   # given twice: shown once
+
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service))), \
+                    patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", "text"):
+                quality = quality_pass.QualityPass(send, "zh", "none", "")
+                quality.feed(tone(3))
+                await quality.finish()
+            return events
+        sentences = [s["source"] for event in asyncio.run(go()) for s in event["quality"]["sentences"]]
+        self.assertEqual(sentences, ["要我幫你補一份待辦，或是把零零一到零零九移到封存區嗎？", "對。"])
+
+    def test_a_short_english_confirmation_of_the_end_is_kept(self):
+        service = FakeQualityService(["so the deadline is next friday next friday"], [{"sentences": [
+            {"src": "So the deadline is next Friday.", "tgt": "所以期限是下週五。"}, {"src": "Next Friday.", "tgt": "下週五。"},
+            {"src": "Yes, it is next Friday.", "tgt": "對，是下週五。"}, {"src": "it is next Friday.", "tgt": "是下週五。"}], "carry": ""}])
+
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service))), \
+                    patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", "text"):
+                quality = quality_pass.QualityPass(send, "en", "zh", "")
+                quality.feed(tone(3))
+                await quality.finish()
+            return events
+        sentences = [s["source"] for event in asyncio.run(go()) for s in event["quality"]["sentences"]]
+        # Two words that confirm the end stay; four words that only repeat it go.
+        self.assertEqual(sentences, ["So the deadline is next Friday.", "Next Friday.", "Yes, it is next Friday."])
+
+    def test_revision_corrects_the_text_only(self):
+        users, systems = [], []
+
+        async def reviewer(messages, timeout):
+            systems.append(messages[0]["content"])
+            users.append(messages[1]["content"])
+            numbers = [int(n) for n in re.findall(r"^(\d+)\. SRC: ", messages[1]["content"], re.M)]
+            return {"sentences": [{"ids": [n], "src": "這是第三句話。" if n == 3 else f"這是第{n}句話。"} for n in numbers], "notes": ""}
+
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            reviser = revise_pass.Reviser(reviewer, send, "English", lambda start, end: "", lambda text: text,
+                                          lambda text: quality_pass.units(text, quality_pass.in_words(text)), translate=False)
+            reviser.add([dict(s, target="") for s in shown(1, 9)])
+            for _ in range(50):
+                await asyncio.sleep(0)
+            reviser.cancel()
+            return events
+        events = asyncio.run(go())
+        self.assertEqual(systems[0], revise_pass.SYSTEM_TRANSCRIPT)
+        self.assertNotIn("TGT:", users[0])
+        self.assertNotIn("TRANSLATE INTO", users[0])
+        self.assertNotIn("3. Translation.", revise_pass.SYSTEM_TRANSCRIPT)
+        self.assertEqual(events, [{"revision": {"seq": 1, "sentences": [{"id": 3, "source": "這是第三句話。", "target": ""}]}}])
+
+
 class ReviserTest(unittest.TestCase):
     """quality-revision: shown sentences are revised in windows; anything that goes wrong keeps the first result."""
 
