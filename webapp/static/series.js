@@ -139,7 +139,7 @@
   $('detect').checked=store.get('progressDetect')==='1';
   $('detect').onchange=()=>{store.set('progressDetect',$('detect').checked?'1':'0');if($('detect').checked)maybeCheck(true)};
   $('team').addEventListener('change',()=>loadSeries($('team').value));
-  Promise.all([window.accountReady,fetch('/api/config').then(r=>r.ok?r.json():{}).catch(()=>({}))]).then(([,config])=>{
+  Promise.all([window.accountSoon,(window.appConfig||fetch('/api/config').then(r=>r.ok?r.json():null).catch(()=>null)).then(c=>c||{})]).then(([,config])=>{
     minutesModel=!!config.minutes;
     // app.js fills the team menu from the same account answer; read it after that.
     setTimeout(()=>loadSeries($('team').value),0);

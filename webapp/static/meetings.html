@@ -43,7 +43,7 @@
 </main>
 
 <script src="/assets/return-path.js?v=20261113c"></script>
-<script src="/assets/account.js?v=20261118b"></script>
+<script src="/assets/account.js?v=20261118ph"></script>
 <script src="/assets/meeting-catalog.js?v=20261105a"></script>
 <script>
 const $=id=>document.getElementById(id);
@@ -109,7 +109,8 @@ for(const k of ['team','creator','from','to'])$(k).onchange=reload;
 $('filters').onsubmit=event=>{event.preventDefault();reload()};
 $('clear').onclick=()=>{for(const k of FILTERS)$(k).value='';reload()};
 
-Promise.all([window.accountReady,fetch('/api/meetings/creators').then(r=>r.ok?r.json():[]).catch(()=>[])]).then(([{teams},people])=>{
+window.onPageShown(reload);   // shown after being prepared in the background: the list as it is now
+Promise.all([window.accountSoon,fetch('/api/meetings/creators').then(r=>r.ok?r.json():[]).catch(()=>[])]).then(([{teams},people])=>{
   creators=Object.fromEntries(people.map(p=>[p.username,p.displayName]));
   $('team').append(...teams.map(t=>Object.assign(document.createElement('option'),{value:t.id,textContent:t.name})));
   $('creator').append(...people.map(p=>Object.assign(document.createElement('option'),{value:p.username,textContent:p.displayName===p.username?p.username:`${p.displayName}（${p.username}）`})));

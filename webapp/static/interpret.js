@@ -166,6 +166,7 @@
   fetch('/api/interpret/config').then(r => r.ok ? r.json() : null).then(cfg => {
     if (cfg && cfg.retentionDays) $('retention').textContent = `紀錄保存 ${cfg.retentionDays} 天，到期自動刪除。`;
   }).catch(() => {});
+  window.onPageShown?.(() => loadHistory().catch(() => {}));   // shown after being prepared: the records as they are now
   loadHistory().then(() => {
     const wanted = new URLSearchParams(location.search).get('id');   // 在我的紀錄開啟, from the live page
     if (wanted) loadSession(wanted);

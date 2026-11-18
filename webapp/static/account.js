@@ -169,29 +169,53 @@ function currentNav(path=location.pathname){
   if(path==='/ask')return 'search';
   return NAV_LINKS.find(n=>n.href===path)?.key||'';
 }
+// The account this tab last saw (page-switching): the header is drawn from it at once, before /api/me answers, and
+// redrawn only when the answer differs. Only for drawing; the server checks every request. Removed on 401 and sign-out.
+const ACCOUNT_KEY='yq-me';
+const remembered=(()=>{try{const me=JSON.parse(sessionStorage.getItem(ACCOUNT_KEY)||'null');return me&&me.username?me:null}catch{try{sessionStorage.removeItem(ACCOUNT_KEY)}catch{}return null}})();
+const forget=()=>{try{sessionStorage.removeItem(ACCOUNT_KEY)}catch{}};
+function drawHeader(me){
+  const slot=document.getElementById('account');
+  if(!slot)return;
+  const make=(tag,props)=>Object.assign(document.createElement(tag),props);
+  const name=make('span',{className:'account-name'});
+  name.append(make('b',{textContent:me.displayName||me.username}));
+  const signOut=async()=>{forget();await fetch('/api/logout',{method:'POST'});location.replace('/login')};
+  const out=make('button',{type:'button',className:'account-logout',textContent:'登出',onclick:signOut});
+  // The same links in the same order on every page (ui-consistency-pass); the current page's link stays, marked.
+  const here=currentNav();
+  const links=NAV_LINKS.filter(n=>!n.admin||me.admin).map(n=>{
+    const a=make('a',{href:n.href,textContent:n.text,className:n.key==='search'?'nav-link account-search':'nav-link'});
+    a.dataset.nav=n.key;if(n.key==='search')a.title='搜尋（/）';
+    if(n.key===here){a.classList.add('current');a.setAttribute('aria-current','page')}
+    return a;
+  });
+  slot.replaceChildren(...links,ownAvatar(me,make,signOut,here),name,out);
+  prerenderLinks();
+}
+// Supporting browsers (Chrome, Edge) prepare a header link's page while the pointer rests on it (page-switching);
+// others ignore the rules and load the page as before.
+function prerenderLinks(){
+  if(document.getElementById('yq-prerender')||!HTMLScriptElement.supports?.('speculationrules'))return;
+  const rules=Object.assign(document.createElement('script'),{id:'yq-prerender',type:'speculationrules'});
+  rules.textContent=JSON.stringify({prerender:[{where:{and:[{selector_matches:'#account a.nav-link'},{not:{selector_matches:'.current'}}]},eagerness:'moderate'}]});
+  document.head.append(rules);
+}
+// A page prepared in the background may be shown much later: its data is fetched again when it is shown, so a change
+// made meanwhile on another page is not hidden (page-switching). fn runs only for a page that was prepared.
+window.onPageShown=fn=>{if(document.prerendering)document.addEventListener('prerenderingchange',()=>fn(),{once:true})};
+if(remembered)drawHeader(remembered);
 window.accountReady=fetch('/api/me').then(response=>{
-  if(response.status===401){location.replace(ReturnPath.loginUrl(location.pathname,location.search));return new Promise(()=>{})}
+  if(response.status===401){forget();location.replace(ReturnPath.loginUrl(location.pathname,location.search));return new Promise(()=>{})}
   return response.json();
 }).then(me=>{
-  const slot=document.getElementById('account');
-  if(slot){
-    const make=(tag,props)=>Object.assign(document.createElement(tag),props);
-    const name=make('span',{className:'account-name'});
-    name.append(make('b',{textContent:me.displayName||me.username}));
-    const signOut=async()=>{await fetch('/api/logout',{method:'POST'});location.replace('/login')};
-    const out=make('button',{type:'button',className:'account-logout',textContent:'登出',onclick:signOut});
-    // The same links in the same order on every page (ui-consistency-pass); the current page's link stays, marked.
-    const here=currentNav();
-    const links=NAV_LINKS.filter(n=>!n.admin||me.admin).map(n=>{
-      const a=make('a',{href:n.href,textContent:n.text,className:n.key==='search'?'nav-link account-search':'nav-link'});
-      a.dataset.nav=n.key;if(n.key==='search')a.title='搜尋（/）';
-      if(n.key===here){a.classList.add('current');a.setAttribute('aria-current','page')}
-      return a;
-    });
-    slot.replaceChildren(...links,ownAvatar(me,make,signOut,here),name,out);
-  }
+  const text=JSON.stringify(me);
+  try{sessionStorage.setItem(ACCOUNT_KEY,text)}catch{}
+  if(!remembered||JSON.stringify(remembered)!==text)drawHeader(me);
   return me;
 });
+// The account at once when this tab remembers it, else when /api/me answers: for menus and controls, never for access.
+window.accountSoon=remembered?Promise.resolve(remembered):window.accountReady;
 
 // The header avatar and its menu: 更換照片, and 移除照片 when there is a photo.
 // phoneItems: 待辦看板 and 登出 for a header too narrow for their buttons (the meeting page on phones, accounts.css).

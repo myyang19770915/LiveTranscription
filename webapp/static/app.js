@@ -530,7 +530,7 @@ function showEngine(){$('asrEngineValue').textContent=asrEngine()==='mai'?'雲�
 function showRefineFit(){$('cloudRefineFit').textContent=qualityChosen()?'精準模式已包含，不需另外開啟':'傳送文字到外部服務 · 適合辨識已正確、想要譯文更通順'}
 // 團隊: every meeting belongs to one of the user's teams; the last choice stays in this browser.
 const NO_TEAM='尚未加入任何團隊，請聯絡管理員';
-window.accountReady.then(({teams})=>{
+window.accountSoon.then(({teams})=>{   // page-switching: the remembered account fills the menu at once
   let saved='';try{saved=localStorage.getItem('team')||''}catch{}
   $('team').replaceChildren(...teams.map(team=>Object.assign(document.createElement('option'),{value:team.id,textContent:team.name})));
   if(teams.some(team=>String(team.id)===saved))$('team').value=saved;
@@ -563,7 +563,9 @@ document.addEventListener('visibilitychange',()=>document.hidden?clearTimeout(se
 checkServices();
 // Unknown settings (the request failed) count as external translation: the notice must never claim text stays on the host
 // when it may not (privacy-notice).
-fetch('/api/config').then(r=>r.ok?r.json():{cloudTranslate:true}).catch(()=>({cloudTranslate:true})).then(({cloudRefine,mai,quality:qualityReady,cloudTranslate})=>{
+// One /api/config request per load, shared with series.js (page-switching).
+window.appConfig=fetch('/api/config').then(r=>r.ok?r.json():null).catch(()=>null);
+window.appConfig.then(config=>config||{cloudTranslate:true}).then(({cloudRefine,mai,quality:qualityReady,cloudTranslate})=>{
   cloudTranslation=!!cloudTranslate;
   $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;$('qualityRow').hidden=!qualityReady;$('setupAdvanced').hidden=!(cloudRefine||mai||qualityReady);
   try{$('quality').checked=localStorage.getItem('quality')==='1'}catch{}

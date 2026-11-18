@@ -115,7 +115,7 @@ async function load(){
   for(const k of ['team','days'])if(params.get(k))query.set(k,params.get(k));
   const response=await fetch(`/api/metrics?${query}`);
   const result=await response.json().catch(()=>null);
-  if(ticket!==latest)return;
+  if(ticket!==latest||response.status===401)return;   // signed out: account.js goes to the sign-in page
   if(response.status===404&&params.get('team')){setParam('team','');$('team').value='';notice('找不到這個團隊，已改為顯示全部團隊');return load()}
   if(!response.ok||!result?.actions)throw new Error(typeof result?.detail==='string'?result.detail:'無法載入指標');
   data=result;
@@ -130,4 +130,5 @@ $('weeklyTable').onclick=()=>{const on=$('weeklyTable').getAttribute('aria-press
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
 let resizing;
 addEventListener('resize',()=>{clearTimeout(resizing);resizing=setTimeout(()=>{if(data)renderWeekly(data)},150)});
-window.accountReady.then(reload);
+window.onPageShown(reload);
+reload();   // the numbers do not need the account (page-switching); a signed-out visit goes to the sign-in page (account.js)

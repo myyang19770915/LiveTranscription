@@ -64,7 +64,7 @@
 </main>
 
 <script src="/assets/return-path.js?v=20261113c"></script>
-<script src="/assets/account.js?v=20261118b"></script>
+<script src="/assets/account.js?v=20261118ph"></script>
 <script>
 const $=id=>document.getElementById(id);
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
@@ -190,6 +190,7 @@ $('createTeam').onsubmit=event=>{event.preventDefault();const button=event.submi
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
 load().catch(error=>showError(error.message));
 // The header menu changed the signed-in administrator's own photo.
+window.onPageShown(()=>{load().catch(error=>showError(error.message));loadAccess().catch(error=>showError(error.message))});   // shown after being prepared
 window.addEventListener('yq:avatar',()=>load().catch(error=>showError(error.message)));
 </script>
 </body></html>

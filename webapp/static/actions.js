@@ -131,7 +131,7 @@ async function load(){
   query.set('status',(params.get('cancelled')?COLUMNS:COLUMNS.slice(0,3)).join(','));
   const response=await fetch(`/api/actions?${query}`);
   const result=await response.json().catch(()=>null);
-  if(ticket!==latest)return;
+  if(ticket!==latest||response.status===401)return;   // signed out: account.js goes to the sign-in page
   // A bookmarked team the user has left: show all their teams instead of staying on the error.
   if(response.status===404&&params.get('team')){setParam('team','');$('team').value='';await load();notice('找不到這個團隊，已改為顯示全部團隊');return}
   if(!response.ok||!result?.items)throw new Error(result?.detail||'無法載入待辦');
@@ -347,4 +347,7 @@ document.addEventListener('keydown',event=>{
   if(event.key==='c'&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!typing&&!document.querySelector('dialog[open]')){event.preventDefault();openCreate()}
 });
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('interpreter-theme',next)}catch{}};
-window.accountReady.then(account=>{me=account;return reload()});
+// The board's data does not wait for the account (page-switching): me only shows which reminder switches can be used.
+window.accountSoon.then(account=>{me=account;return reload()});
+window.accountReady.then(account=>{me=account});
+window.onPageShown(reload);

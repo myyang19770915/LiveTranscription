@@ -168,7 +168,7 @@ $('q').value=params.get('q')||'';
 $('from').value=params.get('from')||'';$('to').value=params.get('to')||'';
 pressKind(['segments','items','meetings'].includes(params.get('kind'))?params.get('kind'):'all');
 $('q').focus();
-window.accountReady.then(async me=>{
+window.accountSoon.then(async me=>{   // page-switching: the remembered account fills the menus at once
   teams=me.teams||[];
   $('team').append(...teams.map(t=>el('option',{value:t.id,textContent:t.name})));
   $('team').value=teams.some(t=>String(t.id)===params.get('team'))?params.get('team'):'';
