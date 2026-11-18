@@ -340,10 +340,13 @@ class _Live:
 class QualityPass:
     """One stream's quality pass. `send` is an async callable taking the event dict for the browser."""
 
-    def __init__(self, send, language: str, target: str, glossary: str, convert=lambda text: text, engine_language: str = "zhen"):
+    def __init__(self, send, language: str, target: str, glossary: str, convert=lambda text: text, engine_language: str = "zhen",
+                 engine: str | None = None):
         self.send, self.language, self.glossary, self.convert = send, language, glossary.strip(), convert
         self.engine_language = engine_language   # the local engine's name for the language (TRANSLATE_QUALITY_ASR=local)
-        self.engine = recognizer(language)
+        # engine: who recognizes, in place of TRANSLATE_QUALITY_ASR's choice ("api" for a recording that already exists,
+        # record-to-meeting); a meeting leaves it to the setting.
+        self.engine = engine or recognizer(language)
         # MAI recognizes in real time: it listens along and is committed at each chunk cut.
         self.mai = chunk_asr.MaiLive(language) if self.engine == "mai" else None
         self.target = target if target in NAMES else "en"

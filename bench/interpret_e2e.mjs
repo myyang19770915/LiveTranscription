@@ -247,7 +247,7 @@ const state = page => page.evaluate(() => ({
 
 // --- Translate-only sessions are saved: the translation goes to the record every interval while it runs, then in full.
 {
-  const puts = [], sid = '20261118-110000';
+  const puts = [], bodies = [], sid = '20261118-110000';
   const {page, context} = await home({saveMs: 600, setup: async page => {
     await page.routeWebSocket('**/ws/transcribe', ws => ws.onMessage(message => {
       if (typeof message !== 'string') return;
@@ -256,7 +256,7 @@ const state = page => page.evaluate(() => ({
       ws.send(JSON.stringify({msg: {text: '大家早安。', speech_end: true}, displayText: '大家早安。'}));
     }));
     await page.route('**/api/interpret/**/translation', route => { puts.push([route.request().url().split('/api/interpret/')[1], route.request().postDataJSON().text]);
-      route.fulfill(json({})); });
+      bodies.push(route.request().postDataJSON()); route.fulfill(json({})); });
   }});
   await page.click('#modeTranslate'); await page.selectOption('#language', 'zh'); await page.selectOption('#targetLanguage', 'en');
   t('即時翻譯 says it is saved', await page.textContent('#storeNote'), '存成你的紀錄，只有你看得到');
@@ -268,6 +268,10 @@ const state = page => page.evaluate(() => ({
   await page.waitForTimeout(2500);
   t('after it is saved: the full translation once more', puts.at(-1), [`sessions/${sid}/translation`, 'Good morning, everyone.']);
   t('and 在我的紀錄開啟', await page.getAttribute('#savedLink', 'href'), `/interpret?id=${sid}`);
+  // record-to-meeting: the finished sentences go with the text, so the record can become a meeting.
+  const sentences = bodies.at(-1).segments || [];
+  t('the sentences go with the translation', [sentences.length, sentences[0]?.source, sentences[0]?.target, typeof sentences[0]?.startMs, sentences[0]?.endMs >= sentences[0]?.startMs],
+    [1, '大家早安。', 'Good morning, everyone.', 'number', true]);
   await context.close();
 }
 

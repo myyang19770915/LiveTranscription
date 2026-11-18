@@ -45,17 +45,25 @@ function showSaved(id){if(!id)return;$('savedLink').href=`/interpret?id=${encode
 // then once more in full after the session is saved.
 const LIVE_SAVE_MS=window.YQ_LIVE_SAVE_MS||30000;
 let recordToken='',savedRecord='',sentTranslation='',liveSaveTimer=0;
+// With the text go the finished sentences (record-to-meeting), as a meeting keeps them, so the record can become one.
+function recordSegments(){
+  if(interpretOn())return undefined;   // 即時口譯's translation is spoken, not per sentence
+  const cut=t=>String(t||'').slice(0,2000);
+  return outputRecords().slice(0,5000).map(s=>{const startMs=Math.max(0,Math.round(s.startMs||0));
+    return {startMs,endMs:Math.max(startMs,Math.round(s.endMs||0)),source:cut(s.source),target:cut(s.target),detected:String(s.detected||'').slice(0,16)}});
+}
+function recordBody(){return JSON.stringify({text:visibleTranslation(),segments:recordSegments()})}
 function sendLiveTranslation(){
-  const text=visibleTranslation();
-  if(!recordToken||text===sentTranslation)return;
-  fetch(`/api/interpret/live/${recordToken}/translation`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({text})})
-    .then(r=>{if(r.ok)sentTranslation=text}).catch(()=>{});   // tried again at the next interval
+  const body=recordBody();
+  if(!recordToken||body===sentTranslation||(!visibleTranslation()&&!recordSegments()?.length))return;   // nothing yet, or nothing new
+  fetch(`/api/interpret/live/${recordToken}/translation`,{method:'PUT',headers:{'content-type':'application/json'},body})
+    .then(r=>{if(r.ok)sentTranslation=body}).catch(()=>{});   // tried again at the next interval
 }
 async function saveFinalTranslation(){
   for(let i=0;i<60&&(activeTranslation||pendingSource().trim()||!savedRecord);i++)await new Promise(r=>setTimeout(r,500));   // the last segments are still being translated
   if(!savedRecord){if(recordToken)toast('最後一段譯文沒有存到紀錄，可以先匯出',6000);return}   // ended without the saved answer
   const id=savedRecord;showSaved(id);
-  try{const r=await fetch(`/api/interpret/sessions/${encodeURIComponent(id)}/translation`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({text:visibleTranslation()})});if(!r.ok)throw new Error(r.status)}
+  try{const r=await fetch(`/api/interpret/sessions/${encodeURIComponent(id)}/translation`,{method:'PUT',headers:{'content-type':'application/json'},body:recordBody()});if(!r.ok)throw new Error(r.status)}
   catch{toast('譯文沒有存到紀錄，可以先匯出',6000)}
 }
 // 即時翻譯 (live-translation) and 即時口譯 (interpret-mode-on-home): the same page without a meeting record; each session

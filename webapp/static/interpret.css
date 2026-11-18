@@ -86,3 +86,23 @@
 
 /* 我的紀錄 (interpret-mode-on-home): the kind column stays on one line. */
 .history td.kind { white-space: nowrap; }
+
+/* 轉成會議紀錄 (record-to-meeting): the dialog, and the state of a conversion in the actions of its row. */
+.convert-dialog { width: min(460px, calc(100vw - 32px)); padding: 24px; border: 1px solid var(--border); border-radius: var(--radius-frame);
+  background: var(--panel); color: var(--text); box-shadow: 0 24px 60px rgb(0 0 0 / .3); }
+.convert-dialog::backdrop { background: color-mix(in srgb, var(--page) 70%, transparent); backdrop-filter: blur(6px); }
+.convert-dialog form { display: grid; gap: 8px; }
+.convert-dialog h2 { margin: 0; font-size: var(--text-section); }
+.convert-dialog .hint { margin: 0 0 6px; }
+.convert-dialog .field { margin-top: 6px; }
+.convert-dialog .input { width: 100%; }
+.convert-note { margin: 8px 0 0; padding: 12px 14px; border-radius: var(--radius-card); background: var(--accent-soft); color: var(--text); font-size: 14px; line-height: 1.6; }
+.convert-note.external { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.convert-dialog .alert { margin: 4px 0 0; }
+.convert-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+.history .acts .convert-state { display: inline-flex; padding: 6px 10px; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.history .acts .convert-state.failed { color: var(--danger); }
+.history .acts a.converted { color: var(--accent); }
+.history .acts button:disabled { opacity: .45; cursor: not-allowed; }
+.convert-actions > button { width: auto; }   /* admin.css makes buttons full width on phones; here the two share the row */
+@media (max-width: 640px) { .convert-actions > button { flex: 1; } }

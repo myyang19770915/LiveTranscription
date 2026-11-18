@@ -1,3 +1,4 @@
+import array
 import asyncio
 import base64
 import contextlib
@@ -38,6 +39,7 @@ import mailer
 import meeting_audio
 import minutes
 import qa
+import record_meeting
 import records_retention
 import team_access
 import chunk_asr
@@ -6069,6 +6071,239 @@ class PlainWordingTests(unittest.TestCase):
                     "interpret.UNREACHABLE": interpret.UNREACHABLE, "auth.LDAP_UNREACHABLE": auth.LDAP_UNREACHABLE}
         problems += [f"{name}: {'、'.join(words)}" for name, text in messages.items() if (words := self.offending(text))]
         self.assertEqual(problems, [], "\n" + "\n".join(problems))
+
+
+class FakeQualityPass:
+    """精準模式 for record-to-meeting tests: answers when finished with the events given, and remembers how it was made."""
+    made: list = []
+    events: list = []
+
+    def __init__(self, send, language, target, glossary, convert=lambda text: text, engine_language="zhen", engine=None):
+        from collections import deque
+        self.send, self.fed, self.waiting, self.finished = send, 0, deque(), False
+        FakeQualityPass.made.append({"language": language, "target": target, "engine": engine})
+
+    def feed(self, pcm):
+        self.fed += len(pcm)
+
+    async def finish(self):
+        for event in FakeQualityPass.events:
+            await self.send(event)
+        self.finished = True
+
+    def cancel(self):
+        pass
+
+
+class RecordToMeetingTests(AccountTestCase):
+    """record-to-meeting: a record of 我的紀錄 becomes a team meeting."""
+
+    SENTENCES = [{"startMs": 0, "endMs": 1200, "source": "大家好", "target": "Hello everyone", "detected": "zh"},
+                 {"startMs": 1200, "endMs": 2000, "source": "開始吧", "target": "Let us begin", "detected": "zh"}]
+
+    def setUp(self):
+        super().setUp()
+        FakeQualityPass.made, FakeQualityPass.events = [], []
+        self.addCleanup(self.stop_jobs)
+
+    def stop_jobs(self):
+        for job in record_meeting.JOBS.values():
+            if job.get("task"):
+                job["task"].cancel()
+        record_meeting.JOBS.clear()
+
+    def record(self, user="alice", sid="20261118-140300", kind="translate", rate=16000, seconds=2, segments=None,
+               source="zh", target="en"):
+        """A record written straight to its folder, as a session saves it."""
+        folder = self.output / "interpret" / user / sid
+        folder.mkdir(parents=True)
+        with wave.open(str(folder / "input.wav"), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(rate)
+            audio.writeframes(b"\x01\x00" * rate * seconds)
+        data = {"startedAt": "2026-11-18 14:03:00", "kind": kind, "target": target, "sourceLang": source, "engine": "local", "id": sid,
+                "inputSeconds": seconds, "sourceText": "大家好開始吧", "translation": "Hello everyone. Let us begin."}
+        if segments is not None:
+            data["segments"] = segments
+        (folder / "session.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return folder
+
+    def quality_on(self):
+        for fake in (patch.multiple("quality_pass", URL="http://quality.test", MODEL="text-model", ASR_MODEL="Qwen3-ASR"),
+                     patch("quality_pass.QualityPass", FakeQualityPass)):
+            fake.start()
+            self.addCleanup(fake.stop)
+
+    # --- 即時翻譯 records keep their sentences
+
+    def test_a_translate_session_keeps_its_sentences(self):
+        upstream = AudioUntilEos(32000)
+        with patch("server.websockets.connect", return_value=upstream):
+            with self.signed_in("alice").websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"mode": "translate", "language": "zh", "target": "en"})
+                websocket.send_bytes(b"\x00\x01" * 16000)
+                events = [websocket.receive_json(), websocket.receive_json()]
+                token = next(e["record"] for e in events if "record" in e)
+                live = f"/api/interpret/live/{token}/translation"
+                alice = self.signed_in("alice")
+                for bad in ([{**self.SENTENCES[0], "startMs": 1200, "endMs": 800}], [self.SENTENCES[0]] * 5001,
+                            [{**self.SENTENCES[0], "source": "x" * 2001}], [{**self.SENTENCES[0], "startMs": -1}]):
+                    self.assertEqual(alice.put(live, json={"text": "x", "segments": bad}).status_code, 422)
+                self.assertEqual(alice.put(live, json={"text": "Hello everyone", "segments": self.SENTENCES[:1]}).status_code, 200)
+                websocket.send_text("YOUDAO_ONETIME_ASR_STREAM_EOS")
+                saved = websocket.receive_json()["saved"]
+        folder = self.output / "interpret" / "alice" / saved
+        self.assertEqual(json.loads((folder / "session.json").read_text(encoding="utf-8"))["segments"], self.SENTENCES[:1])
+        alice = self.signed_in("alice")
+        # Once more after saving, all of them; a request without sentences keeps the text only, and the sentences stay.
+        self.assertEqual(alice.put(f"/api/interpret/sessions/{saved}/translation", json={"text": "both", "segments": self.SENTENCES}).status_code, 200)
+        self.assertEqual(alice.put(f"/api/interpret/sessions/{saved}/translation", json={"text": "text only"}).status_code, 200)
+        data = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+        self.assertEqual((data["translation"], data["segments"]), ("text only", self.SENTENCES))
+        listed = alice.get("/api/interpret/sessions").json()[0]
+        self.assertEqual((listed["segments"], listed["meetingId"], listed["cannotConvert"]), (True, None, ""))
+
+    # --- Turning a record into a meeting
+
+    def test_a_record_with_sentences_becomes_a_meeting_at_once(self):
+        team = self.team("產品部", "alice")
+        folder = self.record(segments=self.SENTENCES)
+        alice = self.signed_in("alice")
+        answer = alice.post("/api/interpret/sessions/20261118-140300/meeting", json={"team_id": team, "title": "週會"})
+        self.assertEqual(answer.status_code, 200, answer.text)
+        meeting_id = answer.json()["meetingId"]
+        row = self.query("SELECT team_id, created_by, title, language, source_language, target_language, audio_bytes, "
+                         "to_char(started_at AT TIME ZONE 'Asia/Taipei', 'YYYY-MM-DD HH24:MI'), ended_at - started_at FROM meetings")
+        self.assertEqual(row, [(team, "alice", "週會", "zh", "zh", "en", 64000, "2026-11-18 14:03", timedelta(seconds=2))])
+        self.assertEqual(self.query("SELECT seq, start_ms, end_ms, asr_text, source, live_target, target, detected FROM segments ORDER BY seq"),
+                         [(1, 0, 1200, "大家好", "大家好", "Hello everyone", "Hello everyone", "zh"),
+                          (2, 1200, 2000, "開始吧", "開始吧", "Let us begin", "Let us begin", "zh")])
+        with wave.open(str(self.output / "teams" / str(team) / meeting_id / "audio.wav")) as audio:
+            self.assertEqual((audio.getframerate(), audio.getnframes()), (16000, 32000))
+        self.assertEqual(alice.get(f"/api/meetings/{meeting_id}").status_code, 200)
+        # The record stays, marked, and is not converted twice.
+        self.assertEqual(alice.get("/api/interpret/sessions").json()[0]["meetingId"], meeting_id)
+        self.assertEqual(alice.get("/api/interpret/sessions/20261118-140300/meeting").json(), {"state": "done", "meetingId": meeting_id})
+        again = alice.post("/api/interpret/sessions/20261118-140300/meeting", json={"team_id": team})
+        self.assertEqual((again.status_code, again.json()["detail"]["meetingId"]), (409, meeting_id))
+        self.assertEqual(self.query("SELECT count(*) FROM meetings"), [(1,)])
+        self.assertTrue((folder / "input.wav").is_file())
+
+    def test_the_default_title_and_who_may_convert(self):
+        mine, theirs = self.team("產品部", "alice"), self.team("業務", "bob")
+        self.record(segments=self.SENTENCES)
+        alice, bob = self.signed_in("alice"), self.signed_in("bob")
+        self.assertEqual(alice.post("/api/interpret/sessions/20261118-140300/meeting", json={"team_id": theirs}).status_code, 404)
+        self.assertEqual(bob.post("/api/interpret/sessions/20261118-140300/meeting", json={"team_id": theirs}).status_code, 404)
+        self.assertEqual(self.query("SELECT count(*) FROM meetings"), [(0,)])
+        self.assertEqual(alice.post("/api/interpret/sessions/20261118-140300/meeting", json={"team_id": mine, "title": "  "}).status_code, 200)
+        self.assertEqual(self.query("SELECT title FROM meetings"), [("即時翻譯 2026-11-18 14:03",)])
+
+    # --- Records without sentences go through 精準模式
+
+    def test_24_khz_keeps_two_samples_of_three(self):
+        pcm = array.array("h", [0, 1, 2, 3, 4, 5, 6]).tobytes()
+        self.assertEqual(array.array("h", record_meeting.to_16k(pcm, 24000)).tolist(), [0, 1, 3, 4])
+        self.assertEqual(record_meeting.to_16k(pcm, 16000), pcm)
+
+    def test_an_interpreted_session_through_quality(self):
+        self.quality_on()
+        team = self.team("產品部", "alice")
+        folder = self.record(kind="interpret", rate=24000, seconds=2, source="en", target="zh")
+        FakeQualityPass.events = [
+            {"quality": {"seq": 1, "throughMs": 1500, "final": False, "sentences": [
+                {"id": 1, "source": "Hello all", "target": "大家好", "lang": "en", "startMs": 0, "endMs": 900},
+                {"id": 2, "source": "today", "target": "今天", "lang": "en", "startMs": 900, "endMs": 1500}]}},
+            {"revision": {"seq": 1, "sentences": [{"id": 1, "source": "Hello all, today", "target": "大家好，今天", "merged": [2], "endMs": 1500}]}},
+            {"quality": {"seq": 2, "throughMs": 2000, "final": True, "sentences": [
+                {"id": 3, "source": "we start.", "target": "我們開始。", "lang": "en", "startMs": 1500, "endMs": 2000}]}}]
+        job = {}
+        meeting_id = asyncio.run(record_meeting.convert("alice", folder, team, "口譯", job))
+        self.assertEqual(FakeQualityPass.made, [{"language": "en", "target": "zh", "engine": "api"}])   # never MAI
+        self.assertEqual((job["totalMs"], job["doneMs"]), (2000, 2000))
+        self.assertEqual(self.query("SELECT seq, start_ms, end_ms, source, target, detected FROM segments ORDER BY seq"),
+                         [(1, 0, 1500, "Hello all, today", "大家好，今天", "en"), (2, 1500, 2000, "we start.", "我們開始。", "en")])
+        self.assertEqual(self.query("SELECT audio_bytes FROM meetings"), [(64000,)])   # 2 s at 16 kHz
+        with wave.open(str(self.output / "teams" / str(team) / meeting_id / "audio.wav")) as audio:
+            self.assertEqual((audio.getframerate(), audio.getnframes()), (16000, 32000))
+        self.assertFalse((folder / record_meeting.STAGED).exists())
+        self.assertEqual(json.loads((folder / "session.json").read_text(encoding="utf-8"))["meetingId"], meeting_id)
+
+    def test_a_failed_part_creates_no_meeting(self):
+        self.quality_on()
+        team = self.team("產品部", "alice")
+        folder = self.record(kind="interpret", rate=24000)
+        FakeQualityPass.events = [
+            {"quality": {"seq": 1, "throughMs": 1000, "final": False, "sentences": [
+                {"id": 1, "source": "a", "target": "b", "lang": "zh", "startMs": 0, "endMs": 1000}]}},
+            {"quality": {"seq": 2, "failed": True, "throughMs": 2000, "final": True}}]
+        with self.assertRaises(record_meeting.Failed) as failed:
+            asyncio.run(record_meeting.convert("alice", folder, team, "口譯", {}))
+        self.assertEqual(str(failed.exception), "部分內容處理失敗，請再試一次")
+        self.assertEqual(self.query("SELECT count(*) FROM meetings"), [(0,)])
+        self.assertEqual(list(self.output.glob("teams/**/audio.wav")), [])
+        self.assertFalse((folder / record_meeting.STAGED).exists())   # the recording being made is not left behind
+        self.assertNotIn("meetingId", json.loads((folder / "session.json").read_text(encoding="utf-8")))
+
+    def test_the_end_of_a_record_without_sentences_is_told(self):
+        # The last save of a 即時翻譯 session did not arrive: more than 35 s at the end have no sentences.
+        record = {"kind": "translate", "inputSeconds": 100, "segments": [{"startMs": 0, "endMs": 60000}]}
+        self.assertEqual(record_meeting.missing_tail_ms(record), 40000)
+        self.assertEqual(record_meeting.missing_tail_ms(record | {"inputSeconds": 90}), 0)
+        self.assertEqual(record_meeting.missing_tail_ms({"kind": "interpret", "inputSeconds": 100}), 0)
+
+    def test_what_the_page_is_told_about_quality_conversions(self):
+        team = self.team("產品部", "alice")
+        self.record(kind="interpret", rate=24000)
+        self.record(sid="20261118-150000", kind="translate")                 # saved before sentences were kept
+        self.record(sid="20261118-160000", kind="interpret", target="ko")    # 精準模式 does not translate into Korean
+        alice = self.signed_in("alice")
+        url = "/api/interpret/sessions/20261118-140300/meeting"
+        with patch.multiple("quality_pass", URL="", MODEL="", ASR_MODEL=""):
+            not_set = alice.post(url, json={"team_id": team})
+        self.assertEqual((not_set.status_code, not_set.json()["detail"]), (503, "精準模式尚未設定，這筆紀錄目前不能轉成會議紀錄"))
+        self.quality_on()
+        listed = {s["id"]: s["cannotConvert"] for s in alice.get("/api/interpret/sessions").json()}
+        self.assertEqual(listed, {"20261118-160000": "精準模式只支援中文、英文、日文，這筆紀錄的語言不能轉成會議紀錄",
+                                  "20261118-150000": "", "20261118-140300": ""})
+        self.assertEqual(alice.post("/api/interpret/sessions/20261118-160000/meeting", json={"team_id": team}).status_code, 422)
+
+        async def forever(*_args, **_kwargs):
+            await asyncio.sleep(3600)
+        # One event loop for the whole block (as the server has), so the background conversion keeps running.
+        with alice, patch("record_meeting.convert", forever):
+            started = alice.post(url, json={"team_id": team})
+            self.assertEqual((started.status_code, started.json()["state"]), (202, "running"))
+            self.assertEqual(alice.get(url).json()["state"], "running")
+            self.assertEqual(alice.post(url, json={"team_id": team}).status_code, 409)              # already running
+            self.assertEqual(alice.post("/api/interpret/sessions/20261118-150000/meeting", json={"team_id": team}).status_code, 429)
+            task = record_meeting.JOBS[("alice", "20261118-140300")]["task"]
+            self.assertEqual(alice.delete("/api/interpret/sessions/20261118-140300").status_code, 200)   # stops the conversion
+            self.assertNotIn(("alice", "20261118-140300"), record_meeting.JOBS)
+            self.assertTrue(task.cancelling() or task.cancelled())
+
+    def test_two_requests_at_once_and_the_server_wide_limit(self):
+        self.quality_on()
+        team = self.team("產品部", "alice")
+        self.record(segments=self.SENTENCES)
+        self.record(sid="20261118-150000", kind="interpret", rate=24000)
+        self.record(sid="20261118-160000", kind="translate", segments=[])   # sentences kept but none: 精準模式
+        alice = self.signed_in("alice")
+        # A request for the same record already being handled (a double click) is refused, never a second meeting.
+        record_meeting.CLAIMED.add(("alice", "20261118-140300"))
+        try:
+            self.assertEqual(alice.post("/api/interpret/sessions/20261118-140300/meeting", json={"team_id": team}).status_code, 409)
+        finally:
+            record_meeting.CLAIMED.clear()
+        self.assertEqual(self.query("SELECT count(*) FROM meetings"), [(0,)])
+        # Two conversions of other users are running: a third waits.
+        for user in ("bob", "carol"):
+            record_meeting.JOBS[(user, "20261118-090000")] = {"state": "running", "doneMs": 0, "totalMs": 0, "error": ""}
+        busy = alice.post("/api/interpret/sessions/20261118-150000/meeting", json={"team_id": team})
+        self.assertEqual((busy.status_code, busy.json()["detail"]), (429, "目前有其他紀錄正在轉換，請稍後再試"))
+        listed = {s["id"]: s["segments"] for s in alice.get("/api/interpret/sessions").json()}
+        self.assertEqual(listed["20261118-160000"], False)
 
 
 if __name__ == "__main__":

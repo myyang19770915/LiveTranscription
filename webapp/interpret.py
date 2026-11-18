@@ -29,14 +29,15 @@ from zoneinfo import ZoneInfo
 
 import websockets
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from opencc import OpenCC
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StrictInt, model_validator
 from starlette.websockets import WebSocketState
 
 import auth
 import db
 import interpret_usage
+import record_meeting
 import stream_limits
 import team_access
 
@@ -154,6 +155,7 @@ class Recording:
         self.output_bars: list[list[float]] = []
         self.translation: list[str] = []
         self.source = ""
+        self.segments: list[dict] | None = None   # 即時翻譯's finished sentences (record-to-meeting), from the page
 
     def clock(self) -> float:
         return time.monotonic() - self.t0
@@ -231,6 +233,8 @@ class Recording:
         data = self.meta | {"id": sid, "inputSeconds": round(self.input_seconds, 1),
                             "outputSeconds": round(self.output_seconds, 1), "sourceText": self.source,
                             "translation": "".join(self.translation), "usd": usd}
+        if self.segments is not None:
+            data["segments"] = self.segments
         (self.folder / "bars.json").write_text(json.dumps({"step": 0.1, "input": self.input_bars, "output": self.output_bars}), encoding="utf-8")
         (self.folder / "transcript.txt").write_text(f"原文：\n{self.source}\n\n譯文（{data['target']}）：\n{data['translation']}\n", encoding="utf-8")
         (self.folder / "session.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -251,8 +255,28 @@ def live_close(token: str) -> None:
     LIVE.pop(token, None)
 
 
+MAX_SEGMENTS = 5000          # sentences kept for a record (record-to-meeting)
+MAX_SEGMENT_TEXT = 2000
+
+
+class Sentence(BaseModel):
+    """One finished sentence of a 即時翻譯 session, on the record's audio timeline (milliseconds)."""
+    startMs: StrictInt = Field(ge=0)
+    endMs: StrictInt = Field(ge=0)
+    source: str = Field(max_length=MAX_SEGMENT_TEXT)
+    target: str = Field(default="", max_length=MAX_SEGMENT_TEXT)
+    detected: str = Field(default="", max_length=16)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.endMs < self.startMs:
+            raise ValueError("endMs before startMs")
+        return self
+
+
 class LiveText(BaseModel):
     text: str
+    segments: list[Sentence] | None = Field(default=None, max_length=MAX_SEGMENTS)
 
 
 @router.put("/api/interpret/live/{token}/translation")
@@ -263,6 +287,8 @@ async def live_translation(token: str, body: LiveText, user: auth.CurrentUser):
     if len(body.text) > MAX_TEXT:
         raise HTTPException(status_code=422, detail="譯文太長")
     rec.translation = [body.text]
+    if body.segments is not None:
+        rec.segments = [s.model_dump() for s in body.segments]
     return {"kept": len(body.text)}
 
 
@@ -276,7 +302,7 @@ async def page(_user: auth.CurrentUser):
 async def config(user: auth.CurrentUser):
     import records_retention   # it reads this module's record folders
     return {"configured": configured(), "allowed": await allowed(user), "usdPerHour": interpret_usage.USD_PER_HOUR,
-            "targets": list(TARGETS), "retentionDays": await records_retention.days()}
+            "targets": list(TARGETS), "retentionDays": await records_retention.days(), "convertSpeed": record_meeting.SPEED}
 
 
 class Grant(BaseModel):
@@ -324,8 +350,14 @@ async def sessions(user: auth.CurrentUser):
                 data = json.loads((sub / "session.json").read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
+            data = {"kind": "interpret"} | data
             items.append({k: data.get(k) for k in ("id", "startedAt", "target", "sourceLang", "engine", "inputSeconds", "outputSeconds", "usd")}
-                         | {"kind": data.get("kind") or "interpret", "preview": (data.get("translation") or data.get("sourceText") or "")[:60]})
+                         | {"kind": data["kind"], "preview": (data.get("translation") or data.get("sourceText") or "")[:60],
+                            # record-to-meeting: the meeting it became, whether it has its sentences, and why it cannot become one
+                            "meetingId": data.get("meetingId"), "segments": record_meeting.has_sentences(data),
+                            "cannotConvert": record_meeting.why_not(data),
+                            "missingTailMs": record_meeting.missing_tail_ms(data),
+                            "conversion": _job_state(record_meeting.JOBS[(user.username, sub.name)]) if (user.username, sub.name) in record_meeting.JOBS else None})
     return items
 
 
@@ -335,14 +367,16 @@ async def session(sid: str, user: auth.CurrentUser):
     return {"kind": "interpret"} | data   # saved before kinds existed: interpreting
 
 
-class Translation(BaseModel):
-    text: str
+class Translation(LiveText):
+    pass
 
 
-def write_translation(folder: Path, text: str) -> None:
-    """The translation of a 即時翻譯 record, from the page: session.json and transcript.txt."""
+def write_translation(folder: Path, text: str, segments: list[dict] | None = None) -> None:
+    """The translation of a 即時翻譯 record, from the page: session.json and transcript.txt; with its sentences when sent."""
     data = json.loads((folder / "session.json").read_text(encoding="utf-8"))
     data["translation"] = text
+    if segments is not None:
+        data["segments"] = segments
     (folder / "session.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     (folder / "transcript.txt").write_text(f"原文：\n{data.get('sourceText', '')}\n\n譯文（{data.get('target', '')}）：\n{text}\n", encoding="utf-8")
 
@@ -354,8 +388,76 @@ async def session_translation(sid: str, body: Translation, user: auth.CurrentUse
         raise HTTPException(status_code=422, detail="譯文太長")
     if json.loads((folder / "session.json").read_text(encoding="utf-8")).get("kind") != "translate":
         raise HTTPException(status_code=409, detail="即時口譯紀錄的譯文由口譯產生，不能修改")
-    await asyncio.to_thread(write_translation, folder, body.text)
+    await asyncio.to_thread(write_translation, folder, body.text, None if body.segments is None else [s.model_dump() for s in body.segments])
     return {"saved": sid}
+
+
+class ToMeeting(BaseModel):
+    team_id: StrictInt
+    title: str = Field(default="", max_length=team_access.TITLE_MAX)
+
+
+def _job_state(job: dict) -> dict:
+    return {k: job[k] for k in ("state", "doneMs", "totalMs", "error")}
+
+
+@router.post("/api/interpret/sessions/{sid}/meeting")
+async def to_meeting(sid: str, body: ToMeeting, user: auth.CurrentUser):
+    """record-to-meeting: the record becomes a meeting of one of the user's teams. With its sentences at once (200);
+    otherwise through 精準模式 in the background (202), followed with GET."""
+    folder = session_dir(user, sid)
+    data = {"kind": "interpret"} | json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    if data.get("meetingId"):
+        raise HTTPException(status_code=409, detail={"message": "這筆紀錄已轉成會議紀錄", "meetingId": data["meetingId"]})
+    key = (user.username, sid)
+    if record_meeting.JOBS.get(key, {}).get("state") == "running" or key in record_meeting.CLAIMED:
+        raise HTTPException(status_code=409, detail={"message": "這筆紀錄正在轉成會議紀錄"})
+    # Claimed before the first wait, so two requests at once (a double click, two tabs) never make two meetings.
+    record_meeting.CLAIMED.add(key)
+    try:
+        return await _convert(key, folder, data, body, user)
+    finally:
+        record_meeting.CLAIMED.discard(key)
+
+
+async def _convert(key: tuple[str, str], folder: Path, data: dict, body: ToMeeting, user: auth.User):
+    async with db.connect() as conn:
+        if not await team_access.is_member(conn, user.username, body.team_id):
+            raise HTTPException(status_code=404, detail=team_access.TEAM_NOT_FOUND)
+    reason = record_meeting.why_not(data)
+    if reason:
+        raise HTTPException(status_code=503 if reason == record_meeting.NOT_CONFIGURED else 422, detail=reason)
+    title = body.title.strip() or record_meeting.default_title(data)
+    if record_meeting.has_sentences(data):
+        return {"meetingId": await record_meeting.convert(user.username, folder, body.team_id, title)}
+    running = [k for k, job in record_meeting.JOBS.items() if job["state"] == "running"]
+    if any(k[0] == user.username for k in running) or len(running) >= record_meeting.MAX_RUNNING:
+        raise HTTPException(status_code=429, detail="目前有其他紀錄正在轉換，請稍後再試")
+    job = record_meeting.JOBS[key] = {"state": "running", "doneMs": 0, "totalMs": 0, "error": ""}
+
+    async def run() -> None:
+        try:
+            await record_meeting.convert(user.username, folder, body.team_id, title, job)
+            record_meeting.JOBS.pop(key, None)
+        except asyncio.CancelledError:
+            record_meeting.JOBS.pop(key, None)
+            raise
+        except record_meeting.Failed as error:
+            job.update(state="failed", error=str(error))
+        except Exception as error:   # why, never what was said
+            logger.warning("record to meeting failed: %s", type(error).__name__)
+            job.update(state="failed", error=record_meeting.FAILED)
+    job["task"] = asyncio.create_task(run())
+    return JSONResponse(_job_state(job), status_code=202)
+
+
+@router.get("/api/interpret/sessions/{sid}/meeting")
+async def to_meeting_state(sid: str, user: auth.CurrentUser):
+    data = json.loads((session_dir(user, sid) / "session.json").read_text(encoding="utf-8"))
+    if data.get("meetingId"):
+        return {"state": "done", "meetingId": data["meetingId"]}
+    job = record_meeting.JOBS.get((user.username, sid))
+    return _job_state(job) if job else {"state": "none"}
 
 
 @router.get("/api/interpret/sessions/{sid}/bars")
@@ -378,7 +480,11 @@ async def session_file(sid: str, name: str, user: auth.CurrentUser):
 
 @router.delete("/api/interpret/sessions/{sid}")
 async def delete_session(sid: str, user: auth.CurrentUser):
-    shutil.rmtree(session_dir(user, sid))
+    folder = session_dir(user, sid)
+    job = record_meeting.JOBS.pop((user.username, sid), None)
+    if job and job.get("task"):   # being converted: stopped, no meeting
+        job["task"].cancel()
+    shutil.rmtree(folder)
     return {"deleted": sid}
 
 
