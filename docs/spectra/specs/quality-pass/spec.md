@@ -649,7 +649,7 @@ tests:
 ---
 ### Requirement: The text model's answer accounts for its input
 
-The gateway SHALL compare the amount of source text in a text-model answer (its sentences plus its carry) with the amount it was given (the carried text plus the newly recognized text), counted in words for text written mostly in Latin script and in letters and digits otherwise. An answer SHALL be unusable when the input holds at least 12 units and the answer holds fewer than 70% of them, or more than 150% of them plus 10. An unusable answer SHALL be asked for once more. When the second answer is unusable too, the gateway SHALL show no sentence for that chunk and SHALL keep the carried text and the new text together as the carried text of the next chunk, so that they are asked again with what follows; only when the chunk is the last of the stream, or that text is longer than 800 characters, SHALL the chunk fail (the live result of its range stays). The instructions to the text model SHALL state that no content may be deleted, summarized or shortened, and that only filler sounds and repeated false starts may be removed.
+The gateway SHALL compare the amount of source text in a text-model answer (its sentences plus its carry) with the amount it was given (the carried text plus the newly recognized text), counted in words for text written mostly in Latin script and in letters and digits otherwise. An answer SHALL be unusable when the input holds at least 12 units and the answer holds fewer than 70% of them, or more than 150% of them plus 10. An unusable answer SHALL be asked for once more. When the second answer is unusable too, the gateway SHALL show no sentence for that chunk and SHALL keep the carried text and the new text together as the carried text of the next chunk, so that they are asked again with what follows; only when the chunk is the last of the stream, or that text is longer than 800 characters, SHALL the chunk fail (the live result of its range stays). The instructions to the text model SHALL state that no content may be deleted, summarized or shortened. For a translated stream they SHALL state that only filler sounds and repeated false starts may be removed; for a stream without translation the removals and limits of the transcript-only requirement "精準模式 without translation" apply instead.
 
 #### Scenario: The carried sentence is dropped
 
@@ -687,16 +687,26 @@ The gateway SHALL compare the amount of source text in a text-model answer (its 
 
 
 <!-- @trace
-source: quality-completeness
-updated: 2026-11-14
+source: transcript-polish
+updated: 2026-11-19
 code:
-  - bench/README.md
-  - bench/omit_probe.py
-  - .env.example
-  - bench/omit_analyze.py
-  - README.md
+  - chang01.png
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - lab/realtime-translate/index.html
+  - lab/realtime-translate/server.py
   - webapp/quality_pass.py
-  - webapp/chunk_asr.py
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - lab/realtime-translate/costs.jsonl
+  - bench/rubric_transcript.md
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - webapp/revise_pass.py
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - gpt-realtime-translate_demoUI.png
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
 tests:
   - webapp/test_server.py
 -->

@@ -275,9 +275,23 @@ REPEAT_MIN = 6         # characters (Chinese, Japanese): a sentence this long th
 REPEAT_MIN_WORDS = 3   # the same in words for Latin script: "Next Friday." confirming "...next Friday." stays
 NONE = "none"   # the meeting is not translated (transcript-only): 精準模式 settles the spoken text only
 
+# transcript-polish: without a translation the transcript is the record itself, so step 1 edits it into clean, readable
+# written text (blind evaluation 2026-11-19: 84.8 vs 75.8 of 100 over 4 Chinese clips), with the limits its slips showed.
+POLISH_STEP = """1. Read CARRY + NEW as one continuous stretch of {src} speech and write it as a clean, readable transcript (clean verbatim), as a careful editor of meeting minutes would:
+   - Fix recognition errors: wrong characters and similar-sounding words (代辦 → 待辦), a name or term spelled differently from CONTEXT or TERMS, wrong 他/她, a stray question mark, a number split by a full stop. Where a word makes no sense in its context, write the word the speaker clearly meant.
+   - Use the standard written form of words and terms (for Chinese with Taiwan usage: 軟體, 資料庫, 網路, 影片), consistent with TERMS and CONTEXT. Brand and product names stay as spoken.
+   - Remove filler words and verbal tics that carry no meaning (uh, um, you know; えー, あの; 嗯, 呃, 欸, 那個, 就是, 然後, 的話, 對對對 used as fillers), stutters, false starts and words said twice by mistake.
+   - Make each sentence read smoothly as natural written text: fix word order, add a missing small function word, and punctuate properly, only as far as needed.
+   - Keep every point that was said: each fact, number, name, negation, condition, hedge and question, and the speaker's meaning, person and tone, including every sentence of CARRY. Never summarize, shorten a point, merge points into a conclusion, or add anything that was not said. When unsure what was said, keep what was recognized.
+   - Limits: words or sentences spoken in a language other than {src} (English inside Chinese speech, for example) stay in that language as spoken, never translated (OK, thank you stays OK, thank you). A direct quote stays a direct quote with its quotation marks, never turned into reported speech. A sentence the speaker left unfinished stays unfinished: never complete it, guess its ending or paraphrase it into something the speaker did not say. Each item holds one complete thought; do not pack several thoughts into one item.
+"""
+
 
 def _without_translation(prompt: str) -> str:
-    """SYSTEM without its translation: the same repair, segmentation and carry, each item only "src" and "lang"."""
+    """SYSTEM without its translation: polished instead of only repaired (POLISH_STEP), the same segmentation and carry,
+    each item only "src" and "lang"."""
+    start, end = prompt.index("1. Read CARRY + NEW"), prompt.index("2. Split it into sentences")
+    prompt = prompt[:start] + POLISH_STEP + prompt[end:]
     for old, new in (
             ("return the final transcript and its translation, sentence by sentence.", "return the final transcript, sentence by sentence. Nothing is translated."),
             ("- CONTEXT: the previous sentences with their translations (already shown to the reader; never repeat or re-translate them).",

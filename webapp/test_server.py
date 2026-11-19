@@ -3119,6 +3119,47 @@ class TranscriptOnlyQualityTest(unittest.TestCase):
         self.assertEqual(events, [{"revision": {"seq": 1, "sentences": [{"id": 3, "source": "這是第三句話。", "target": ""}]}}])
 
 
+class TranscriptPolishTest(unittest.TestCase):
+    """transcript-polish: without translation 精準模式 and its revision edit the text into a clean record, within limits;
+    the translated instructions stay as they were."""
+
+    def test_quality_prompt_polishes_without_translation_only(self):
+        polished = quality_pass.system_prompt("zh", "none")
+        self.assertIn("clean, readable transcript", polished)
+        self.assertIn("那個, 就是", polished)
+        self.assertIn("standard written form", polished)
+        for limit in ("stay in that language as spoken, never translated", "A direct quote stays a direct quote",
+                      "never complete it", "Never summarize", "Each item holds one complete thought"):
+            self.assertIn(limit, polished)
+        self.assertNotIn("Remove only filler sounds", polished)
+        self.assertIn("代辦 → 待辦", polished)
+        self.assertIn("OK, thank you stays OK, thank you", polished)
+        english = quality_pass.system_prompt("en", "none")
+        self.assertIn("of English speech", english)
+        self.assertIn("a language other than English (English inside Chinese speech", english)
+        self.assertIn("uh, um", english)
+        self.assertNotIn("other language stays in that language exactly", english)
+        translated = quality_pass.system_prompt("zh", "en")
+        self.assertIn("Remove only filler sounds (uh, um, えー, あの, 嗯, 呃)", translated)
+        self.assertNotIn("clean, readable transcript", translated)
+        self.assertNotIn("那個, 就是", translated)
+
+    def test_revision_prompt_polishes_without_translation_only(self):
+        polished = revise_pass.SYSTEM_TRANSCRIPT
+        self.assertIn("1. Recognition and wording.", polished)
+        self.assertIn("那個, 就是", polished)
+        for limit in ("stay in that language as spoken, never translated", "a direct quote stays a direct quote",
+                      "stays unfinished, never completed", "never add content", "stays word for word",
+                      "的話, 對對對", "negation, condition", "each item holds one complete thought"):
+            self.assertIn(limit, polished)
+        self.assertIn("2. Sentences.", polished)
+        for alt_rule in ("when both fit, SRC stays", "become the one variant that fits", "Never add content that neither recognizer has"):
+            self.assertIn(alt_rule, polished)
+        self.assertNotIn("Translation.", polished)
+        self.assertIn("1. Recognition. Read WINDOW", revise_pass.SYSTEM)
+        self.assertNotIn("那個, 就是", revise_pass.SYSTEM)
+
+
 class ReviserTest(unittest.TestCase):
     """quality-revision: shown sentences are revised in windows; anything that goes wrong keeps the first result."""
 

@@ -41,8 +41,15 @@ Every "tgt" is written in the language named by TRANSLATE INTO; "src" stays in t
 Return JSON only: {"sentences": [{"ids": [1], "src": "...", "tgt": "..."}, {"ids": [2, 3], "src": "...", "tgt": "..."}], "notes": "..."} with every number of WINDOW exactly once, in order."""
 
 
+POLISH_STEP = """1. Recognition and wording. Read WINDOW as continuous speech in its context. Correct SRC where a word or phrase does not make sense there (a similar-sounding wrong word, a name or term spelled differently from TERMS, NOTES or BEFORE, a dropped or added negation, a wrong number, a wrong homophone such as 他/她, a question recognized as a statement) and ALT or the context makes the intended words clear. Where SRC and ALT differ, choose the reading that fits the context; when both fit, SRC stays. Words recognized twice in two variants ("穩定不穩定") become the one variant that fits. Never add content that neither recognizer has. Use the standard written form of terms (for Chinese with Taiwan usage). Remove fillers (uh, um; えー, あの; 嗯, 呃, 欸, 那個, 就是, 然後, 的話, 對對對 used as fillers), stutters and words said twice by mistake that are still there, and make a sentence that still reads awkwardly read smoothly as natural written text. Keep every point, fact, number, name, negation, condition, hedge and question and the speaker's meaning; never add content, and never delete, shorten or summarize content. Limits: words or sentences spoken in a language other than the speaker's main language (English inside Chinese speech, for example) stay in that language as spoken, never translated; a direct quote stays a direct quote, never turned into reported speech; a sentence the speaker left unfinished stays unfinished, never completed, guessed or paraphrased; each item holds one complete thought. A sentence that already reads well stays word for word as it is.
+"""
+
+
 def _without_translation(prompt: str) -> str:
-    """SYSTEM for a meeting that is not translated (transcript-only): the same corrections and merges of SRC, no TGT."""
+    """SYSTEM for a meeting that is not translated (transcript-only): SRC polished like a meeting record (POLISH_STEP,
+    transcript-polish) and merged as before, no TGT."""
+    start, end = prompt.index("1. Recognition."), prompt.index("2. Sentences.")
+    prompt = prompt[:start] + POLISH_STEP + prompt[end:]
     for old, new in (
             ("A fast first pass has already shown the reader the sentences of WINDOW (SRC = transcript, TGT = translation).",
              "A fast first pass has already shown the reader the sentences of WINDOW (SRC = transcript; this meeting is not translated)."),
