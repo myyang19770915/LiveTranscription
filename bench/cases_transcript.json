@@ -1,0 +1,8 @@
+[
+ {"name": "zh_podcast_firstoy", "id": "AlkUuN2p92c", "start": 60, "duration": 240, "language": "zh", "target": "none", "subs": ["zh-TW"]},
+ {"name": "zh_inside_seo", "id": "3TLsLpML5Zk", "start": 300, "duration": 240, "language": "zh", "target": "none", "subs": ["zh-TW"]},
+ {"name": "zh_hbr_boss", "id": "QLz57x80VWY", "start": 120, "duration": 240, "language": "zh", "target": "none", "subs": ["zh-TW"]},
+ {"name": "zh_evaair_press", "id": "Qak8rLJzk4g", "start": 180, "duration": 240, "language": "zh", "target": "none", "subs": ["zh-TW"]},
+ {"name": "zh_ecommerce_talk", "id": "8hHNaR0mVZw", "start": 600, "duration": 240, "language": "zh", "target": "none", "subs": ["zh-TW"]},
+ {"name": "zh_improv_podcast", "id": "SUen20216tA", "start": 600, "duration": 240, "language": "zh", "target": "none", "subs": ["zh-TW"]}
+]

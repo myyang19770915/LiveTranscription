@@ -3160,6 +3160,142 @@ class TranscriptPolishTest(unittest.TestCase):
         self.assertNotIn("那個, 就是", revise_pass.SYSTEM)
 
 
+class TranscriptNamesTurnsTest(unittest.TestCase):
+    """transcript-names-turns: 只 stays the adverb; without translation speaker turns stay apart. Names are deliberately
+    not locked to their first spelling (measured 2026-11-19: a misheard name was carried through a whole clip)."""
+
+    def test_the_adverb_zhi_is_kept(self):
+        for given, expected in (("不是只有这样", "不是只有這樣"), ("一只猫", "一隻貓"), ("只有一只", "只有一隻"),
+                                ("两只手都不是只要", "兩隻手都不是只要"), ("一只会飞的鸟", "一隻會飛的鳥"),
+                                ("船只不得进入港区", "船隻不得進入港區"), ("哪只会飞", "哪隻會飛"), ("船隻在港口", "船隻在港口")):
+            self.assertEqual(TO_TRADITIONAL.convert(given), expected, given)
+
+    def test_instructions_without_translation_only(self):
+        self.assertIn("two people's words are never in one item", quality_pass.system_prompt("zh", "none"))
+        # Revision may only merge, never split: there the rule is not to merge different speakers.
+        self.assertIn("never merge items spoken by different people", revise_pass.SYSTEM_TRANSCRIPT)
+        for prompt in (quality_pass.system_prompt("zh", "none"), revise_pass.SYSTEM_TRANSCRIPT):
+            # Measured 2026-11-19: locking names to their first spelling kept a misheard name all through a clip.
+            self.assertNotIn("written the same way throughout the meeting", prompt)
+        for prompt in (quality_pass.system_prompt("zh", "en"), revise_pass.SYSTEM):
+            self.assertNotIn("two people's words are never in one item", prompt)
+            self.assertNotIn("never merge items spoken by different people", prompt)
+
+
+class TranscriptCompletenessTest(unittest.TestCase):
+    """transcript-completeness: without translation a left-out stretch is asked for again, wording follows the evidence,
+    and the names revision learned reach the next chunk."""
+
+    def test_what_counts_as_left_out(self):
+        for given, back, left in (("我們下週要把待辦事項整理一下", "我們下週要把待辦事項整理一下。", ""),
+                                  ("那個我們就是下週要把代辦事項整理一下", "我們下週要把待辦事項整理一下。", ""),
+                                  ("那是在職場上回到家裡跟家人起了爭執", "那是在職場上。", "回到家裡跟家人起了爭執"),
+                                  ("這是對的嗎他問", "這是對的嗎？", ""),
+                                  ("我们下周要上线", "我們下週要上線。", ""),
+                                  ("我們下週要把待辦事項我們下週要把待辦事項整理一下", "我們下週要把待辦事項整理一下。", ""),   # said twice
+                                  ("我們下個禮拜要去台北不是我們下個禮拜要去台中", "我們下個禮拜要去台中。", ""),           # false start
+                                  ("這件事情我們要先跟客戶確認時間", "我們要先跟客戶確認時間這件事情。", ""),                       # moved
+                                  ("we will move the release to next friday because the tests failed again", "We will move the release.",
+                                   "to next friday because the tests failed again")):
+            self.assertEqual(quality_pass.missing(given, back, lambda text: text.replace("们", "們").replace("周", "週").replace("线", "線")), left, given)
+
+    def run_pass(self, service, target, revise=False, notes=""):
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            with patch("quality_pass.new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(service))), \
+                    patch("quality_pass.URL", "http://quality.test/v1"), patch("quality_pass.ASR_MODEL", "asr"), patch("quality_pass.MODEL", "text"), \
+                    patch("quality_pass.REVISE", revise):
+                quality = quality_pass.QualityPass(send, "zh", target, "", lambda text: text)
+                if notes:
+                    quality.reviser.notes = notes
+                quality.feed(tone(3))
+                await quality.finish()
+            return events
+        events = asyncio.run(go())
+        return [s["source"] for event in events if "quality" in event for s in event["quality"].get("sentences", [])]
+
+    def test_a_left_out_stretch_is_asked_for_again(self):
+        dropped = {"sentences": [{"src": "我們今天先看專案進度。那是在職場上。", "lang": "zh"}, {"src": "後來大家都同意了，下週再一起討論細節。", "lang": "zh"}], "carry": ""}
+        full = {"sentences": [{"src": "我們今天先看專案進度。那是在職場上。", "lang": "zh"}, {"src": "回到家裡，跟家人起了爭執。", "lang": "zh"}, {"src": "後來大家都同意了，下週再一起討論細節。", "lang": "zh"}], "carry": ""}
+        service = FakeQualityService(["我們今天先看專案進度那是在職場上回到家裡跟家人起了爭執後來大家都同意了下週再一起討論細節"], [dropped, full])
+        with self.assertLogs("uvicorn.error", "WARNING") as logs:
+            sentences = self.run_pass(service, "none")
+        self.assertEqual(sentences, ["我們今天先看專案進度。那是在職場上。", "回到家裡，跟家人起了爭執。", "後來大家都同意了，下週再一起討論細節。"])
+        self.assertEqual(len(service.chats), 2)
+        self.assertIn("LEFT OUT", service.user(1))
+        self.assertIn("回到家裡跟家人起了爭執", service.user(1))
+        self.assertNotIn("回到家裡", " ".join(logs.output))   # numbers only
+        self.assertIn("left out 11 characters", " ".join(logs.output))
+
+    def test_a_failed_second_request_keeps_the_first_answer(self):
+        service = FakeQualityService(["我們今天先看專案進度那是在職場上回到家裡跟家人起了爭執後來大家都同意了下週再一起討論細節"], [{"sentences": [{"src": "我們今天先看專案進度。那是在職場上。", "lang": "zh"}, {"src": "後來大家都同意了，下週再一起討論細節。", "lang": "zh"}], "carry": ""}, 500])
+        self.assertEqual(self.run_pass(service, "none"), ["我們今天先看專案進度。那是在職場上。", "後來大家都同意了，下週再一起討論細節。"])
+
+    def test_a_translated_stream_is_not_checked(self):
+        service = FakeQualityService(["我們今天先看專案進度那是在職場上回到家裡跟家人起了爭執後來大家都同意了下週再一起討論細節"], [{"sentences": [dict({"src": "我們今天先看專案進度。那是在職場上。", "lang": "zh"}, tgt="Progress, at work."), dict({"src": "後來大家都同意了，下週再一起討論細節。", "lang": "zh"}, tgt="All agreed.")], "carry": ""}])
+        self.assertEqual(len(self.run_pass(service, "en")), 2)
+        self.assertEqual(len(service.chats), 1)
+
+    def test_notes_reach_the_next_chunk_without_translation_only(self):
+        answer = {"sentences": [{"src": "阿總說好。", "tgt": "A-Zong agreed.", "lang": "zh"}], "carry": ""}
+        service = FakeQualityService(["阿總說好"], [dict(answer)])
+        self.run_pass(service, "none", revise=True, notes="阿總 (a participant, male)")
+        self.assertIn("NOTES: 阿總 (a participant, male)", service.user(0))
+        self.assertIn("NOTES (may be absent)", service.chats[0]["messages"][0]["content"])
+        service = FakeQualityService(["阿總說好"], [dict(answer)])
+        self.run_pass(service, "en", revise=True, notes="阿總 (a participant, male)")
+        self.assertNotIn("NOTES:", service.user(0))
+
+    def test_instructions_follow_the_evidence_without_translation_only(self):
+        for prompt in (quality_pass.system_prompt("zh", "none"), revise_pass.SYSTEM_TRANSCRIPT):
+            for rule in ("never change a word only to make the sentence read better", "is its own item, never joined to the next question",
+                         "Quotation marks cover only the quoted words", "stay where they carry time order"):
+                self.assertIn(rule, prompt)
+        self.assertNotIn("Evidence first", quality_pass.system_prompt("zh", "en"))
+        self.assertNotIn("Evidence first", revise_pass.SYSTEM)
+
+    def revise(self, answers):
+        sources = {n: f"第{n}句我們今天要討論專案的進度與下一步安排" for n in range(1, 10)}
+
+        async def reviewer(messages, timeout):
+            window = [int(n) for n in re.findall(r"^(\d+)\. SRC:", messages[1]["content"], re.M)]
+            make = answers.pop(0) if answers else (lambda n: sources[n])
+            return {"sentences": [{"ids": [i], "src": make(i)} for i in range(1, len(window) + 1)], "notes": ""}
+
+        async def go():
+            events = []
+
+            async def send(payload):
+                events.append(payload)
+            reviser = revise_pass.Reviser(reviewer, send, "English", lambda start, end: "", lambda text: text,
+                                          lambda text: quality_pass.units(text, quality_pass.in_words(text)), translate=False,
+                                          left_out=lambda given, back: quality_pass.missing(given, back))
+            reviser.add([{"id": n, "source": sources[n], "target": "", "lang": "zh", "targetLang": "none", "startMs": n * 1000, "endMs": n * 1000 + 900}
+                         for n in range(1, 10)])
+            for _ in range(50):
+                await asyncio.sleep(0)
+            reviser.cancel()
+            return events
+        return asyncio.run(go())
+
+    def test_a_revision_that_leaves_out_a_stretch_is_not_used(self):
+        def dropping(n):
+            return "第1句。" if n == 1 else f"第{n}句：我們今天要討論專案的進度與下一步安排。"
+        self.assertEqual(self.revise([dropping, dropping]), [])
+
+    def test_a_second_revision_that_keeps_everything_is_used(self):
+        def dropping(n):
+            return "第1句。" if n == 1 else f"第{n}句我們今天要討論專案的進度與下一步安排"
+
+        def polished(n):
+            return "第1句：我們今天要討論專案的進度與下一步安排。" if n == 1 else f"第{n}句我們今天要討論專案的進度與下一步安排"
+        events = self.revise([dropping, polished])
+        self.assertEqual([s["source"] for e in events for s in e["revision"]["sentences"]], ["第1句：我們今天要討論專案的進度與下一步安排。"])
+
+
 class ReviserTest(unittest.TestCase):
     """quality-revision: shown sentences are revised in windows; anything that goes wrong keeps the first result."""
 

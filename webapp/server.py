@@ -87,9 +87,19 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 class _Traditional(OpenCC):
     # s2twp reads 了 after 說明/證明/表明… as 瞭 ("說明瞭付款方式"); the aspect particle is meant.
     MISREAD_LIAO = re.compile(r"([說證表聲發查講標註])明瞭")
+    # s2tw writes the adverb 只 as the measure word 隻 after 是 ("不是隻有"). Only a 只 of the input is turned back, never a
+    # 隻 that was already written (船隻), and not after a word that takes the measure word (一, 這, 哪, 萬…).
+    MISREAD_ZHI = re.compile(r"(?<![一二兩三四五六七八九十百千萬億幾每這那哪某整數半多零〇0-9船])隻(?=[有是要能會好在不得])")
 
     def convert(self, text: str) -> str:
-        return self.MISREAD_LIAO.sub(r"\1明了", super().convert(text))
+        out = self.MISREAD_LIAO.sub(r"\1明了", super().convert(text))
+        if "只" not in text or len(out) != len(text):
+            return out
+        chars = list(out)
+        for match in self.MISREAD_ZHI.finditer(out):
+            if text[match.start()] == "只":
+                chars[match.start()] = "只"
+        return "".join(chars)
 
 
 # Characters only: s2twp's phrase table rewrites ordinary words into IT jargon (循环→迴圈, 扩展→擴充套件)

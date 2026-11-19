@@ -7,6 +7,7 @@ asks for it. A failed chunk never ends the stream; the live result of that range
 """
 import array
 import asyncio
+import difflib
 import io
 import json
 import logging
@@ -142,6 +143,41 @@ def covered(given: int, back: int) -> bool:
     sometimes returns the new text and forgets the carried sentence) and nothing much invented. Removing fillers
     costs a few per cent; a dropped sentence costs a third or more."""
     return not (given >= 12 and back < 0.7 * given) and back <= 1.5 * given + 10
+
+
+LEFT_OUT_CHARS = 8    # transcript-completeness: this many letters or digits of the input in a row missing from the answer
+LEFT_OUT_WORDS = 6    # the same in words for Latin script
+FILLERS = re.compile(r"那個|就是|然後|的話|對對對|嗯|呃|欸|\b(?:uh|um)\b|えー|あの", re.IGNORECASE)
+
+
+def missing(given: str, back: str, convert=lambda text: text) -> str:
+    """The longest stretch of `given` that `back` leaves out, when it is long enough to be a dropped clause rather
+    than a removed filler or a corrected word; "" otherwise. Both are compared in the same script, without fillers."""
+    given, back = FILLERS.sub(" ", convert(given)), convert(back)
+    words = in_words(given)
+    if words:
+        a, b = re.findall(r"[a-z0-9']+", unicodedata.normalize("NFKC", given).lower()), re.findall(r"[a-z0-9']+", unicodedata.normalize("NFKC", back).lower())
+    else:
+        a, b = list(said(given)), list(said(back))
+    least, longest = (LEFT_OUT_WORDS if words else LEFT_OUT_CHARS), []
+    glue = " " if words else ""
+    given_text, back_text = glue.join(a), glue.join(b)
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        # Left out: nothing in its place, or a much shorter stand-in (a clause "corrected" into two characters).
+        if (tag == "delete" or (tag == "replace" and (j2 - j1) * 3 <= i2 - i1)) and i2 - i1 >= least and i2 - i1 > len(longest):
+            stretch = glue.join(a[i1:i2])
+            # Moved elsewhere in the answer, or said again (a repeat, a false start): removed on purpose. What is
+            # new in it is what neither the rest of the input nor the answer has in runs of 3 or more.
+            if stretch in back_text or len(a[i1:i2]) - _shared(a[i1:i2], a[:i1] + a[i2:]) < least:
+                continue
+            longest = a[i1:i2]
+    return glue.join(longest)
+
+
+def _shared(stretch: list[str], rest: list[str]) -> int:
+    """How many items of `stretch` the rest of the input also has, in matching runs of 3 or more."""
+    blocks = difflib.SequenceMatcher(None, stretch, rest, autojunk=False).get_matching_blocks()
+    return sum(block.size for block in blocks if block.size >= 3)
 
 
 def new_client() -> httpx.AsyncClient:
@@ -283,6 +319,8 @@ POLISH_STEP = """1. Read CARRY + NEW as one continuous stretch of {src} speech a
    - Remove filler words and verbal tics that carry no meaning (uh, um, you know; えー, あの; 嗯, 呃, 欸, 那個, 就是, 然後, 的話, 對對對 used as fillers), stutters, false starts and words said twice by mistake.
    - Make each sentence read smoothly as natural written text: fix word order, add a missing small function word, and punctuate properly, only as far as needed.
    - Keep every point that was said: each fact, number, name, negation, condition, hedge and question, and the speaker's meaning, person and tone, including every sentence of CARRY. Never summarize, shorten a point, merge points into a conclusion, or add anything that was not said. When unsure what was said, keep what was recognized.
+   - Evidence first: change a content word only when it sounds similar and the context, TERMS, NOTES or the other recognizer supports the change; never change a word only to make the sentence read better (存在 does not become 存成), and never reverse a direction, negation or number. 然後, 就是 and 的話 stay where they carry time order, a condition or a definition. A short answer by another person (害怕。 逃跑。 對。) is its own item, never joined to the next question. Quotation marks cover only the quoted words: what the speaker says after the quote is outside them, and answers of different people are not put into one quote.
+   - Turns: when the speaker changes (a question, an answer, a backchannel), a new item starts; two people's words are never in one item, and a tag question (對不對？) stays with the person who said it.
    - Limits: words or sentences spoken in a language other than {src} (English inside Chinese speech, for example) stay in that language as spoken, never translated (OK, thank you stays OK, thank you). A direct quote stays a direct quote with its quotation marks, never turned into reported speech. A sentence the speaker left unfinished stays unfinished: never complete it, guess its ending or paraphrase it into something the speaker did not say. Each item holds one complete thought; do not pack several thoughts into one item.
 """
 
@@ -295,6 +333,8 @@ def _without_translation(prompt: str) -> str:
     for old, new in (
             ("return the final transcript and its translation, sentence by sentence.", "return the final transcript, sentence by sentence. Nothing is translated."),
             ("- CONTEXT: the previous sentences with their translations (already shown to the reader; never repeat or re-translate them).",
+             "- NOTES (may be absent): what is known so far about this meeting's people, names and terms, learned from what was said. "
+             "Use it only to spell names and terms right; it is never content.\n"
              "- CONTEXT: the previous sentences (already shown to the reader; never repeat them)."),
             ("A very long sentence may be split at a natural clause boundary only if both halves translate cleanly on their own",
              "A very long sentence may be split at a natural clause boundary only if both halves read cleanly on their own")):
@@ -408,7 +448,8 @@ class QualityPass:
         self.sentences_sent = 0         # the id of the last sentence sent
         self.reviser = revise_pass.Reviser(self._ask_revision, self._send_revision, target_name(language, self.target), self.live_text.between,
                                            convert, lambda text: units(text, in_words(text)), glossary,
-                                           translate=self.target != NONE) if REVISE else None
+                                           translate=self.target != NONE,
+                                           left_out=(lambda given, back: missing(given, back, convert)) if self.target == NONE else None) if REVISE else None
         self.worker = asyncio.create_task(self._run())
 
     # --- input -------------------------------------------------------------------------------------------
@@ -564,6 +605,8 @@ class QualityPass:
         alt = self.live_text.between(self.carry_start, chunk.end_ms) if USE_ALT else ""
         try:
             result = await self._twice(lambda: self._refine(new, pause, alt, chunk.last))
+            if result["left_out"]:
+                result = await self._again(result, lambda: self._refine(new, pause, alt, chunk.last, result["left_out"]))
         except Unusable as error:
             unsettled = joined(self.carry, new)
             if str(error) != "coverage" or chunk.last or len(unsettled) > CARRY_LIMIT:
@@ -595,6 +638,20 @@ class QualityPass:
         self.context = (self.context + [{"src": s["source"], "tgt": s["target"]} for s in sentences])[-CONTEXT_SENTENCES:]
         self.carry, self.carry_start = carry, carry_start
         return len(new), sentences
+
+    async def _again(self, first: dict, request) -> dict:
+        """transcript-completeness: the answer left out a stretch of what was said; asked once more with that stretch
+        named, the answer that leaves out less is used. A failed second request keeps the first answer."""
+        try:
+            second = await request()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            second = None
+        better = second if second is not None and len(second["left_out"]) < len(first["left_out"]) else first
+        # Numbers only, never the text.
+        logger.warning("quality pass: an answer left out %d characters; asked again, %d left out", len(first["left_out"]), len(better["left_out"]))
+        return better
 
     async def _transcribe(self, chunk: Chunk) -> str:
         if chunk.heard is not None:   # MAI listened along; its text for this commit is on its way
@@ -636,12 +693,17 @@ class QualityPass:
         # Qwen3-ASR served by vLLM answers "language Chinese<asr_text>…": the text is what follows the tag.
         return without_loop(text.rsplit("<asr_text>", 1)[-1])
 
-    async def _refine(self, new: str, pause: str, alt: str, last: bool) -> dict:
+    async def _refine(self, new: str, pause: str, alt: str, last: bool, left_out: str = "") -> dict:
         translating = self.target != NONE
         context = "\n".join(f"{s['src']}\n  => {s['tgt']}" if translating else s["src"] for s in self.context) or "(start of meeting)"
-        user = ((f"TERMS: {self.glossary}\n\n" if self.glossary else "") + f"CONTEXT:\n{context}\n\nCARRY: {self.carry}\nNEW: {new}\nPAUSE: {pause}\n"
+        # Without translation, what revision has learned about this meeting's people, names and terms (its notes).
+        notes = self.reviser.notes if not translating and self.reviser and self.reviser.notes != revise_pass.NO_NOTES else ""
+        user = ((f"TERMS: {self.glossary}\n\n" if self.glossary else "") + (f"NOTES: {notes}\n\n" if notes else "")
+                + f"CONTEXT:\n{context}\n\nCARRY: {self.carry}\nNEW: {new}\nPAUSE: {pause}\n"
                 + (f"ALT: {alt}\n" if alt else "") + f"LAST: {'true' if last else 'false'}"
-                + (f"\nTRANSLATE INTO: {target_name(self.language, self.target)}" if translating else ""))
+                + (f"\nTRANSLATE INTO: {target_name(self.language, self.target)}" if translating else "")
+                + (f"\nLEFT OUT: your previous answer left out this part of CARRY + NEW: «{left_out}». Every part of CARRY and NEW "
+                   "must be in the sentences or in carry; only fillers, stutters, false starts and repeats may go." if left_out else ""))
         payload = {"model": MODEL, "max_tokens": 6000, "response_format": {"type": "json_object"},
                    "messages": [{"role": "system", "content": system_prompt(self.language, self.target)}, {"role": "user", "content": user}],
                    **EXTRA}
@@ -671,10 +733,13 @@ class QualityPass:
         carry = carry.strip() if isinstance(carry, str) else ""
         # The answer must account for what it was given: the carried sentence and the new text, not just one of them.
         given = joined(self.carry, new)
+        # Without translation, also stretch by stretch (before repeats were removed: those are left out on purpose).
+        answered = " ".join(item["src"] for item in answer["sentences"] if isinstance(item, dict) and isinstance(item.get("src"), str))
+        left = missing(given, answered + " " + carry, self.convert) if not translating else ""
         words = in_words(given)
         if not covered(units(given, words), units(" ".join(item["src"] for item in items) + " " + carry, words)):
             raise Unusable("coverage")
-        return {"sentences": items, "carry": carry}
+        return {"sentences": items, "carry": carry, "left_out": left}
 
 
 class TeeReceiver:

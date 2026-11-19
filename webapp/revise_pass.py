@@ -41,7 +41,7 @@ Every "tgt" is written in the language named by TRANSLATE INTO; "src" stays in t
 Return JSON only: {"sentences": [{"ids": [1], "src": "...", "tgt": "..."}, {"ids": [2, 3], "src": "...", "tgt": "..."}], "notes": "..."} with every number of WINDOW exactly once, in order."""
 
 
-POLISH_STEP = """1. Recognition and wording. Read WINDOW as continuous speech in its context. Correct SRC where a word or phrase does not make sense there (a similar-sounding wrong word, a name or term spelled differently from TERMS, NOTES or BEFORE, a dropped or added negation, a wrong number, a wrong homophone such as 他/她, a question recognized as a statement) and ALT or the context makes the intended words clear. Where SRC and ALT differ, choose the reading that fits the context; when both fit, SRC stays. Words recognized twice in two variants ("穩定不穩定") become the one variant that fits. Never add content that neither recognizer has. Use the standard written form of terms (for Chinese with Taiwan usage). Remove fillers (uh, um; えー, あの; 嗯, 呃, 欸, 那個, 就是, 然後, 的話, 對對對 used as fillers), stutters and words said twice by mistake that are still there, and make a sentence that still reads awkwardly read smoothly as natural written text. Keep every point, fact, number, name, negation, condition, hedge and question and the speaker's meaning; never add content, and never delete, shorten or summarize content. Limits: words or sentences spoken in a language other than the speaker's main language (English inside Chinese speech, for example) stay in that language as spoken, never translated; a direct quote stays a direct quote, never turned into reported speech; a sentence the speaker left unfinished stays unfinished, never completed, guessed or paraphrased; each item holds one complete thought. A sentence that already reads well stays word for word as it is.
+POLISH_STEP = """1. Recognition and wording. Read WINDOW as continuous speech in its context. Correct SRC where a word or phrase does not make sense there (a similar-sounding wrong word, a name or term spelled differently from TERMS, NOTES or BEFORE, a dropped or added negation, a wrong number, a wrong homophone such as 他/她, a question recognized as a statement) and ALT or the context makes the intended words clear. Where SRC and ALT differ, choose the reading that fits the context; when both fit, SRC stays. Words recognized twice in two variants ("穩定不穩定") become the one variant that fits. Never add content that neither recognizer has. Use the standard written form of terms (for Chinese with Taiwan usage). Remove fillers (uh, um; えー, あの; 嗯, 呃, 欸, 那個, 就是, 然後, 的話, 對對對 used as fillers), stutters and words said twice by mistake that are still there, and make a sentence that still reads awkwardly read smoothly as natural written text. Keep every point, fact, number, name, negation, condition, hedge and question and the speaker's meaning; never add content, and never delete, shorten or summarize content. Evidence first: change a content word only when it sounds similar and the context, TERMS, NOTES or the other recognizer supports the change; never change a word only to make the sentence read better (存在 does not become 存成), and never reverse a direction, negation or number. 然後, 就是 and 的話 stay where they carry time order, a condition or a definition. A short answer by another person (害怕。 逃跑。 對。) is its own item, never joined to the next question. Quotation marks cover only the quoted words: what the speaker says after the quote is outside them, and answers of different people are not put into one quote. Turns: never merge items spoken by different people (a question and its answer, a backchannel); a tag question (對不對？) is never merged with another person's words. Limits: words or sentences spoken in a language other than the speaker's main language (English inside Chinese speech, for example) stay in that language as spoken, never translated; a direct quote stays a direct quote, never turned into reported speech; a sentence the speaker left unfinished stays unfinished, never completed, guessed or paraphrased; each item holds one complete thought. A sentence that already reads well stays word for word as it is.
 """
 
 
@@ -69,6 +69,9 @@ def _without_translation(prompt: str) -> str:
 SYSTEM_TRANSCRIPT = _without_translation(SYSTEM)
 
 
+NO_NOTES = "(nothing yet)"
+
+
 class Refused(Exception):
     """The model answered, but not with a revision of this window. The message is one fixed word."""
 
@@ -83,8 +86,10 @@ class Reviser:
     """One stream's revision. `ask(messages, timeout)` returns the model's parsed JSON answer; `send` takes the event
     for the browser; `alt(start_ms, end_ms)` is the live engine's text of that span; `units(text)` measures text."""
 
-    def __init__(self, ask, send, target_name: str, alt, convert, units, glossary: str = "", translate: bool = True):
+    def __init__(self, ask, send, target_name: str, alt, convert, units, glossary: str = "", translate: bool = True, left_out=None):
         self.ask, self.send, self.target_name, self.alt, self.convert, self.units = ask, send, target_name, alt, convert, units
+        # left_out(given, back): the stretch of `given` that `back` leaves out, or "" (transcript-completeness); None: unchecked
+        self.left_out = left_out
         self.translate = translate          # False: the meeting is not translated (transcript-only), SRC only
         self.glossary = glossary.strip()
         self.sentences: list[dict] = []     # every sentence sent so far, as revised: id, source, target, lang, startMs, endMs
@@ -92,7 +97,7 @@ class Reviser:
         self.added = self.done = 0          # sentences taken in; sentences whose window is over (revised or given up)
         self.busy = 0                       # sentences of the window being revised now
         self.tail: list[asyncio.Task] = []  # the windows asked together when the stream ends
-        self.notes = "(nothing yet)"
+        self.notes = NO_NOTES
         self.seq = 0
         self.closing = self.closed = False
         self.deadline = None                # set when the stream ends
@@ -197,6 +202,9 @@ class Reviser:
             raise Refused("empty")
         if not usable(self.units(" ".join(s["source"] for s in window)), self.units(" ".join(item["src"] for item in items))):
             raise Refused("coverage")
+        if self.left_out and any(self.left_out(" ".join(window[number - 1]["source"] for number in group), item["src"])
+                                 for group, item in zip(groups, items)):
+            raise Refused("left-out")
         return answer, groups
 
     async def _revise(self, window: list[dict], messages: list[dict]) -> tuple[int, list[int]]:
