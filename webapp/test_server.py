@@ -42,6 +42,7 @@ import qa
 import record_meeting
 import records_retention
 import team_access
+import translation_quality
 import chunk_asr
 import mai_usage
 import quality_pass
@@ -1064,6 +1065,104 @@ class ReviewTestCase(AccountTestCase):
 
     def segment(self, seq):
         return self.query("SELECT asr_text, source, live_target, target, state, version FROM segments WHERE seq = %s", (seq,))[0]
+
+
+class MeetingTermsTest(ReviewTestCase):
+    """meeting-terms: fixing how terms were written across a meeting; earlier meetings' terms offered before one."""
+
+    def test_replacing_a_term(self):
+        for text, wrong, right, expected in (("我們用 KBox 聽歌", "KBox", "KKBOX", "我們用 KKBOX 聽歌"),
+                                             ("我們用 kbox 聽歌", "KBox", "KKBOX", "我們用 KKBOX 聽歌"),
+                                             ("這是 KBoxes 的資料", "KBox", "KKBOX", "這是 KBoxes 的資料"),
+                                             ("阿祖沒翻譯，阿祖說好", "阿祖", "阿總", "阿總沒翻譯，阿總說好"),
+                                             ("王小說好，王小明也說好", "王小", "王小明", "王小明說好，王小明也說好"),
+                                             ("用 GPT-4 和 GPT-4o", "GPT-4", "GPT-4o", "用 GPT-4o 和 GPT-4o")):
+            self.assertEqual(translation_quality.replace_term(text, wrong, right), expected, text)
+
+    def test_fixes_become_the_meetings_terms(self):
+        merge = translation_quality.merge_glossary
+        self.assertEqual(merge("LINE=耐、阿祖", [("阿祖", "阿總")]), "LINE=耐、阿總=阿祖")
+        self.assertEqual(merge("阿總=阿主", [("阿祖", "阿總")]), "阿總=阿主/阿祖")
+        self.assertEqual(merge("阿總=阿祖", [("阿祖", "阿總")]), "阿總=阿祖")
+        many = merge("、".join(f"詞{i}" for i in range(30)), [("阿祖", "阿總")])
+        self.assertEqual((len(translation_quality.glossary_entries(many)), many.endswith("阿總=阿祖"), many.startswith("詞1、")), (30, True, True))
+
+    def test_earlier_terms_are_merged_newest_first(self):
+        suggest = translation_quality.suggested_glossary
+        self.assertEqual(suggest(["阿總=阿祖", "阿總=阿主、MES"]), "阿總=阿祖/阿主、MES")
+        self.assertEqual(suggest([]), "")
+        newest = suggest(["、".join(f"新{i}" for i in range(20)), "、".join(f"舊{i}" for i in range(20))])
+        self.assertEqual((len(translation_quality.glossary_entries(newest)), newest.startswith("新0、"), "舊9" in newest, "舊10" in newest), (30, True, True, False))
+
+    def test_terms_keep_to_1000_characters(self):
+        long = "、".join(f"{i:02d}" + "名" * 36 for i in range(25))          # 25 terms of 38 characters: about 975
+        merged = translation_quality.merge_glossary(long, [("阿祖", "阿總" + "總" * 30)])
+        self.assertLessEqual(len(merged), 1000)
+        self.assertTrue(merged.endswith("=阿祖") and not merged.startswith("00"))   # the oldest went first
+        offered = translation_quality.suggested_glossary([long, "阿總" + "總" * 30 + "=阿祖"])
+        self.assertLessEqual(len(offered), 1000)
+        self.assertTrue(offered.startswith("00"))                                   # the newest stay
+
+    def fixture(self):
+        alice, meeting = self.signed_in("alice"), self.meeting_id()
+        self.save(alice, meeting, [("阿祖說好", "A-Zu agreed"), ("我跟阿祖確認了", "I checked with A-Zu"), ("這是第一位專家", "First expert"),
+                                    ("沒有問題", "No problem"), ("阿祖再說一次", "A-Zu again")], glossary="LINE=耐、阿祖")
+        return alice, meeting
+
+    def test_a_misheard_name_and_a_homophone(self):
+        alice, meeting = self.fixture()
+        answer = alice.post(f"/api/meetings/{meeting}/terms", json={"fixes": [{"wrong": "阿祖", "right": "阿總"}, {"wrong": "第一位專家", "right": "地位專家"}]})
+        self.assertEqual(answer.status_code, 200)
+        body = answer.json()
+        self.assertEqual((body["changed"], [s["seq"] for s in body["segments"]]), (4, [1, 2, 3, 5]))
+        self.assertEqual([s[0] for s in self.query("SELECT source FROM segments ORDER BY seq")],
+                         ["阿總說好", "我跟阿總確認了", "這是地位專家", "沒有問題", "阿總再說一次"])
+        self.assertEqual(self.query("SELECT count(*) FROM segment_history WHERE kind = 'edit'")[0][0], 4)
+        self.assertEqual(self.query("SELECT state FROM segments WHERE seq = 1")[0][0], "edited")
+        self.assertEqual(self.query("SELECT glossary FROM meetings")[0][0], "LINE=耐、阿總=阿祖、地位專家=第一位專家")
+        self.assertEqual(body["glossary"], "LINE=耐、阿總=阿祖、地位專家=第一位專家")
+
+    def test_a_fix_that_found_nothing_is_not_kept(self):
+        alice, meeting = self.fixture()
+        alice.post(f"/api/meetings/{meeting}/terms", json={"fixes": [{"wrong": "阿祖", "right": "阿總"}, {"wrong": "不存在的詞", "right": "別的詞"}]})
+        self.assertEqual(self.query("SELECT glossary FROM meetings")[0][0], "LINE=耐、阿總=阿祖")
+
+    def test_nothing_matched_changes_nothing(self):
+        alice, meeting = self.fixture()
+        body = alice.post(f"/api/meetings/{meeting}/terms", json={"fixes": [{"wrong": "不存在的詞", "right": "別的詞"}]}).json()
+        self.assertEqual(body["changed"], 0)
+        self.assertEqual(self.query("SELECT count(*) FROM segment_history")[0][0], 0)
+        self.assertEqual(self.query("SELECT glossary FROM meetings")[0][0], "LINE=耐、阿祖")
+
+    def test_invalid_pairs_and_other_teams(self):
+        alice, meeting = self.fixture()
+        for fix in ({"wrong": "祖", "right": "總"}, {"wrong": "阿祖", "right": "阿祖"}, {"wrong": "a", "right": "AB"},
+                    {"wrong": "阿祖", "right": "阿總=X"}, {"wrong": "阿祖/阿主", "right": "阿總"}):
+            self.assertEqual(alice.post(f"/api/meetings/{meeting}/terms", json={"fixes": [fix]}).status_code, 422, fix)
+        self.assertEqual(alice.post(f"/api/meetings/{meeting}/terms", json={"fixes": []}).status_code, 422)
+        self.assertEqual(self.query("SELECT count(*) FROM segment_history")[0][0], 0)
+        self.team("業務", "bob")
+        self.assertEqual(self.signed_in("bob").post(f"/api/meetings/{meeting}/terms", json={"fixes": [{"wrong": "阿祖", "right": "阿總"}]}).status_code, 404)
+
+    def test_earlier_terms_of_the_series_or_topic(self):
+        alice = self.signed_in("alice")
+        team = self.team("測試團隊", "alice")
+        series = alice.post(f"/api/teams/{team}/series", json={"name": "研發週會"}).json()["id"]
+        ids = []
+        for title, glossary in (("週會", "阿總=阿主、MES"), ("週會", "阿總=阿祖、KKBOX=KBox")):
+            meeting = alice.post("/api/meetings", json={"team_id": team, "language": "zh", "title": title, "series_id": series}).json()["id"]
+            self.save(alice, meeting, [("好", "OK")], glossary=glossary)
+            ids.append(meeting)
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            for minutes, meeting in enumerate(ids):
+                conn.execute("UPDATE meetings SET started_at = now() - make_interval(mins => %s), ended_at = now() WHERE id = %s", (60 - minutes, meeting))
+        self.assertEqual(alice.get(f"/api/teams/{team}/terms", params={"series_id": series}).json(),
+                         {"glossary": "阿總=阿祖/阿主、KKBOX=KBox、MES", "count": 3})
+        self.assertEqual(alice.get(f"/api/teams/{team}/terms", params={"title": " 週會 "}).json()["count"], 3)
+        self.assertEqual(alice.get(f"/api/teams/{team}/terms", params={"title": "別的會"}).json(), {"glossary": "", "count": 0})
+        self.assertEqual(alice.get(f"/api/teams/{team}/terms").json()["count"], 0)
+        self.team("業務", "bob")
+        self.assertEqual(self.signed_in("bob").get(f"/api/teams/{team}/terms", params={"series_id": series}).status_code, 404)
 
 
 class SegmentStorageTests(ReviewTestCase):

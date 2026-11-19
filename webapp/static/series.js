@@ -51,6 +51,7 @@
 
   // --- Unfinished items and suggestions ---
   async function loadItems(){
+    document.dispatchEvent(new Event('series-changed'));   // earlier-terms.js offers the series' terms
     const id=seriesId(),ticket=++listTicket;
     $('seriesPanel').hidden=!id;
     if(!id){items=[];return}

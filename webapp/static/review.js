@@ -202,6 +202,75 @@ async function renaming(on){
   // Keep whatever is chosen by now (the user may already have picked 不屬於系列).
   if(list&&!$('renameForm').hidden)options(list.some(s=>s.id===meeting.seriesId)?list:[...current,...list],$('seriesInput').value);
 }
+// --- 修正名詞 (meeting-terms): one form written wrong throughout the meeting, corrected everywhere at once ---
+const TERM_SEPARATORS=/[=,，、;；/／|｜\n\r]/;
+function termPattern(wrong){   // as the server: Latin forms as whole words, any letter case
+  const escaped=wrong.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  return new RegExp(/^[A-Za-z0-9 ]+$/.test(wrong)?`(?<![A-Za-z])${escaped}(?![A-Za-z])`:escaped,'gi');
+}
+function termProblem(wrong,right){
+  if(!wrong&&!right)return '';
+  if(wrong.length<2||(/^[\x00-\x7f]+$/.test(wrong)&&(wrong.match(/[A-Za-z]/g)||[]).length<2))return '「原本寫成」至少要 2 個字';
+  if(!right)return '請填「應該是」';
+  if(wrong===right)return '「原本寫成」和「應該是」不能相同';
+  if(TERM_SEPARATORS.test(wrong+right))return '不能包含 = 、 , ; / | 等符號';
+  return '';
+}
+function termsFound(wrong,right=''){   // as the server: a "should be" already written that contains the form is not counted
+  if(wrong.length<2)return 0;
+  const pattern=termPattern(wrong);
+  const keep=right&&right.toLowerCase().includes(wrong.toLowerCase())?new RegExp(`(${termPattern(right).source})`,'gi'):null;
+  const count=text=>(keep?text.split(keep).filter((_,i)=>i%2===0):[text]).reduce((n,piece)=>n+(piece.match(pattern)||[]).length,0);
+  return segments.reduce((n,s)=>n+count(s.source)+count(s.target),0);
+}
+function termRow(wrong=''){
+  const found=el('span',{className:'found'});
+  const wrongInput=el('input',{className:'input wrong',maxLength:40,value:wrong,placeholder:'例：阿祖',autocomplete:'off','aria-label':'原本寫成'});
+  const rightInput=el('input',{className:'input right',maxLength:40,placeholder:'例：阿總',autocomplete:'off','aria-label':'應該是'});
+  const row=el('div',{className:'terms-row'},wrongInput,el('span',{className:'arrow',textContent:'→','aria-hidden':'true'}),rightInput,found,
+    el('button',{type:'button',className:'remove',textContent:'×',title:'移除這列','aria-label':'移除這列',onclick:()=>{row.remove();if(!$('termsRows').children.length)$('termsRows').append(termRow())}}));
+  const count=()=>{const w=wrongInput.value.trim();const n=termsFound(w,rightInput.value.trim());found.textContent=w.length<2?'':n?`找到 ${n} 處`:'找不到';found.classList.toggle('none',w.length>=2&&!n)};
+  wrongInput.oninput=()=>{count();$('termsError').hidden=true};rightInput.oninput=()=>{count();$('termsError').hidden=true};
+  count();
+  return row;
+}
+function termsError(message){$('termsError').textContent=message;$('termsError').hidden=!message}
+$('termsButton').onclick=()=>{
+  // Text selected in a segment is the likely "written as".
+  const selected=String(window.getSelection?.()||'').trim();
+  const picked=selected.length>=2&&selected.length<=40&&!/\s{2,}|\n/.test(selected)?selected:'';
+  $('termsRows').replaceChildren(termRow(picked));
+  const translated=segments.some(s=>s.target)&&meeting.targetLanguage!=='none';
+  $('termsNote').textContent='譯文中出現相同的寫法也會一起改，但不會重新翻譯；需要時可以逐段「儲存並重譯」。';
+  $('termsNote').hidden=!translated;
+  termsError('');$('termsGo').disabled=false;
+  $('termsDialog').showModal();
+  $('termsRows').querySelector(picked?'.right':'.wrong').focus();
+};
+$('termsAdd').onclick=()=>{if($('termsRows').children.length<20){const row=termRow();$('termsRows').append(row);row.querySelector('.wrong').focus()}};
+$('termsCancel').onclick=()=>$('termsDialog').close();
+$('termsForm').onsubmit=async event=>{
+  event.preventDefault();
+  const fixes=[...$('termsRows').children].map(row=>({wrong:row.querySelector('.wrong').value.trim(),right:row.querySelector('.right').value.trim()}));
+  const problem=fixes.map(f=>termProblem(f.wrong,f.right)).find(Boolean);
+  const filled=fixes.filter(f=>f.wrong||f.right);
+  if(problem)return termsError(problem);
+  if(!filled.length)return termsError('請至少填一列');
+  if(!filled.some(f=>termsFound(f.wrong,f.right)))return termsError('這場會議找不到這些寫法');
+  $('termsGo').disabled=true;
+  try{
+    const response=await fetch(`/api/meetings/${meetingId}/terms`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fixes:filled})});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:Array.isArray(data.detail)?String(data.detail[0]?.msg||'').replace(/^Value error, /,''):'更正失敗');
+    for(const segment of data.segments){const i=segments.findIndex(s=>s.seq===segment.seq);if(i>=0)segments[i]=segment}
+    render();
+    meeting.glossary=data.glossary;
+    $('termsDialog').close();
+    notice(data.changed?`已更正 ${data.changed} 段，修改紀錄裡看得到每一段的變更`:'這場會議找不到這些寫法');
+  }catch(error){termsError(error.message||'更正失敗')}
+  finally{$('termsGo').disabled=false}
+};
+
 $('renameButton').onclick=()=>renaming(true);
 $('renameCancel').onclick=()=>renaming(false);
 $('renameForm').onsubmit=async event=>{

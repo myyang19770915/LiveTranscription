@@ -119,6 +119,11 @@ body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-
 }
 .context-field { grid-area: context !important; }
 .context-field input { padding-top: 8px; }
+/* 帶入上次的名詞 (meeting-terms): a quiet link under 會議情境, only when earlier meetings have terms. */
+.terms-offer { display: block; margin: 4px 0 0; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 12px;
+  font-weight: 600; text-align: left; cursor: pointer; }
+.terms-offer:hover { text-decoration: underline; }
+.terms-offer[hidden] { display: none; }
 .primary {
   grid-area: start !important;
   min-height: 62px;

@@ -46,15 +46,75 @@ def strip_context_echo(text, glossary):
         text = re.sub(rf"{run}{tail}、?", "", text, flags=re.I)
     return text
 
+def _term_pattern(form):
+    pattern = re.escape(form)
+    if re.fullmatch(r"[A-Za-z0-9 ]+", form):
+        pattern = r"(?<![A-Za-z])" + pattern + r"(?![A-Za-z])"
+    return pattern
+
+def replace_term(text, wrong, right):
+    """Every `wrong` in `text` written as `right`. Latin forms match whole words in any letter case (nine ≠ ninety).
+    Where `right` contains `wrong` (王小 → 王小明), a `right` already written stays as it is."""
+    def fix(piece):
+        return re.sub(_term_pattern(wrong), lambda _: right, piece, flags=re.I)
+    if wrong.casefold() not in right.casefold():
+        return fix(text)
+    pieces = re.split(f"({_term_pattern(right)})", text, flags=re.I)
+    return "".join(piece if i % 2 else fix(piece) for i, piece in enumerate(pieces))
+
 def apply_aliases(text, glossary):
     """Replace only the mishearings the user listed. Latin aliases match whole words (nine ≠ ninety)."""
     for term, aliases in glossary_entries(glossary):
         for alias in sorted(aliases, key=len, reverse=True):
-            pattern = re.escape(alias)
-            if re.fullmatch(r"[A-Za-z0-9 ]+", alias):
-                pattern = r"(?<![A-Za-z])" + pattern + r"(?![A-Za-z])"
-            text = re.sub(pattern, lambda _: term, text, flags=re.I)
+            text = replace_term(text, alias, term)
     return text
+
+GLOSSARY_TERMS = 30      # as many terms as glossary_entries reads
+GLOSSARY_CHARS = 1000    # 會議情境 holds this many characters (meeting-terms)
+
+def _entries(glossary):
+    """Every entry of a glossary, uncapped, as [term, [misheard forms]]."""
+    entries = []
+    for raw in re.split(r"[,，、;；\n]+", glossary or ""):
+        term, _, aliases = raw.partition("=")
+        if 0 < len(term.strip()) <= 40:
+            entries.append([term.strip(), [a.strip() for a in re.split(r"[/／|｜]", aliases) if a.strip()]])
+    return entries
+
+def _join(entries):
+    return "、".join(term + ("=" + "/".join(aliases) if aliases else "") for term, aliases in entries)
+
+def _capped(entries, keep_first):
+    """At most GLOSSARY_TERMS terms and GLOSSARY_CHARS characters; drops from the end when keep_first, else from the start."""
+    entries = entries[:GLOSSARY_TERMS] if keep_first else entries[-GLOSSARY_TERMS:]
+    while entries and len(_join(entries)) > GLOSSARY_CHARS:
+        entries = entries[:-1] if keep_first else entries[1:]
+    return _join(entries)
+
+def merge_glossary(glossary, fixes):
+    """The meeting's terms after fixing (wrong, right) pairs (meeting-terms): `right=wrong` is added, a listed `right`
+    gains `wrong` as one more misheard form, and `wrong` is no longer a term or a misheard form of another term."""
+    entries = _entries(glossary)
+    for wrong, right in fixes:
+        key = wrong.casefold()
+        entries = [[term, [a for a in aliases if a.casefold() != key]] for term, aliases in entries if term.casefold() != key]
+        for entry in entries:
+            if entry[0] == right:
+                if wrong not in entry[1]:
+                    entry[1].append(wrong)
+                break
+        else:
+            entries.append([right, [wrong]])
+    return _capped(entries, keep_first=False)   # the oldest go first
+
+def suggested_glossary(glossaries):
+    """Terms of earlier meetings, newest first, merged: the misheard forms of the same term are joined (meeting-terms)."""
+    merged = {}
+    for glossary in glossaries:
+        for term, aliases in _entries(glossary):
+            known = merged.setdefault(term, [])
+            known += [a for a in aliases if a not in known]
+    return _capped([[term, aliases] for term, aliases in merged.items()], keep_first=True)
 
 def term_discovery_messages(transcript, language, known=""):
     """Ask the model which words in a stretch of live ASR are misheard names or terms. No glossary is

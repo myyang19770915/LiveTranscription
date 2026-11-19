@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>會後校對 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261118a"><link rel="stylesheet" href="/assets/admin.css?v=20261118rm"><link rel="stylesheet" href="/assets/review.css?v=20261118a"><link rel="stylesheet" href="/assets/minutes.css?v=20261115c"><link rel="stylesheet" href="/assets/speakers.css?v=20261115c"><link rel="stylesheet" href="/assets/topbar.css?v=20261118d"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>會後校對 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261118a"><link rel="stylesheet" href="/assets/admin.css?v=20261118rm"><link rel="stylesheet" href="/assets/review.css?v=20261119mt"><link rel="stylesheet" href="/assets/minutes.css?v=20261115c"><link rel="stylesheet" href="/assets/speakers.css?v=20261115c"><link rel="stylesheet" href="/assets/topbar.css?v=20261118d"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>會議紀錄</small></span></a>
@@ -27,6 +27,7 @@
   <div class="card toolbar">
     <p id="reviewHint" class="hint">點一段就會播放那段錄音。修正轉錄後按「儲存並重譯」，譯文會用和會議中相同的方式（帶前後文與會議詞彙）重新翻譯；每次修改都會留下紀錄。</p>
     <label id="refineRow" class="toggle" hidden><input id="refine" type="checkbox"> 雲端精修 <span class="muted small">會議內容會傳送到外部服務</span></label>
+    <button id="termsButton" class="secondary-button compact" type="button" title="人名、專有名詞或同音字寫錯了，一次改正整場會議">修正名詞</button>
   </div>
 
   <section id="speakers" class="card speakers" aria-label="說話者" hidden></section>
@@ -36,11 +37,28 @@
   <audio id="player" preload="none"></audio>
 </main>
 
+<!-- meeting-terms: correct how names, proper nouns and homophones were written, for the whole meeting at once. -->
+<dialog id="termsDialog" class="terms-dialog" aria-labelledby="termsTitle">
+  <form id="termsForm" method="dialog" novalidate>
+    <h2 id="termsTitle">修正名詞</h2>
+    <p class="hint">人名、專有名詞或同音字寫錯了，可以一次改正整場會議。改過的段落會留下修改紀錄；這些寫法也會記成這場會議的名詞，之後同系列或同主題的會議開始前可以帶入。</p>
+    <div class="terms-head" aria-hidden="true"><span>原本寫成</span><span></span><span>應該是</span></div>
+    <div id="termsRows" class="terms-rows"></div>
+    <button id="termsAdd" class="text-button terms-add" type="button">＋ 再加一列</button>
+    <p id="termsNote" class="terms-note" hidden></p>
+    <p id="termsError" class="alert" role="alert" hidden></p>
+    <div class="terms-actions">
+      <button id="termsCancel" class="secondary-button compact" type="button">取消</button>
+      <button id="termsGo" class="primary-button compact" type="submit">全部更正</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="/assets/return-path.js?v=20261113c"></script>
 <script src="/assets/account.js?v=20261118ph"></script>
 <script src="/assets/translation-context.js?v=20261104b"></script>
 <script src="/assets/timeline.js?v=20261106a"></script><script src="/assets/meeting-catalog.js?v=20261105a"></script>
 <script src="/assets/meeting-nav.js?v=20261118ts"></script>
 <script src="/assets/speakers.js?v=20261108d"></script>
-<script src="/assets/review.js?v=20261118ts"></script>
+<script src="/assets/review.js?v=20261119mt2"></script>
 </body></html>

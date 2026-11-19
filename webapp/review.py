@@ -21,6 +21,7 @@ import db
 import diarize
 import meeting_audio
 import team_access
+import translation_quality
 
 router = APIRouter()
 MAX_TEXT = 10_000
@@ -223,6 +224,78 @@ async def confirm_segment(meeting_id: str, seq: int, body: ConfirmIn, user: auth
             return stale(row)
         state = "edited" if row["state"] == "edited" else "confirmed"
         return await record(conn, row, "confirm", user, row["source"], row["target"], state)
+
+
+# --- meeting-terms: fixing how terms were written, for the whole meeting -----------------------------------------
+GLOSSARY_SEPARATORS = set("=,，、;；/／|｜\n\r")
+
+
+class TermFix(BaseModel):
+    wrong: str = Field(min_length=1, max_length=40)
+    right: str = Field(min_length=1, max_length=40)
+
+    @model_validator(mode="after")
+    def valid(self):
+        self.wrong, self.right = self.wrong.strip(), self.right.strip()
+        letters = sum(char.isalpha() and char.isascii() for char in self.wrong)
+        if len(self.wrong) < 2 or (self.wrong.isascii() and letters < 2):
+            raise ValueError("「原本寫成」至少要 2 個字")
+        if not self.right:
+            raise ValueError("「應該是」不能是空的")
+        if self.wrong == self.right:
+            raise ValueError("「原本寫成」和「應該是」不能相同")
+        if GLOSSARY_SEPARATORS & set(self.wrong + self.right):
+            raise ValueError("不能包含 = 、 , ; / | 或換行")
+        return self
+
+
+class TermFixesIn(BaseModel):
+    fixes: list[TermFix] = Field(min_length=1, max_length=20)
+
+
+@router.post("/api/meetings/{meeting_id}/terms")
+async def fix_terms(meeting_id: str, body: TermFixesIn, user: auth.CurrentUser):
+    """Write each fix's form everywhere in the meeting at once; every changed segment is an edit in its history, and
+    the fixes become the meeting's terms (meeting-terms)."""
+    pairs = [(fix.wrong, fix.right) for fix in body.fixes]
+    async with db.connect() as conn:
+        meeting = await team_access.require_member(conn, user, meeting_id)
+        rows = await (await conn.execute("SELECT * FROM segments WHERE meeting_id = %s ORDER BY seq FOR UPDATE", (meeting["id"],))).fetchall()
+        changed, used = [], set()
+        for row in rows:
+            source, target = row["source"], row["target"]
+            for wrong, right in pairs:
+                fixed = translation_quality.replace_term(source, wrong, right), translation_quality.replace_term(target, wrong, right)
+                if fixed != (source, target):
+                    used.add((wrong, right))
+                source, target = fixed
+            if (source, target) != (row["source"], row["target"]):
+                changed.append(await record(conn, row, "edit", user, source, target, "edited"))
+        glossary = (await (await conn.execute("SELECT glossary FROM meetings WHERE id = %s FOR UPDATE", (meeting["id"],))).fetchone())["glossary"]
+        if changed:
+            glossary = translation_quality.merge_glossary(glossary, [pair for pair in pairs if pair in used])   # only fixes that found something
+            await conn.execute("UPDATE meetings SET glossary = %s WHERE id = %s", (glossary, meeting["id"]))
+    return {"changed": len(changed), "segments": changed, "glossary": glossary}
+
+
+@router.get("/api/teams/{team_id}/terms")
+async def earlier_terms(team_id: int, user: auth.CurrentUser, series_id: int | None = None, title: str = Query("", max_length=100)):
+    """Terms of the five most recent ended meetings of the series (or, without one, of the same topic), merged."""
+    title = title.strip()
+    async with db.connect() as conn:
+        if not await team_access.is_member(conn, user.username, team_id):
+            raise HTTPException(status_code=404, detail=team_access.TEAM_NOT_FOUND)
+        if series_id is not None:
+            where, value = "series_id = %s", series_id
+        elif title:
+            where, value = "btrim(title) = %s", title
+        else:
+            return {"glossary": "", "count": 0}
+        rows = await (await conn.execute(
+            f"SELECT glossary FROM meetings WHERE team_id = %s AND {where} AND ended_at IS NOT NULL AND glossary <> '' "
+            "ORDER BY started_at DESC LIMIT 5", (team_id, value))).fetchall()
+    glossary = translation_quality.suggested_glossary([r["glossary"] for r in rows])
+    return {"glossary": glossary, "count": len(translation_quality.glossary_entries(glossary))}
 
 
 @router.get("/api/meetings/{meeting_id}/segments/{seq}/history")

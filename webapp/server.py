@@ -211,7 +211,7 @@ class TranslationRequest(BaseModel):
     target: str = Field(pattern=TARGET_PATTERN)
     history: str = Field(default="", max_length=4_000)
     history_translation: str = Field(default="", max_length=4_000)
-    glossary: str = Field(default="", max_length=200)
+    glossary: str = Field(default="", max_length=1000)
     # Names and mishearings learned during the meeting (/api/terms); hints, never replacements.
     learned: str = Field(default="", max_length=2_000)
     # Speech already heard after this span; it settles how a span cut at a comma ends. Never translated.
