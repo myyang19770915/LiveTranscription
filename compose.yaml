@@ -31,8 +31,12 @@ services:
   # 精準模式's recognizer on this machine (quality-pass): Qwen3-ASR 1.7B behind vLLM's OpenAI-compatible API
   # (TRANSLATE_QUALITY_ASR_URL=http://qwen-asr:8000/v1). About 10 GB of GPU memory at 0.3: on a 32 GB card it does not
   # fit next to the local translation model, so use one profile or the other. The first start downloads the weights.
+  # Also published on the host (QWEN_ASR_PORT, default 18000) for other systems on the LAN: NO authentication, so keep
+  # it to a trusted LAN — never route it through the Cloudflare tunnel or a router port forward (README「給其他系統使用 Qwen3-ASR」).
   qwen-asr:
     profiles: ["qwen-asr"]
+    ports:
+      - "${QWEN_ASR_PORT:-18000}:8000"
     image: qwenllm/qwen3-asr:latest@sha256:fb75b775f089e06e5a1aaebffd421e37505cc630d50c86d889d95ffa45a7e16a   # the asr service's image
     gpus: all
     command: ["qwen-asr-serve", "Qwen/Qwen3-ASR-1.7B", "--gpu-memory-utilization", "${QWEN_GPU_MEMORY_UTILIZATION:-0.3}",

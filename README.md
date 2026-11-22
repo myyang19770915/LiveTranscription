@@ -61,7 +61,7 @@ flowchart LR
   diarizeCache --- diarize
 ```
 
-Compose 定義 `app`、`asr`、`db`、`embed`、`diarize` 五個預設啟動的服務，另有以 profile 啟用的服務：本機翻譯模型 `translate`（`local-translate`）、精準模式用的 `qwen-asr`、開發用的 `dev-ldap`、本機測試信箱 `dev-mail`，以及對外用的 Cloudflare Tunnel `tunnel`。翻譯模型放本機或外部服務見[翻譯模型放哪裡](#翻譯模型放哪裡)。除了 `app` 的主機連接埠 `18082`，其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`db` 的健康檢查通過（翻譯模型是否就緒顯示在開會頁的服務狀態）；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料；`diarize` 也不是必要服務，沒啟動時段落不標說話者。
+Compose 定義 `app`、`asr`、`db`、`embed`、`diarize` 五個預設啟動的服務，另有以 profile 啟用的服務：本機翻譯模型 `translate`（`local-translate`）、精準模式用的 `qwen-asr`、開發用的 `dev-ldap`、本機測試信箱 `dev-mail`，以及對外用的 Cloudflare Tunnel `tunnel`。翻譯模型放本機或外部服務見[翻譯模型放哪裡](#翻譯模型放哪裡)。對主機開放連接埠的只有 `app` 的 `18082`，以及以 profile 啟動時 `qwen-asr` 的 `18000`（給區網其他系統用，見[給其他系統使用 Qwen3-ASR](#給其他系統使用-qwen3-asr)）與開發用 `dev-mail` 的 `18025`（只綁本機 127.0.0.1）；其他服務都只在 Compose 內網提供服務；named volume 保留下載的權重與資料庫。`app` 啟動時會等待 `asr`、`db` 的健康檢查通過（翻譯模型是否就緒顯示在開會頁的服務狀態）；`embed` 不是必要服務，沒啟動時「問答」只用關鍵字找資料；`diarize` 也不是必要服務，沒啟動時段落不標說話者。
 
 ### Docker image 與模型權重分別下載在哪裡
 
@@ -345,6 +345,29 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 
 **評測結果（2026-11-14，10 段各 4 分鐘，同輪盲評，滿分 100）**：第二次辨識用 Azure MAI 平均 84.7，不開精準模式的基準（MAI 即時＋雲端精修）81.4，第二次辨識用本機 Qwen3-ASR 1.7B 80.6。Qwen3-ASR 在中文高於基準（84.7 對 77.0），在日文低於基準（77.8 對 83.5）；兩種設定的主要失分都是整句內容遺漏。精準模式因此仍是每場會議自行勾選的選項，細節見 [bench/README.md](bench/README.md)。
 
+### 給其他系統使用 Qwen3-ASR
+
+以 `--profile qwen-asr` 啟動時，Qwen3-ASR 1.7B（vLLM 的 OpenAI 相容 API）也開在主機的 `18000`（`.env` 的 `QWEN_ASR_PORT` 可改），區網內其他系統可直接呼叫：
+
+```bash
+# 確認服務在線：回傳的模型清單應含 Qwen/Qwen3-ASR-1.7B
+curl http://<語橋主機 IP>:18000/v1/models
+
+# 辨識一個音檔（multipart：model 與 file；建議 16 kHz 單聲道 wav）
+curl http://<語橋主機 IP>:18000/v1/audio/transcriptions \
+  -F model=Qwen/Qwen3-ASR-1.7B \
+  -F file=@sample.wav
+```
+
+回傳 `{"text": "language Chinese<asr_text>…"}`：文字前面帶有模型判斷的語言，呼叫端取 `<asr_text>` 之後的部分即為辨識結果。中文輸出為簡體，需要繁體時請自行轉換（語橋用 OpenCC `s2tw`，只轉字不轉詞；`s2twp` 會把一般詞改成 IT 用語，例如「循环」變「迴圈」）。整段音檔一次送出、一次回傳，不是串流；太長的音檔受 `--max-model-len 8192` 限制，建議切成數十秒內的片段。
+
+注意事項：
+
+- **沒有任何驗證**：連得到這個連接埠的人都能使用這張顯示卡。只能在受信任的區網使用；不要把它加到 Cloudflare Tunnel 的 Public hostname，也不要在路由器上轉發 18000。`tunnel` 服務只在 `edge` 網路，本來就連不到 `qwen-asr`。
+- **Windows 防火牆**：其他電腦連不進來時，以系統管理員身分在 PowerShell 執行 `New-NetFirewallRule -DisplayName "Qwen3-ASR 18000" -Direction Inbound -Protocol TCP -LocalPort 18000 -Action Allow -Profile Private`，只對「私人」網路開放，並確認目前的網路設定檔是「私人」而非「公用」。
+- **與精準模式共用顯示卡**：其他系統的請求和語橋精準模式的中文辨識排在同一個模型上。大量或很長的請求會讓精準模式等不到結果（每塊最多等 15 秒）；需要大量批次時，請避開開會時段。
+- **連接埠被占用**：`qwen-asr` 會啟動失敗。在 `.env` 設 `QWEN_ASR_PORT=<其他埠>` 後執行 `docker compose --profile qwen-asr up -d qwen-asr`。語橋本身走 Compose 內網的 `http://qwen-asr:8000/v1`，不受主機連接埠影響。
+
 ## 會後校對
 
 會議結束後，從頁首「會議紀錄」（`/meetings`）進入。列表只顯示你所屬團隊的會議，每場標示已校對幾段；按「校對」開啟 `/meetings/<會議 id>`，「返回會議紀錄」會回到原本的列表（篩選條件保留）。
@@ -510,6 +533,7 @@ $env:YUQIAO_TEAM = "研發部"   # 帳號只屬於一個團隊時可省略
 | `TRANSLATE_EXTRA` | 空 | 併入外部翻譯請求的 JSON；推理型模型要關掉推理草稿才夠快，例如 `{"thinking":{"type":"disabled"}}` |
 | `TRANSLATE_HEALTH_URL` | `TRANSLATE_URL` + `/health` | 開會頁「服務狀態」檢查翻譯服務用的網址；litellm 用 `/health/liveliness` |
 | `QWEN_GPU_MEMORY_UTILIZATION` | `0.3` | 內建 Qwen3-ASR 服務（profile `qwen-asr`）可用的顯示卡記憶體比例 |
+| `QWEN_ASR_PORT` | `18000` | 內建 Qwen3-ASR 服務對主機開放的連接埠（沒有驗證，只給區網；見[給其他系統使用 Qwen3-ASR](#給其他系統使用-qwen3-asr)）。被占用時改這裡，再 `docker compose --profile qwen-asr up -d qwen-asr` |
 | `MAI_USD_PER_HOUR` / `MAI_BUDGET_USD` | `0.54` / `50` | Azure MAI 每小時音訊的單價與累計金額上限（美元）。系統記錄送給 MAI 的音訊秒數（即時引擎與精準模式），系統管理員在「團隊管理」頁看到累計金額；達上限的八成與達上限時顯示提示並記一次警告日誌，不會停用 MAI。評測腳本直接連 MAI 的用量以 `docker exec -w /app <app 容器> python -m mai_usage add <秒數> bench` 登記，不帶參數時印出累計 |
 | `TRANSLATE_QUALITY_ASR_MODEL` / `TRANSLATE_QUALITY_MODEL` | 空（關閉） | 選用：「精準模式」的第二段辨識模型（`/audio/transcriptions`）與文字模型（`/chat/completions`）。兩個都填才啟用，頁面才出現開關（見[精準模式](#精準模式)） |
 | `TRANSLATE_QUALITY_ASR` | 空 | 精準模式的第二次辨識由誰做。空：`TRANSLATE_QUALITY_ASR_MODEL` 的辨識服務；`local`：本機 Confucius（音訊不離開這台機器）；`mai`：Azure MAI（需已設定 `AZURE_MAI_*`）；`hybrid`：中文（`zh`、`yue`）用辨識服務、其他語言用 MAI。用到 MAI 的串流會另開一條 MAI 連線，音訊照收到的速度送出並在每個區塊切點取回文字。文字都會送到文字模型。其他值視為未設定 |
