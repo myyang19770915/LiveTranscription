@@ -3,7 +3,10 @@ const EOS = 'YOUDAO_ONETIME_ASR_STREAM_EOS';
 const translationEmptyMarkup = $('translation').innerHTML;
 let socket, stream, captureStreams = [], audioContext, sourceNodes = [], workletNode, startedAt, timerHandle, starting = false, stopping = false;
 let recorder, recordingChunks = [], recording, meetingStamp = '', meetingId = '', meetingEpoch = -1, topicUsed = false, sessionPrefix = '';
-let testStream, testStreams = [], testAudioContext, testSources = [], testAnalyser, testAnimation;
+let testStream, testStreams = [], testAudioContext, testSources = [], testAnalyser, testAnimation, testSilence, testSampler;
+// 測試音源 with no sound for this long says so, with advice for the chosen source (audio-test-feedback).
+const TEST_SILENCE_MS=5000,TEST_SAMPLE_MS=100;
+const silenceAdvice=mode=>mode==='microphone'?'還沒收到聲音：請對麥克風說話，或換一個麥克風來源':'還沒收到聲音：請確認分享時勾選了分享音訊，且正在播放';
 let transcript = '', translated = '', draftText = '', translationTimer, pauseTimer, activeTranslation;
 let translationOffset = 0, translationHistory = [], translationEpoch = 0, flushRequested = false, lastDraftSource = '';
 let tentative = '';   // the cloud engine's text not yet confirmed (mai-intermediate): shown, drafted, never finalized
@@ -273,7 +276,7 @@ async function refreshMicrophones(preferredId=''){
   if(!devices.length){const option=document.createElement('option');option.value='default';option.textContent='找不到麥克風';$('microphone').appendChild(option);setMicStatus('沒有可用的輸入裝置','error');return}
   if([...$('microphone').options].some(o=>o.value===current))$('microphone').value=current;
 }
-function stopMicTest(){cancelAnimationFrame(testAnimation);testSources.forEach(source=>source.disconnect());testStreams.forEach(media=>media.getTracks().forEach(track=>track.stop()));testAudioContext?.close();testStream=testAudioContext=testAnalyser=null;testStreams=[];testSources=[];$('testMic').classList.remove('testing');$('testMic').querySelector('b').textContent='測試音源';$('microphone').disabled=false;$('audioSource').disabled=false;$('micTestLevel').style.transform='scaleX(.03)';updateSourceUI()}
+function stopMicTest(){cancelAnimationFrame(testAnimation);clearTimeout(testSilence);clearInterval(testSampler);testSources.forEach(source=>source.disconnect());testStreams.forEach(media=>media.getTracks().forEach(track=>track.stop()));testAudioContext?.close();testStream=testAudioContext=testAnalyser=null;testStreams=[];testSources=[];$('testMic').classList.remove('testing');$('testMic').querySelector('b').textContent='測試音源';$('microphone').disabled=false;$('audioSource').disabled=false;$('micTestLevel').style.transform='scaleX(.03)';updateSourceUI()}
 async function toggleMicTest(){
   if(testStream){stopMicTest();setMicStatus('測試已結束');return}
   try{
@@ -285,7 +288,16 @@ async function toggleMicTest(){
     testAudioContext=new AudioContext();testAnalyser=testAudioContext.createAnalyser();testAnalyser.fftSize=1024;
     for(const media of testStreams){const source=testAudioContext.createMediaStreamSource(media);source.connect(testAnalyser);testSources.push(source)}
     const samples=new Float32Array(testAnalyser.fftSize);let peak=0;
-    const draw=()=>{testAnalyser.getFloatTimeDomainData(samples);let sum=0;for(const value of samples)sum+=value*value;const rms=Math.sqrt(sum/samples.length),level=Math.min(1,rms*8);peak=Math.max(level,peak*.94);$('micTestLevel').style.transform=`scaleX(${Math.max(.03,peak)})`;if(peak>.08)setMicStatus(`訊號正常：${label}`,'ok');testAnimation=requestAnimationFrame(draw)};draw();
+    const analyser=testAnalyser,level=()=>{analyser.getFloatTimeDomainData(samples);let sum=0;for(const value of samples)sum+=value*value;return Math.min(1,Math.sqrt(sum/samples.length)*8)};
+    // Whether sound arrives is sampled on a timer, not only in the drawing loop: sharing a tab usually brings that tab
+    // to the front, and a page in the background gets no animation frames. The status is written only when it changes
+    // (it is announced to screen readers).
+    let heard=false,shown='';const mode=selectedSource();
+    const signal=()=>{heard=true;if(shown!=='ok'){shown='ok';setMicStatus(`訊號正常：${label}`,'ok')}};
+    const draw=()=>{peak=Math.max(level(),peak*.94);$('micTestLevel').style.transform=`scaleX(${Math.max(.03,peak)})`;if(peak>.08)signal();testAnimation=requestAnimationFrame(draw)};
+    clearInterval(testSampler);testSampler=setInterval(()=>{if(level()>.08)signal()},TEST_SAMPLE_MS);
+    clearTimeout(testSilence);testSilence=setTimeout(()=>{if(level()>.08)signal();if(!heard){shown='silent';setMicStatus(silenceAdvice(mode),'error')}},TEST_SILENCE_MS);
+    draw();
     $('testMic').classList.add('testing');$('testMic').querySelector('b').textContent='結束測試';$('testMic').querySelector('small').textContent=selectedSource()==='microphone'?'請對麥克風說話':'請播放影片或會議音訊';$('microphone').disabled=true;$('audioSource').disabled=true;$('testMic').disabled=false;
     testStreams.forEach(media=>media.getTracks().forEach(mediaTrack=>mediaTrack.onended=()=>{stopMicTest();setMicStatus('音源已中斷','error')}));
   }catch(error){stopMicTest();setMicStatus(error.status||(error.name==='NotAllowedError'?(error.message||'Chrome 未允許麥克風'):'無法連接所選音源'),'error');toast(error.message,error.status?8000:undefined)}finally{$('testMic').disabled=false}

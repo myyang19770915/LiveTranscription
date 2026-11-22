@@ -274,6 +274,11 @@ try {
     await page.goto(`${insecure}/`); await sleep(1500);
     check('insecure page: the browser treats it as insecure', await page.evaluate(() => !window.isSecureContext));
     check('insecure page: status explains it on load', await page.textContent('#micStatus') === NEED, await page.textContent('#micStatus'));
+    // audio-test-feedback: the status is shown inside the 測試音源 button.
+    // At 390px the button sits in the settings dialog: open it first.
+    await page.click('#mobileSettingsOpen');
+    check('insecure page: the status is visible inside the 測試音源 button', await page.evaluate(() => { const el = document.getElementById('micStatus'); return !!el.closest('#testMic') && el.offsetWidth > 0 && el.textContent; }));
+    await page.keyboard.press('Escape');
     const afterTest = await pressTest(page);
     check('insecure page with a port: 測試音源 advises https or localhost without naming an address',
       afterTest.status === NEED && afterTest.toast === `${NEED}，請改用 https 網址，或在這台電腦上以 localhost 開啟`, afterTest);

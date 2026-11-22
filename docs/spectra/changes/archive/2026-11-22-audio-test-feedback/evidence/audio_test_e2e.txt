@@ -1,0 +1,19 @@
+ok   microphone: status visible inside the 測試音源 button [true,true]
+ok   microphone: 訊號正常 true
+ok   microphone: no status under the microphone selector false
+ok   tab audio, not tested yet: status visible [true,"尚未連接分享音訊"]
+ok   tab audio: status visible inside the button [true,true]
+ok   tab audio: 訊號正常 true
+ok   tab audio: the level meter moves true
+ok   silent microphone: not reported before 5 s false
+ok   silent microphone: 還沒收到聲音 with advice, error style, visible ["還沒收到聲音：請對麥克風說話，或換一個麥克風來源",true,true]
+ok   silent system: not reported before 5 s false
+ok   silent system: 還沒收到聲音 with advice, error style, visible ["還沒收到聲音：請確認分享時勾選了分享音訊，且正在播放",true,true]
+ok   silent mixed: not reported before 5 s false
+ok   silent mixed: 還沒收到聲音 with advice, error style, visible ["還沒收到聲音：請確認分享時勾選了分享音訊，且正在播放",true,true]
+ok   background page: sound is still noticed, no false 還沒收到聲音 [true,false]
+ok   silent first: 還沒收到聲音 true
+ok   then sound: back to 訊號正常, not in the error style [true,false]
+ok   the status text was written once, not on every frame 1
+ok   width 1000: status visible true
+ok   width 390: status visible true
