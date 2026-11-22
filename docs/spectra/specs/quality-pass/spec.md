@@ -1264,51 +1264,67 @@ tests:
 ---
 ### Requirement: Live text does not repeat kept text
 
-While the quality pass is on, the live text shown after the kept sentences SHALL NOT begin with words the last kept sentence already ends with. Within the live text from 6 characters (not counting punctuation and white space) before the usual cut point up to the last time mark at or before `throughMs` plus 1500 ms, the page SHALL look for the end of the last kept sentence, ignoring punctuation and white space, trying its last 6 down to its last 3 characters (fewer only when the sentence has fewer). Only an occurrence that ends after the usual cut point SHALL count, since a repeat can begin before the cut point and end after it. When found, the live text SHALL start right after the first such occurrence, so that later new speech that repeats the same words stays shown, without leading punctuation or white space; when not found, the live text SHALL start at the usual cut point.
+While the quality pass is on, the live text shown after the kept sentences SHALL NOT begin with words the kept sentences already end with, also when the quality pass reworded them, the repeat spans more than one kept sentence, or the live text arrived late. All comparisons SHALL ignore punctuation and white space. The page SHALL compare against K, the last 15 characters of the kept sentences' source texts joined in order, and SHALL search L, the live text from at most 6 characters before the usual cut point to at most 30 characters after it, regardless of time marks. A candidate is a stretch P of L that starts at most 6 characters before the cut point or at it, ends after the cut point, and holds at least 3 characters. A candidate SHALL count as a repeat only when all of these hold, with LCS meaning the longest common subsequence (characters in the same order, not necessarily adjacent):
 
-#### Scenario: Overlapping live chunk is trimmed
+1. the LCS of P and K holds at least 3 characters and at least 80% of the characters of P;
+2. the LCS of P and K is longer than the LCS of P without its last character and K, so that new speech right after a repeat is not hidden;
+3. the LCS of P and K is longer than the LCS of P and K without its last 2 characters, so that the repeat continues the end of the kept text and not a word in its middle.
 
-- **WHEN** the last kept sentence is 「好，我們點進來。」 and the live text after the cut point is 「點進來，好接著在教材的地方」
-- **THEN** the transcript pane shows the live text 「好接著在教材的地方」
+Of the repeats, the page SHALL choose the one with the longest LCS, and of those the one that ends first. The live text SHALL start right after the chosen repeat, without leading punctuation or white space; when no candidate counts, the live text SHALL start at the usual cut point.
+
+#### Scenario: A reworded repeat is trimmed
+
+- **WHEN** the kept sentences end with 「…給客戶的繁體中文回覆草稿。」 and the live text around the cut point is 「給客戶的繁體｜中文回覆的草稿，如果沒有確認交期呢」 (｜ is the cut point)
+- **THEN** the transcript pane shows the live text 「如果沒有確認交期呢」
+
+#### Scenario: New speech that shares only a short word stays
+
+- **WHEN** the kept sentences end with 「…我們的系統。」 and the live text after the cut point is 「我們今天要談預算」
+- **THEN** the transcript pane shows the live text 「我們今天要談預算」
 
 ##### Example: trimming cases
 
-| Last kept sentence | Live text after the cut point (within throughMs + 1500 ms) | Live text shown |
-| --- | --- | --- |
-| 好，我們點進來。 | 點進來，好接著在教材的地方 | 好接著在教材的地方 |
-| 品項、單價、數量、小計、運費、總額。 | 運費總額三十趴的定金 | 三十趴的定金 |
-| 好，我們點進來。 | 接著在教材的地方 | 接著在教材的地方 |
-| 好，我們點進來。 | 切點前「…好我們點」、切點後「進來，好接著在教材的地方」 | 好接著在教材的地方 |
-| 這是我們的 | 我們的系統跟我們的客戶 | 系統跟我們的客戶（取第一次出現） |
-| right now. | now we know | we know |
+| Kept sentences end with | Live text around the cut point (｜) | Live text shown | Notes |
+| --- | --- | --- | --- |
+| …給客戶的繁體中文回覆草稿。 | 給客戶的繁體｜中文回覆的草稿，如果沒有確認交期呢 | 如果沒有確認交期呢 | reworded: 「的」 |
+| …第一輪的提示詞，我們複製下來。去貼上。 | 示詞我們複製｜下來哦去貼上哦再來哦這個路徑 | 哦再來哦這個路徑 | two sentences, a filler in between |
+| …按右鍵來複製連結，去做這個取代的動作。好，點擊傳送。 | 去做這個取代｜的動作，好點擊傳送，好我們可以看一下呢 | 好我們可以看一下呢 | late live text |
+| 好，我們點進來。 | 前面的字｜點進來，好接著在教材的地方 | 好接著在教材的地方 | |
+| 好，我們點進來。 | 好我們點｜進來，好接著在教材的地方 | 好接著在教材的地方 | repeat across the cut point |
+| 品項、單價、數量、小計、運費、總額。 | 前面的字｜運費總額三十趴的定金 | 三十趴的定金 | |
+| 好，我們點進來。 | 前面的字｜接著在教材的地方 | 接著在教材的地方 | no repeat |
+| 好，我們點進來。 | 我們點進來｜接著說 | 接著說 | the repeat ends before the cut point |
+| 這是我們的 | 前面｜我們的系統跟我們的客戶 | 系統跟我們的客戶 | the first one |
+| right now. | 前面｜now we know | we know | |
+| …我們的系統。 | 前面｜我們今天要談預算 | 我們今天要談預算 | only 「我們」 in common |
 
 <!-- @trace
-source: quality-transcript-flow
+source: quality-live-dedupe
 updated: 2026-11-22
 code:
-  - bench/meeting_end_e2e.mjs
-  - lab/realtime-translate/index.html
-  - lab/realtime-translate/sessions/20261117-174651/output.wav
-  - webapp/static/app.js
-  - bench/quality_e2e.mjs
-  - lab/realtime-translate/sessions/20261116-232831/output.wav
-  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
-  - 螢幕擷取畫面 2026-11-17 225637.png
   - gpt-realtime-translate_demoUI.png
-  - chang01.png
-  - lab/realtime-translate/sessions/20261116-232831/input.wav
-  - lab/realtime-translate/sessions/20261116-232831/session.json
-  - webapp/static/index.html
-  - 20261122_211227.mp4
-  - webapp/revise_pass.py
-  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - webapp/static/app.js
   - webapp/static/quality-view.js
-  - webapp/server.py
-  - bench/qualitycheck.js
-  - lab/realtime-translate/server.py
   - lab/realtime-translate/sessions/20261116-232831/transcript.txt
-  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - 20261122_215017.mp4
+  - lab/realtime-translate/index.html
+  - bench/meeting_end_e2e.mjs
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - chang01.png
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/server.py
   - lab/realtime-translate/costs.jsonl
+  - bench/qualitycheck.js
+  - webapp/revise_pass.py
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - 20261122_211227.mp4
+  - lab/realtime-translate/server.py
+  - webapp/static/index.html
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
 tests:
   - webapp/test_server.py
 -->

@@ -66,33 +66,47 @@
     for(const mark of timeMarks||[]){if(mark.ms>state.throughMs)break;at=mark.end}
     return at;
   }
-  // The live chunk that crosses the last kept sentence's end (its time mark is the audio received when it arrived,
-  // up to LATE_MS after its own audio) can start with words that sentence already ends with: start after them.
-  // Looked for only up to throughMs + LATE_MS, ignoring punctuation and white space, the last 6 down to 3 characters.
-  // A repeat can straddle the cut point (「點」 before it, 「進來」 after): the search starts up to 6 characters before
-  // the cut point, and only a match that ends after it counts. The first such match: a later one could be new speech
-  // that happens to repeat the words (「我們的系統跟我們的客戶」), and "now" could sit inside "know".
-  const PUNCT=/[\s\p{P}]/u,REPEAT_MAX=6,REPEAT_MIN=3;
-  function skipRepeat(state,transcript,timeMarks,from){
-    const core=[...(state.records.at(-1)?.source||'')].filter(c=>!PUNCT.test(c));
-    let until=from;
-    for(const mark of timeMarks||[]){if(mark.ms>state.throughMs+LATE_MS)break;until=Math.max(until,mark.end)}
-    if(!core.length||until<=from)return from;
+  // The live text after the cut point can start with words the kept sentences already end with (quality-live-dedupe):
+  // the live chunk crossing the cut point, live text that arrived late, a repeat across two kept sentences, and kept
+  // text the quality pass reworded (「中文回覆草稿」 / live 「中文回覆的草稿」). So the match is loose: a stretch P of the
+  // live text around the cut point against K, the end of the kept text, by their longest common subsequence (LCS:
+  // the same characters in the same order, not necessarily adjacent). Punctuation and white space are ignored.
+  // P counts as a repeat when its LCS with K has at least REPEAT_MIN characters and REPEAT_SHARE of P, P's last
+  // character is part of it (new speech right after the repeat stays), and so is one of K's last 2 characters (the
+  // repeat continues the end of the kept text, not a word in its middle). The longest LCS wins, then the earliest end.
+  const PUNCT=/[\s\p{P}]/u,KEPT_TAIL=15,BEFORE=6,AFTER=30,REPEAT_MIN=3,REPEAT_SHARE=0.8;
+  function skipRepeat(state,transcript,from){
+    const kept=[];   // the last KEPT_TAIL characters, from the last sentences only (not the whole meeting on every redraw)
+    for(let r=state.records.length-1;r>=0&&kept.length<KEPT_TAIL;r--)kept.unshift(...[...state.records[r].source].filter(c=>!PUNCT.test(c)));
+    kept.splice(0,Math.max(0,kept.length-KEPT_TAIL));
+    const m=kept.length;
+    if(m<REPEAT_MIN)return from;
     // The searched characters without punctuation, each with the transcript index just after it.
-    const before=[];
-    for(let i=from;i>0&&before.length<REPEAT_MAX;){const c=transcript[i-1];i--;if(!PUNCT.test(c))before.unshift({c,after:i+1})}
-    const chars=[...before];
-    for(let i=from;i<until;){const c=String.fromCodePoint(transcript.codePointAt(i));i+=c.length;if(!PUNCT.test(c))chars.push({c,after:i})}
-    for(let n=Math.min(REPEAT_MAX,core.length);n>=Math.min(REPEAT_MIN,core.length);n--){
-      const tail=core.slice(-n);
-      for(let s=0;s+n<=chars.length;s++){   // the first occurrence that ends after the cut point
-        if(chars[s+n-1].after<=from)continue;
-        if(!tail.every((c,k)=>chars[s+k].c===c))continue;
-        let i=chars[s+n-1].after;while(i<transcript.length&&PUNCT.test(transcript[i]))i++;   // past punctuation and spaces
-        return i;
+    const chars=[];
+    for(let i=from;i>0&&chars.length<BEFORE;){
+      const low=transcript.charCodeAt(i-1),pair=low>=0xdc00&&low<=0xdfff&&i>=2;   // whole characters, also outside the BMP
+      const c=transcript.slice(pair?i-2:i-1,i);
+      if(!PUNCT.test(c))chars.unshift({c,after:i});
+      i-=c.length;
+    }
+    const cut=chars.length;   // chars[cut] is the first character after the cut point
+    for(let i=from;i<transcript.length&&chars.length<cut+AFTER;){const c=String.fromCodePoint(transcript.codePointAt(i));i+=c.length;if(!PUNCT.test(c))chars.push({c,after:i})}
+    let best=null;
+    for(let s=0;s<=cut;s++){
+      // row[k]: LCS of P (chars s..j) and kept[0..k); extended one character of P at a time.
+      let row=new Array(m+1).fill(0);
+      for(let j=s;j<chars.length;j++){
+        const next=new Array(m+1).fill(0);
+        for(let k=1;k<=m;k++)next[k]=chars[j].c===kept[k-1]?row[k-1]+1:Math.max(row[k],next[k-1]);
+        const lcs=next[m],length=j-s+1,grew=lcs>row[m];
+        row=next;
+        if(j<cut||length<REPEAT_MIN||!grew||lcs<REPEAT_MIN||lcs<REPEAT_SHARE*length||lcs<=row[m-2])continue;
+        if(!best||lcs>best.lcs||(lcs===best.lcs&&chars[j].after<best.after))best={lcs,after:chars[j].after};
       }
     }
-    return from;
+    if(!best)return from;
+    let i=best.after;while(i<transcript.length&&PUNCT.test(transcript[i]))i++;   // past punctuation and spaces
+    return i;
   }
   // Two texts one after the other: directly when either side of the seam is Chinese/Japanese (or full-width
   // punctuation), with a space otherwise, so English sentences do not run together (as subtitles.js joinSentences).
@@ -122,7 +136,7 @@
     const transcript=live.transcript||'';
     return {
       sources:state.records.map(s=>s.source),
-      liveSource:state.done?'':transcript.slice(skipRepeat(state,transcript,live.timeMarks,liveFrom(state,live.timeMarks))),
+      liveSource:state.done?'':transcript.slice(skipRepeat(state,transcript,liveFrom(state,live.timeMarks))),
       targets:state.records.map(s=>s.target),
       liveTargets:finals.map(s=>s.target),
       liveFinals:finals,

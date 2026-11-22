@@ -137,7 +137,6 @@ t('ignored: sentence without text',Q.apply(Q.create(),{sentences:[{source:1,targ
   t('live: overlap trimmed',shown('好，我們點進來。','點進來，好接著在教材的地方'),'好接著在教材的地方後來的字');
   t('live: shorter overlap found',shown('品項、單價、數量、小計、運費、總額。','運費總額三十趴的定金'),'三十趴的定金後來的字');
   t('live: no overlap, unchanged',shown('好，我們點進來。','接著在教材的地方'),'接著在教材的地方後來的字');
-  t('live: overlap beyond throughMs + 1500 ms is not searched',Q.view(Q.apply(Q.create(),{seq:1,throughMs:10000,final:false,sentences:[sentence('好，我們點進來。','',0,10000)]},[]),{transcript:'前面點進來',timeMarks:[{end:2,ms:9000},{end:5,ms:12000}],finals:[]}).liveSource,'點進來');
 }
 {
   // The repeat straddles the cut point: 「點」 is before it, 「進來」 after (the 2026-11-22 recording).
@@ -157,3 +156,27 @@ t('ignored: sentence without text',Q.apply(Q.create(),{sentences:[{source:1,targ
   t('live: "now" not found inside "know"',live('right now.','now we know'),'we know');
 }
 t('paragraphs: a sentence without times does not hide the pause',Q.paragraphs([{source:'第一句。',startMs:0,endMs:2000},{source:'甲。',startMs:0,endMs:0},{source:'第二句。',startMs:5000,endMs:7000}]),['第一句。甲。','第二句。']);
+
+// quality-live-dedupe: "Live text does not repeat kept text", the spec's example table. The live text after the cut
+// point arrives with a time mark long after throughMs (late live text), which no longer matters.
+{
+  const shownAfter=(kept,before,after)=>{
+    const state=Q.apply(Q.create(),{seq:1,throughMs:10000,final:false,sentences:kept.map((s,i)=>sentence(s,'',i*1000,i===kept.length-1?10000:(i+1)*1000))},[]);
+    const transcript=before+after;
+    return Q.view(state,{transcript,timeMarks:[{end:before.length,ms:9000},{end:transcript.length,ms:30000}],finals:[]}).liveSource;
+  };
+  const rows=[
+    ['reworded: 的',['並且輸出一段可以給客戶的繁體中文回覆草稿。'],'給客戶的繁體','中文回覆的草稿，如果沒有確認交期呢','如果沒有確認交期呢'],
+    ['two sentences, a filler in between',['客戶詢價的部分，第一輪的提示詞，我們複製下來。','去貼上。'],'示詞我們複製','下來哦去貼上哦再來哦這個路徑','哦再來哦這個路徑'],
+    ['late live text',['我們可以在這個地方按右鍵來複製連結，去做這個取代的動作。','好，點擊傳送。'],'去做這個取代','的動作，好點擊傳送，好我們可以看一下呢','好我們可以看一下呢'],
+    ['plain repeat',['好，我們點進來。'],'前面的字','點進來，好接著在教材的地方','好接著在教材的地方'],
+    ['repeat across the cut point',['好，我們點進來。'],'好我們點','進來，好接著在教材的地方','好接著在教材的地方'],
+    ['shorter repeat',['品項、單價、數量、小計、運費、總額。'],'前面的字','運費總額三十趴的定金','三十趴的定金'],
+    ['no repeat',['好，我們點進來。'],'前面的字','接著在教材的地方','接著在教材的地方'],
+    ['the repeat ends before the cut point',['好，我們點進來。'],'我們點進來','接著說','接著說'],
+    ['the first one',['這是我們的'],'前面','我們的系統跟我們的客戶','系統跟我們的客戶'],
+    ['English',['right now.'],'前面','now we know','we know'],
+    ['only 我們 in common',['這是我們的系統。'],'前面','我們今天要談預算','我們今天要談預算'],
+  ];
+  for(const [name,kept,before,after,want] of rows)t('dedupe: '+name,shownAfter(kept,before,after),want);
+}
