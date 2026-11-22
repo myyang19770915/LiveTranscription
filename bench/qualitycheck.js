@@ -116,3 +116,44 @@ const final=(source,target,startMs,endMs)=>({source,target,detected:'',startMs,e
 }
 t('ignored: not an object',Q.apply(Q.create(),null,[]).records.length,0);
 t('ignored: sentence without text',Q.apply(Q.create(),{sentences:[{source:1,target:'x'}]},[]).records.length,0);
+
+// "Kept sentences flow into paragraphs" (quality-transcript-flow): pauses of 3000 ms or 200 characters start a new one.
+{
+  const r=(source,startMs,endMs)=>({source,startMs,endMs});
+  t('paragraphs: close sentences share one',Q.paragraphs([r('好，我們點進來。',0,2000),r('接著在教材的地方點進來。',2500,6000),r('我們把檔案放進來。',6500,9000)]),['好，我們點進來。接著在教材的地方點進來。我們把檔案放進來。']);
+  t('paragraphs: a 3000 ms pause',Q.paragraphs([r('第一句。',0,2000),r('第二句。',5000,7000)]),['第一句。','第二句。']);
+  const long='長'.repeat(199)+'。';
+  t('paragraphs: 200 characters',Q.paragraphs([r(long,0,30000),r('下一句。',30100,31000)]),[long,'下一句。']);
+  t('paragraphs: no times join',Q.paragraphs([r('甲。',0,0),r('乙。',0,0)]),['甲。乙。']);
+  t('paragraphs: none',Q.paragraphs([]),[]);
+}
+
+// "Live text does not repeat kept text" (quality-transcript-flow): the live chunk crossing the last sentence's end.
+{
+  const shown=(kept,live)=>{
+    const state=Q.apply(Q.create(),{seq:1,throughMs:10000,final:false,sentences:[sentence(kept,'',0,10000)]},[]);
+    return Q.view(state,{transcript:'前面的字'+live+'後來的字',timeMarks:[{end:4,ms:9000},{end:4+live.length,ms:11000},{end:8+live.length,ms:20000}],finals:[]}).liveSource;
+  };
+  t('live: overlap trimmed',shown('好，我們點進來。','點進來，好接著在教材的地方'),'好接著在教材的地方後來的字');
+  t('live: shorter overlap found',shown('品項、單價、數量、小計、運費、總額。','運費總額三十趴的定金'),'三十趴的定金後來的字');
+  t('live: no overlap, unchanged',shown('好，我們點進來。','接著在教材的地方'),'接著在教材的地方後來的字');
+  t('live: overlap beyond throughMs + 1500 ms is not searched',Q.view(Q.apply(Q.create(),{seq:1,throughMs:10000,final:false,sentences:[sentence('好，我們點進來。','',0,10000)]},[]),{transcript:'前面點進來',timeMarks:[{end:2,ms:9000},{end:5,ms:12000}],finals:[]}).liveSource,'點進來');
+}
+{
+  // The repeat straddles the cut point: 「點」 is before it, 「進來」 after (the 2026-11-22 recording).
+  const state=Q.apply(Q.create(),{seq:1,throughMs:10000,final:false,sentences:[sentence('好，我們點進來。','',0,10000)]},[]);
+  const transcript='好我們點進來，好接著在教材的地方';
+  t('live: repeat across the cut point trimmed',Q.view(state,{transcript,timeMarks:[{end:4,ms:8000},{end:transcript.length,ms:11000}],finals:[]}).liveSource,'好接著在教材的地方');
+  t('live: a match ending before the cut point does not count',Q.view(state,{transcript:'我們點進來接著說',timeMarks:[{end:5,ms:9000},{end:8,ms:11000}],finals:[]}).liveSource,'接著說');
+}
+{
+  // Review of quality-transcript-flow: English sentences get a space; the first repeat across the cut point counts.
+  const r=(source,startMs,endMs)=>({source,startMs,endMs});
+  t('paragraphs: English sentences with a space',Q.paragraphs([r("Okay, let's start.",0,2000),r('Next item is the budget.',2500,5000)]),["Okay, let's start. Next item is the budget."]);
+  t('join: English live text after a sentence',Q.join('the budget.','and then we'),'the budget. and then we');
+  t('join: Chinese without a space',Q.join('好，我們點進來。','好接著'),'好，我們點進來。好接著');
+  const live=(kept,text)=>Q.view(Q.apply(Q.create(),{seq:1,throughMs:10000,final:false,sentences:[sentence(kept,'',0,10000)]},[]),{transcript:'前面'+text,timeMarks:[{end:2,ms:9000},{end:2+text.length,ms:11000}],finals:[]}).liveSource;
+  t('live: the first repeat, not a later one',live('這是我們的','我們的系統跟我們的客戶'),'系統跟我們的客戶');
+  t('live: "now" not found inside "know"',live('right now.','now we know'),'we know');
+}
+t('paragraphs: a sentence without times does not hide the pause',Q.paragraphs([{source:'第一句。',startMs:0,endMs:2000},{source:'甲。',startMs:0,endMs:0},{source:'第二句。',startMs:5000,endMs:7000}]),['第一句。甲。','第二句。']);

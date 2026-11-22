@@ -1,0 +1,2 @@
+ok   plain: quality off false
+ok   plain: transcript pane is the live text, no quality spans ["這裡我們回到第二層目錄，好我們點進來。",0]

@@ -1,0 +1,57 @@
+ok   translation pane: two sentences then the live one ending at 14000 ["One.","Two.","live two"]
+ok   transcript pane: kept sources then the live text after 10000 [["第一句。","第二句。"],"第二段即時文字"]
+ok   kept through the last sentence, not the chunk end 10000
+ok   live finals up to throughMs are kept ["A","B"]
+ok   the later one is still live ["C"]
+ok   the next chunk is kept after them ["A","B","C!"]
+ok   a kept live segment is not promoted twice 3
+ok   five segments in order [[1,"一"],[2,"二"],[3,"三"],[4,"四"],[5,"五"]]
+ok   the first two did not move [{"seq":1,"source":"一","target":"1","detected":"zh","startMs":0,"endMs":4000},{"seq":2,"source":"二","target":"2","detected":"zh","startMs":4000,"endMs":8000}]
+ok   an empty event keeps the live text where it was 5
+ok   two failures: still available false
+ok   three failures: unavailable true
+ok   a success clears it false
+ok   nothing live after the final event ["",[]]
+ok   the export is the kept sentences ["尾巴還在。→The tail is still here."]
+ok   a failed final event keeps every remaining live segment ["tail"]
+ok   kept at the failure ["A"]
+ok   finalized later in the failed range: kept, the one ending just past it too ["A","B","C"]
+ok   kept once 3
+ok   and no longer shown as live []
+ok   a later segment is still live ["D"]
+ok   everything after a failed final event is kept ["A","B","C","D","E"]
+ok   a final success after failures keeps the late live segment ["F"]
+ok   one sentence changed 1
+ok   segment 2 has the new text, same span and language {"seq":2,"source":"跟先生的感情變得不穩定。","target":"became unstable.","detected":"zh","startMs":3000,"endMs":6000,"id":2}
+ok   segments 1 and 3 are unchanged [{"seq":1,"source":"一。","target":"One.","detected":"zh","startMs":0,"endMs":3000,"id":1},{"seq":3,"source":"三。","target":"Three.","detected":"zh","startMs":6000,"endMs":9000,"id":3}]
+ok   both panes show it ["跟先生的感情變得不穩定。","became unstable."]
+ok   unknown id: nothing changes [0,"[{\"seq\":1,\"source\":\"一。\",\"target\":\"One.\",\"detected\":\"zh\",\"startMs\":0,\"endMs\":3000,\"id\":1},{\"seq\":2,\"source\":\"跟先生的感情變得不穩定。\",\"target\":\"became unstable.\",\"detected\":\"zh\",\"startMs\":3000,\"endMs\":6000,\"id\":2},{\"seq\":3,\"source\":\"三。\",\"target\":\"Three.\",\"detected\":\"zh\",\"startMs\":6000,\"endMs\":9000,\"id\":3}]"]
+ok   malformed: nothing changes [0,0,"[{\"seq\":1,\"source\":\"一。\",\"target\":\"One.\",\"detected\":\"zh\",\"startMs\":0,\"endMs\":3000,\"id\":1},{\"seq\":2,\"source\":\"跟先生的感情變得不穩定。\",\"target\":\"became unstable.\",\"detected\":\"zh\",\"startMs\":3000,\"endMs\":6000,\"id\":2},{\"seq\":3,\"source\":\"三。\",\"target\":\"Three.\",\"detected\":\"zh\",\"startMs\":6000,\"endMs\":9000,\"id\":3}]"]
+ok   a kept live segment is not revised [0,"A"]
+ok   five kept segments are numbered 1 to 5 [1,2,3,4,5]
+ok   one sentence changed 1
+ok   four segments are left, the merged one ends where the second part ended [[1,"一。",3000],[2,"所以我們決定在下個月開始。",9000],[4,"四。",12000],[5,"五。",15000]]
+ok   the merge is remembered for the save [{"into":2,"from":3}]
+ok   both panes show four [4,"So we decided to start next month."]
+ok   an unknown merged id, the sentence itself and a non-number are ignored [1,4,1,12000]
+ok   the next kept segment continues the numbers 6
+ok   three in one [1,[1,2,4],[{"into":2,"from":3},{"into":4,"from":5},{"into":4,"from":6}]]
+ok   ignored: not an object 0
+ok   ignored: sentence without text 0
+ok   paragraphs: close sentences share one ["好，我們點進來。接著在教材的地方點進來。我們把檔案放進來。"]
+ok   paragraphs: a 3000 ms pause ["第一句。","第二句。"]
+ok   paragraphs: 200 characters ["長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長長。","下一句。"]
+ok   paragraphs: no times join ["甲。乙。"]
+ok   paragraphs: none []
+ok   live: overlap trimmed "好接著在教材的地方後來的字"
+ok   live: shorter overlap found "三十趴的定金後來的字"
+ok   live: no overlap, unchanged "接著在教材的地方後來的字"
+ok   live: overlap beyond throughMs + 1500 ms is not searched "點進來"
+ok   live: repeat across the cut point trimmed "好接著在教材的地方"
+ok   live: a match ending before the cut point does not count "接著說"
+ok   paragraphs: English sentences with a space ["Okay, let's start. Next item is the budget."]
+ok   join: English live text after a sentence "the budget. and then we"
+ok   join: Chinese without a space "好，我們點進來。好接著"
+ok   live: the first repeat, not a later one "系統跟我們的客戶"
+ok   live: "now" not found inside "know" "we know"
+ok   paragraphs: a sentence without times does not hide the pause ["第一句。甲。","第二句。"]

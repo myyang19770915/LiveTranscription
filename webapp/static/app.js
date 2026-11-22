@@ -159,9 +159,9 @@ function toEnd(el){const top=el.scrollHeight-el.clientHeight;if(lessMotion?.matc
 for(const id of ['transcript','translation'])for(const type of ['wheel','touchmove','mousedown'])$(id).addEventListener(type,event=>{
   if(type==='wheel'?event.deltaY<0:type==='mousedown'?event.offsetX>=event.currentTarget.clientWidth:true)paneFollows.set(event.currentTarget,false)},{passive:true});
 function render(id, value) { if(id==='transcript'){const parts=subtitleParts();window.Subtitles?.update(parts);window.Overlay?.update(parts)} const el=$(id),follow=follows(el);
-  if(id==='transcript'&&qualityOn){   // kept sentences one per paragraph, then the live text not yet replaced
-    const shown=qualityShown(),kept=shown.sources.join('\n\n'),make=(name,text)=>Object.assign(document.createElement('span'),{className:name,textContent:text});
-    el.replaceChildren(...(kept?[make('quality-kept',kept)]:[]),...(shown.liveSource?[make('quality-live',(kept?'\n\n':'')+shown.liveSource)]:[]));
+  if(id==='transcript'&&qualityOn){   // kept sentences in paragraphs (split at pauses), the live text right after them (quality-transcript-flow)
+    const shown=qualityShown(),kept=QualityView.paragraphs(quality.records).join('\n\n'),make=(name,text)=>Object.assign(document.createElement('span'),{className:name,textContent:text});
+    el.replaceChildren(...(kept?[make('quality-kept',kept)]:[]),...(shown.liveSource?[make('quality-live',QualityView.join(kept,shown.liveSource).slice(kept.trimEnd().length))]:[]));
     value=kept+shown.liveSource;
   }else el.textContent=value;
   if(id==='transcript'&&tentative){const span=document.createElement('span');span.className='tentative';span.textContent=tentative;el.append(span)}

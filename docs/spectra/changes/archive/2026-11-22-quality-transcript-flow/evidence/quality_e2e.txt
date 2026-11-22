@@ -1,0 +1,17 @@
+ok   not configured: the switch is hidden true
+ok   configured: the switch is shown, unchecked [false,false]
+ok   checked: 雲端精修 is disabled and the notice names 精準模式 [true,"精準模式音訊與文字會傳送到外部服務"]
+ok   the stream header asks for the quality pass and not for refinement ["translate",true,false]
+ok   two sentences are shown (one paragraph in the transcript: no pause between them) ["跟先生的感情變得穩定。第二句。","became stable.\n\nSecond."]
+ok   the revised sentence replaces the first in both panes ["跟先生的感情變得不穩定。第二句。","became unstable.\n\nSecond."]
+ok   the merged sentence is one segment in both panes ["跟先生的感情變得不穩定，第二句。","became unstable, second."]
+ok   following: the pane scrolled to its new end true
+ok   reading earlier text: the scroll position stays 153
+ok   back at the end: the pane follows again true
+ok   two failed chunks: the status is unchanged false
+ok   three failed chunks in a row true
+ok   stopping waited about 70 s for the connection to close true
+ok   flow: a meeting without translation, with the quality pass ["meeting","none",true]
+ok   flow: three close sentences in one paragraph, live text without the repeated 點進來 ["這裡我們回到第二層目錄。我們回到上一層這地方來去新增目錄。好，我們點進來。","好接著在教材的地方"]
+ok   flow: after a 4 s pause the next sentence starts a paragraph "這裡我們回到第二層目錄。我們回到上一層這地方來去新增目錄。好，我們點進來。\n\n接著在教材的地方點進來。"
+ok   flow: the meeting was created through the stub, not the database "POST /api/meetings"
