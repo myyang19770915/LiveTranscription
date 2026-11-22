@@ -4,9 +4,9 @@
 
 語橋 Live 是本機部署的即時會議轉錄與跨語翻譯 Web App。使用者可從麥克風、Chrome 分頁／系統聲音或兩者混合收音；左欄顯示逐字稿，右欄先顯示暫譯，語句完成後再以完整句修訂。適合單人參與線上會議、觀看影片及線上課程時使用。
 
-產品 UI 不顯示底層模型名稱；本 README 保留模型、框架與部署細節，供維護、驗證與授權檢查。語音辨識使用 Confucius4-R2T2，文字翻譯使用本機 Gemma 4 E2B Q4_0。
+產品 UI 不顯示底層模型名稱；本 README 保留模型、框架與部署細節，供維護、驗證與授權檢查。即時語音辨識使用本機的 Confucius4-R2T2；文字模型（翻譯、精準模式的整理、雲端精修、會議紀要）目前使用雲端的 OpenAI 相容模型 `deepseek-v4-flash`（經 litellm 閘道）。算力足夠時，文字模型可以換成地端的大模型，見[文字模型：雲端或地端](#文字模型雲端或地端)。
 
-> 第一次啟動需要下載 Docker image、ASR/VAD 模型與 Gemma 權重；下載後模型快取會保留在 Docker named volumes。辨識與翻譯請求在本機 Docker 網路中處理，不會送到第三方推論 API。首次下載仍會連到 Hugging Face 等模型來源。
+> 第一次啟動需要下載 Docker image 與 ASR/VAD 模型（開精準模式時另有 Qwen3-ASR 權重，用本機翻譯模型時另有其權重）；下載後模型快取會保留在 Docker named volumes。即時語音辨識在本機 Docker 網路中處理；**目前的翻譯文字會送到設定的雲端文字模型**（開會頁顯示「雲端翻譯」），精準模式、雲端精修與 Azure MAI 也會把文字或音訊送到外部服務。改用地端文字模型時，文字就不離開你的網路。首次下載仍會連到 Hugging Face 等模型來源。
 
 ## 功能一覽
 
@@ -19,7 +19,7 @@
 - 桌面雙欄；手機採逐字稿／翻譯分頁、固定會議操作列和設定視窗，支援直向與橫向；可提供姓名、品牌或專有名詞作為會議情境。
 - 右上角可切換明亮／暗色主題，選擇會保存在目前瀏覽器。
 - 換頁快：同一個分頁看過任一頁後，之後每頁一打開就有頂端列（帳號暫存在分頁的 sessionStorage，只用於畫面，權限仍由伺服器檢查）；Chrome、Edge 在滑鼠停在頂端列連結上時會在背景預先準備那一頁，顯示時再重新抓資料。
-- 本機 Docker 部署，不依賴雲端 ASR 或翻譯 API。
+- 本機 Docker 部署：即時語音辨識在本機；翻譯用的文字模型可接雲端（目前）或地端模型，透過 OpenAI 相容 API 切換。
 - 會後：逐字稿校對（含「修正名詞」一次更正整場的名詞）、AI 會議紀要與待辦追蹤、全文搜尋，以及用一句話問會議內容的「問答」（每句附出處）；開下一場時可「帶入上次的名詞」。
 - 「我的紀錄」：即時翻譯與即時口譯的個人紀錄，可一鍵「轉成會議紀錄」放進團隊。
 - 紀要定稿後以 Email 寄給團隊（公司 SMTP），可設定寄到成員個人信箱或團隊群組信箱、定稿自動寄送或手動再寄。
@@ -32,7 +32,7 @@
 | Web/API | Python 3.12、FastAPI、Uvicorn、WebSocket | 靜態頁面、音訊 WebSocket 代理、翻譯 API、OpenCC 繁體轉換 |
 | ASR | `qwenllm/qwen3-asr` 容器 + Confucius4-R2T2 | 以 16 kHz、單聲道 PCM 音訊串流辨識 |
 | VAD | FireRedVAD Stream-VAD | ASR 服務端語音活動處理所需模型 |
-| 翻譯 | Google Gemma 4 E2B-it QAT Q4_0 GGUF + `llama.cpp` CUDA server | 本機、多語文字翻譯；透過 OpenAI 相容 Chat Completions API 呼叫 |
+| 文字模型 | 目前：雲端 `deepseek-v4-flash`（litellm 閘道，OpenAI 相容）；選用：本機 Google Gemma 4 E2B-it QAT Q4_0 GGUF + `llama.cpp` CUDA server，或其他地端大模型 | 翻譯、精準模式整理、雲端精修與會議紀要；都透過 OpenAI 相容 Chat Completions API 呼叫 |
 | 執行環境 | Docker Compose、NVIDIA Container Toolkit | 管理容器、GPU、服務依賴與模型快取 |
 
 ### 部署拓樸
@@ -43,7 +43,7 @@ flowchart LR
   subgraph docker[Docker Compose／本機 GPU 主機]
     app[app<br/>FastAPI + Uvicorn<br/>靜態頁面、WebSocket、翻譯 API]
     asr[asr<br/>Confucius4-R2T2 + VAD<br/>GPU 串流辨識]
-    translate[translate<br/>llama.cpp + Gemma 4<br/>GPU 文字翻譯]
+    translate[translate（選用）<br/>llama.cpp + Gemma 4<br/>本機文字翻譯]
     asrCache[(model-cache<br/>ASR 與 VAD 權重)]
     translateCache[(translation-model-cache<br/>GGUF 權重)]
     db[(db<br/>PostgreSQL 17 + pgvector)]
@@ -120,7 +120,7 @@ flowchart TD
   gateway -->|OpenCC s2tw<br/>中文轉台灣繁體| transcript[瀏覽器左欄<br/>即時逐字稿]
   transcript --> scheduler[前端分段排程<br/>短語暫譯／句尾或停頓修訂]
   scheduler -->|POST /api/translate/stream| api[FastAPI 翻譯代理]
-  api -->|Chat Completions<br/>stream=true| llm[llama.cpp<br/>Gemma 4 E2B Q4_0]
+  api -->|Chat Completions<br/>stream=true| llm[文字模型<br/>雲端或地端（OpenAI 相容）]
   llm -->|token 串流| api
   api -->|SSE 累積譯文<br/>中文轉繁體| scheduler
   scheduler -->|每輪完成才更新<br/>保留上一版譯文| translation[瀏覽器右欄<br/>暫譯與定稿]
@@ -137,7 +137,7 @@ flowchart TD
 
 | 路徑 | 職責 |
 | --- | --- |
-| [`compose.yaml`](compose.yaml) | 三個服務、GPU、健康檢查、port 與模型快取 volume |
+| [`compose.yaml`](compose.yaml) | 所有服務（含以 profile 啟用的）、GPU、健康檢查、port 與模型快取 volume |
 | [`docker/asr/entrypoint.sh`](docker/asr/entrypoint.sh) | 準備 VAD 權重並啟動串流 ASR |
 | [`ws_server.py`](ws_server.py)、[`r2t2/`](r2t2)、[`pyproject.toml`](pyproject.toml) | ASR WebSocket 服務、辨識模型介面與容器內安裝設定；沿用並調整自上游專案 |
 | [`webapp/server.py`](webapp/server.py) | FastAPI 路由、ASR WebSocket 代理、翻譯 API 與繁體轉換 |
@@ -162,7 +162,15 @@ ASR 與翻譯模型權重均未上傳此 repo，部署時由各自容器下載�
 
 來源選單的「中英自動偵測」涵蓋此產品主要優化的中英文使用情境；其他語言建議明確指定來源。翻譯模型選單採相同語言清單，但 Gemma 4 的「35+ 種開箱支援語言」不等於所有選單語言和方向都經本專案品質驗證。低資源語言、混合語句、專有名詞與很短的片段尤其要用實際會議內容確認。
 
-### Gemma 4 E2B-it QAT Q4_0：文字翻譯
+### 文字模型：雲端或地端
+
+翻譯、精準模式的整理與回顧修訂、雲端精修、會議紀要都由一個 OpenAI 相容的文字模型負責，用 `.env` 的 `TRANSLATE_URL`、`TRANSLATE_MODEL`、`TRANSLATE_KEY`（以及 `TRANSLATE_QUALITY_*`、`TRANSLATE_REFINE_*`、`MINUTES_*`）指定，換模型不必改程式。
+
+- **目前的設定**：雲端 `deepseek-v4-flash`，經本機的 litellm 閘道（`TRANSLATE_URL=http://host.docker.internal:4001`）。不占這台主機的顯示卡，顯示卡留給即時辨識與精準模式的 Qwen3-ASR；代價是每場會議的文字會送到該雲端服務。
+- **算力足夠時改用地端大模型**：在另一台（或同一台）有足夠顯示卡的機器上，以 vLLM、llama.cpp 等工具提供 OpenAI 相容 API 的大模型，再把 `TRANSLATE_URL`、`TRANSLATE_MODEL` 指向它（其他 `*_URL`／`*_MODEL` 一併改），文字就不離開你的網路。翻譯與精準模式的品質主要取決於文字模型的能力（評測見[品質優化紀錄](#品質優化紀錄2026-11)），請選夠強的模型並先用 `bench/` 比較。注意：頁面是否顯示「雲端翻譯」只看 `TRANSLATE_KEY` 有沒有值；地端服務若不需要金鑰就留空，否則這個標示會顯示雲端。
+- **最小的本機方案**：`--profile local-translate` 啟動下面的 Gemma 4 E2B（約 3.35 GB 權重），只負責翻譯；它和 Qwen3-ASR 在 32 GB 顯示卡上只能擇一（見[翻譯模型放哪裡](#翻譯模型放哪裡)）。
+
+### 選用：本機 Gemma 4 E2B-it QAT Q4_0
 
 採用 Google 發佈的 [Gemma 4 E2B-it 量化 GGUF repo](https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf) 中 `gemma-4-E2B_q4_0-it.gguf`，是一個 instruction-tuned、以 QAT Q4_0 量化的文字生成模型。GGUF 權重大約 **3.35 GB**；整個 repo 約 **4.34 GB**，另含約 987 MB 的多模態 projector。本專案只做文字翻譯，透過 `--no-mmproj` 不載入 projector。實際 GPU 使用量會再包含 CUDA runtime、KV cache、上下文和 ASR，並非只等於權重檔大小。
 
@@ -242,12 +250,15 @@ Copy-Item .env.example .env
 先將 `.env` 中的 `ASR_SECRET_KEY` 改成自行產生的長隨機字串，再啟動服務：
 
 ```powershell
-docker compose --profile local-translate up --build -d   # 翻譯模型放本機；改用外部服務見「翻譯模型放哪裡」
+# 目前的組合：翻譯用 .env 的 TRANSLATE_* 指到的雲端（或地端）文字模型，精準模式的中文辨識用本機 Qwen3-ASR
+docker compose --profile qwen-asr up --build -d
+# 或：翻譯模型放本機（Gemma 4 E2B，不設 TRANSLATE_KEY；與 qwen-asr 擇一）
+# docker compose --profile local-translate up --build -d
 docker compose ps
-docker compose logs -f asr translate app
+docker compose logs -f asr app
 ```
 
-第一次需要下載程式 image、ASR 權重、FireRedVAD Stream-VAD 與 Gemma GGUF；等待 `asr` 與 `translate` healthcheck 通過後，開啟 [http://localhost:18082](http://localhost:18082)。若 `APP_PORT` 在 `.env` 改過，請改用該連接埠。停止看 log 使用 `Ctrl+C`，服務本身仍會在背景執行。
+第一次需要下載程式 image、ASR 權重、FireRedVAD Stream-VAD，以及所選 profile 的權重（Qwen3-ASR 或 Gemma GGUF）；等待 `asr`（與 `qwen-asr` 或 `translate`）healthcheck 通過後，開啟 [http://localhost:18082](http://localhost:18082)。若 `APP_PORT` 在 `.env` 改過，請改用該連接埠。停止看 log 使用 `Ctrl+C`，服務本身仍會在背景執行。
 
 ## 登入與團隊
 
@@ -540,7 +551,7 @@ curl http://<語橋主機 IP>:18000/v1/audio/transcriptions \
 | `ASR_LOG_TEXT` | `0` | ASR 每次串流的 log（`logs/requests/`）預設只記字數、耗時與狀態，**不記辨識文字**；除錯時設 `1` 暫時記錄每段新增文字。即時翻譯的串流不論設定都不記文字 |
 | `ASR_LOG_RETENTION_DAYS` | `14` | `logs/requests/` 的 log 保留天數；ASR 啟動時與之後每 24 小時刪除過期檔案，`0` 表示不刪除 |
 | `ASR_RECV_QUEUE_MAX` | `500` | ASR 每條連線最多暫存幾段尚未辨識的音訊（約 80 秒）；滿了就暫停讀取，讓送太快的用戶端慢下來，不丟資料 |
-| `GPU_MEMORY_UTILIZATION` | `0.40` | ASR vLLM 可配置 GPU 記憶體的比例；Gemma 另外使用 GPU |
+| `GPU_MEMORY_UTILIZATION` | `0.40` | ASR vLLM 可配置 GPU 記憶體的比例；本機翻譯模型或 Qwen3-ASR 另外使用 GPU |
 | `ASR_MAX_MODEL_LEN` | `16384` | ASR vLLM 模型最大長度設定 |
 | `CUDA_VISIBLE_DEVICES` | `0` | 容器可見的 GPU device index |
 | `TRANSLATE_MODEL_REPO` | Google QAT Q4_0 GGUF repo | llama.cpp 下載的模型 repo |
@@ -658,7 +669,7 @@ curl http://<語橋主機 IP>:18000/v1/audio/transcriptions \
 | `GET /api/meetings/{id}/progress`、`POST …/progress/{suggestionId}/accept`、`…/dismiss` | 這場會議的進度提示；套用（寫入狀態歷程）或略過 |
 | `PUT /api/meetings/{id}/files/{recording\|transcript}` | 儲存會議錄音或逐字稿到 `output/teams/<團隊>/<會議>/` |
 | `WS /ws/transcribe` | 瀏覽器至 app 的即時 PCM 音訊 WebSocket；首包需帶 `meeting_id`，非團隊成員以關閉碼 4404 拒絕 |
-| `POST /api/translate` | 請求 Gemma 文字翻譯；JSON 欄位為 `text`、`source`、`target` 和可選 `history` |
+| `POST /api/translate` | 請求文字翻譯（`TRANSLATE_*` 指定的模型）；JSON 欄位為 `text`、`source`、`target` 和可選 `history` |
 | `POST /api/translate/stream` | 串流翻譯；相同欄位加可選 `draft`，回傳 SSE `data: {"text":"...","done":false}`，完成時 `done=true` |
 | ASR `ws://asr:8272/asr_stream_api_v1` | 僅供 Compose 網路中的 app 使用 |
 | llama.cpp `http://translate:5000/v1/chat/completions` | 僅供 Compose 網路中的 app 使用 |
