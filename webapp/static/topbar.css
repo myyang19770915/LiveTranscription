@@ -27,7 +27,10 @@
   transform: none; transition: border-color .15s, background-color .15s, color .15s;
 }
 .account > a:hover, .account > button:hover, .account .account-avatar:hover { border-color: var(--field-border); transform: none; }
-.account > a.current { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+/* Page links are plain text (ui-night-celadon): no border, no fill; the current page sits on the --field surface. */
+.account > a { border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); }
+.account > a:hover { color: var(--text); background: var(--field); }
+.account > a.current, .account > a[aria-current="page"] { background: var(--field); color: var(--text); font-weight: 500; }
 
 /* The theme button: one round icon button on every page, the sign-in page included. */
 .topbar #themeToggle, .auth-theme {
@@ -43,7 +46,7 @@
 .account-me { position: relative; display: inline-flex; }
 .account .account-avatar { width: 36px; padding: 0; justify-content: center; overflow: hidden; border-radius: 50%; }
 .account-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.account-initial { color: var(--accent); font-weight: 700; }
+.account-initial { color: var(--text); font-weight: 600; }
 .account-menu { position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; min-width: 150px; display: grid; gap: 2px; padding: 6px;
   border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel); box-shadow: 0 12px 32px rgb(0 0 0 / .18); }
 .account-menu[hidden] { display: none; }

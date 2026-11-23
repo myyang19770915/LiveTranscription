@@ -44,7 +44,7 @@
 .board-column { display: flex; flex-direction: column; min-height: 120px; padding: 8px; border: 2px solid transparent; border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--text) 5%, transparent); transition: border-color .12s ease, background .12s ease; }
 .board-column.drop-target { border-color: var(--accent); background: var(--accent-soft); }
-.column-title { display: flex; align-items: center; gap: 8px; margin: 4px 6px 10px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .06em; }
+.column-title { display: flex; align-items: center; gap: 8px; margin: 4px 6px 10px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; }
 .column-doing .column-title span:first-child { color: var(--accent); }
 .column-count { padding: 1px 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--text) 9%, transparent); color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: 0; }
 .column-body { display: grid; gap: 8px; }
@@ -65,7 +65,7 @@
 .issue.status-cancelled .issue-summary { text-decoration: line-through; }
 .issue-foot { display: flex; align-items: center; gap: 8px; min-height: 24px; }
 .issue-gap { flex: 1; }
-.issue-key { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600; }
+.issue-key { color: var(--muted); font-family: var(--font-mono); font-size: 12px; font-weight: 600; }
 .due-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 4px; background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--muted); font-size: 12px; font-weight: 600; }
 .due-chip.soon { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }

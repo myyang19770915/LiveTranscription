@@ -7,25 +7,25 @@ html, body { min-height: 100%; }
 body { margin: 0; color: var(--text); background: var(--page); }
 
 :root {
-  --intro-bg: radial-gradient(ellipse 55% 50% at 50% 62%, #173556 0%, transparent 70%), linear-gradient(160deg, #122335 0%, #0d141c 70%);
-  --card: #18232f;
-  --card-border: #2a3a4c;
+  --intro-bg: var(--page);
+  --card: var(--panel);
+  --card-border: var(--border);
   --card-shadow: 0 10px 28px rgb(0 0 0 / .28);
-  --hub: #1b2836;
-  --orbit: #4cb8ff4d;
-  --orbit-fill: radial-gradient(closest-side, #4cb8ff38, #4cb8ff14 70%, transparent);
-  --input-border: #3d5064;
+  --hub: var(--field);
+  --orbit: color-mix(in srgb, var(--accent) 30%, transparent);
+  --orbit-fill: transparent;
+  --input-border: var(--field-border);
   --f1: #4cb8ff; --f2: #b39bff; --f3: #ff9a4d; --f4: #6fd39b; --f5: #5fd4d4; --f6: #ff7fae;
 }
 :root[data-theme="light"] {
-  --intro-bg: radial-gradient(ellipse 55% 50% at 50% 62%, #dce9fb 0%, transparent 70%), linear-gradient(160deg, #eaf2fc 0%, #f5f8fc 70%);
-  --card: #ffffff;
-  --card-border: #e3eaf3;
+  --intro-bg: var(--page);
+  --card: var(--panel);
+  --card-border: var(--border);
   --card-shadow: 0 10px 28px rgb(23 62 112 / .08);
-  --hub: #ffffff;
-  --orbit: #1479c740;
-  --orbit-fill: radial-gradient(closest-side, #1479c733, #1479c714 70%, transparent);
-  --input-border: #c3cdd8;
+  --hub: var(--panel);
+  --orbit: color-mix(in srgb, var(--accent) 30%, transparent);
+  --orbit-fill: transparent;
+  --input-border: var(--field-border);
   --f1: #1479c7; --f2: #7a4ee0; --f3: #d0661a; --f4: #2e9a5e; --f5: #1d9196; --f6: #cf3f7a;
 }
 
@@ -35,8 +35,8 @@ body { margin: 0; color: var(--text); background: var(--page); }
 .auth-intro { display: flex; flex-direction: column; min-width: 0; padding: 40px clamp(32px, 4.2vw, 80px) 32px; background: var(--intro-bg); }
 .auth-brand { display: inline-flex; align-items: center; gap: 12px; align-self: flex-start; color: var(--text); text-decoration: none; }
 .auth-brand img { display: block; width: 40px; height: 40px; }
-.auth-brand b { font-size: 28px; font-weight: 700; letter-spacing: -.01em; }
-.auth-title { margin: 48px 0 0; font-size: clamp(34px, 3.3vw, 58px); line-height: 1.18; font-weight: 800; letter-spacing: -.01em; }
+.auth-brand b { font-size: 28px; font-weight: 600; letter-spacing: -.01em; }
+.auth-title { margin: 48px 0 0; font-size: clamp(34px, 3.3vw, 58px); line-height: 1.18; font-weight: 600; letter-spacing: 0; }
 .auth-title em { font-style: normal; color: var(--accent); }
 .auth-lead { margin: 14px 0 0; color: var(--muted); font-size: clamp(17px, 1.3vw, 23px); }
 
@@ -69,7 +69,7 @@ body { margin: 0; color: var(--text); background: var(--page); }
 .auth-panel { position: relative; display: flex; flex-direction: column; justify-content: center; padding: 96px clamp(32px, 3vw, 58px) 72px; background: var(--panel); }
 @media (min-width: 761px) { :root:not([data-theme="light"]) .auth-panel { border-left: 1px solid var(--border); } }
 .auth-form { width: 100%; max-width: 520px; display: flex; flex-direction: column; }
-.auth-form h1 { margin: 0; font-size: clamp(28px, 2vw, 38px); font-weight: 800; letter-spacing: -.01em; }
+.auth-form h1 { margin: 0; font-size: clamp(28px, 2vw, 38px); font-weight: 600; letter-spacing: 0; }
 .auth-sub { margin: 12px 0 44px; color: var(--muted); font-size: 17px; }
 
 .auth-label { margin: 0 0 10px; color: var(--text); font-size: 16px; font-weight: 700; }
@@ -100,7 +100,7 @@ body { margin: 0; color: var(--text); background: var(--page); }
 .auth-submit { height: 56px; margin-top: 4px; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
   border: 0; border-radius: var(--radius-control); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 18px; font-weight: 700; letter-spacing: .3em; text-indent: .3em;
   cursor: pointer; transition: box-shadow .15s ease, opacity .15s ease, filter .15s ease; }
-.auth-submit:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 10px 26px var(--accent-soft); }
+.auth-submit:hover:not(:disabled) { filter: brightness(1.06); box-shadow: none; }
 .auth-submit:disabled { cursor: wait; opacity: .8; }
 .auth-submit.loading { letter-spacing: .05em; text-indent: 0; }
 .auth-spinner { display: none; }   /* the shared .spinner (tokens.css), shown while signing in */
@@ -127,19 +127,18 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
    paused in the page script). */
 .auth-intro { position: relative; overflow: hidden; }
 .auth-intro > :not(.auth-glow) { position: relative; z-index: 1; }
-.auth-glow { position: absolute; z-index: 0; width: 44vw; aspect-ratio: 1; border-radius: 50%; filter: blur(70px); pointer-events: none; }
+.auth-glow { display: none; position: absolute; z-index: 0; width: 44vw; aspect-ratio: 1; border-radius: 50%; filter: blur(70px); pointer-events: none; }
 .glow-a { left: -12%; top: 28%; background: color-mix(in srgb, var(--accent) 20%, transparent); animation: glow-drift-a 18s ease-in-out infinite alternate; }
 .glow-b { right: -14%; bottom: -10%; background: color-mix(in srgb, var(--f2) 14%, transparent); animation: glow-drift-b 22s ease-in-out infinite alternate; }
 @keyframes glow-drift-a { to { transform: translate(28%, -14%) scale(1.15); } }
 @keyframes glow-drift-b { to { transform: translate(-24%, -18%) scale(.9); } }
 
-.auth-title em { background: linear-gradient(90deg, var(--accent) 0%, var(--f2) 35%, var(--accent) 70%); background-size: 200% 100%;
-  -webkit-background-clip: text; background-clip: text; color: transparent; animation: title-shimmer 6s linear infinite; }
+.auth-title em { color: var(--accent); }   /* plain accent: no gradient text (ui-night-celadon) */
 @keyframes title-shimmer { to { background-position: -200% 0; } }
 
 .auth-brand, .auth-title, .auth-lead, .auth-map { animation: auth-rise .7s cubic-bezier(.2, .7, .2, 1) both; }
 .auth-title { animation-delay: .08s; } .auth-lead { animation-delay: .16s; } .auth-map { animation-delay: .26s; }
-.auth-title em { animation: auth-rise .7s cubic-bezier(.2, .7, .2, 1) .08s both, title-shimmer 6s linear .8s infinite; }
+.auth-title em { animation: auth-rise .7s cubic-bezier(.2, .7, .2, 1) .08s both; }
 @keyframes auth-rise { from { opacity: 0; translate: 0 16px; } }
 
 .orbit-outer { stroke-dasharray: 5 9; animation: orbit-turn 50s linear infinite; }
@@ -202,3 +201,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
   * { animation: none !important; transition: none !important; }
   .orbit-packets, .hub-ripple { display: none; }
 }
+
+/* ui-night-celadon: the hub sits on its surface without a glow. */
+.auth-hub, :root[data-theme="light"] .auth-hub { box-shadow: none; animation: none; }

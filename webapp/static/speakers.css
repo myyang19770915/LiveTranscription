@@ -11,7 +11,7 @@
 }
 .speakers { display: grid; gap: 12px; padding: 16px 20px; margin-bottom: 16px; }
 .speakers-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-.speakers-head b { font-size: 13px; font-weight: 800; letter-spacing: .12em; }
+.speakers-head b { font-size: 13px; font-weight: 600; letter-spacing: 0; }
 .speakers-head .spacer { flex: 1; }
 .speakers-meta { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
 .speakers-status { margin: -4px 0 0; color: var(--muted); font-size: 14px; }

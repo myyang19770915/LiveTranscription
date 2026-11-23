@@ -162,77 +162,6 @@ tests:
 -->
 
 ---
-### Requirement: Pages keep their appearance after the token change
-
-Moving page styles onto the tokens SHALL NOT visibly change any page beyond corner rounding of at most 2px and the light-theme card shadow. Text, colours, control sizes and layout SHALL stay the same.
-
-#### Scenario: Screenshot comparison
-
-- **WHEN** the meeting page, meeting list, review page, actions board, search, Q&A, metrics, admin and login pages are captured at 1280px in both themes and at 500px in the dark theme before and after the change
-- **THEN** every pair has the same layout, with element boxes moved by no more than 2px
-
-<!-- @trace
-source: ui-visual-polish
-updated: 2026-11-15
-code:
-  - webapp/static/accounts.css
-  - docs/ui-review-shots/mobile-transcript-review.jpeg
-  - webapp/static/overlay.css
-  - webapp/static/subtitles.css
-  - chang01.png
-  - webapp/static/minutes.css
-  - webapp/static/styles.css
-  - webapp/static/minutes.html
-  - docs/ui-review-shots/minutes-empty.jpeg
-  - webapp/static/mobile.css
-  - docs/ui-review-shots/login-dark.jpeg
-  - bench/ui_polish_e2e.mjs
-  - webapp/static/ask.css
-  - webapp/static/metrics.css
-  - docs/ui-review-shots/qa-answer.jpeg
-  - webapp/static/refine.css
-  - webapp/static/speakers.css
-  - webapp/static/subtitles.js
-  - webapp/static/themes.css
-  - webapp/static/tokens.css
-  - webapp/static/review.css
-  - webapp/static/loading-state.js
-  - docs/ui-design-suggestions-codex.md
-  - bench/ui_review_e2e.mjs
-  - docs/ui-review-shots/404-page.jpeg
-  - docs/ui-review-shots/meeting-live.jpeg
-  - bench/README.md
-  - webapp/static/series.css
-  - docs/ui-review-shots/metrics.jpeg
-  - docs/ui-review-codex.md
-  - webapp/static/actions.css
-  - webapp/static/search.css
-  - webapp/static/search.js
-  - docs/ui-review-shots/search-results.jpeg
-  - webapp/static/evidence-panel.css
-  - webapp/static/not-found.html
-  - docs/ui-review-shots/meetings-list.jpeg
-  - webapp/static/index.html
-  - docs/ui-review-shots/team-management.jpeg
-  - webapp/static/login.html
-  - webapp/static/metrics.html
-  - webapp/static/admin.css
-  - docs/ui-review-shots/actions-board.jpeg
-  - webapp/static/admin.html
-  - webapp/static/ask.js
-  - webapp/static/login.css
-  - webapp/static/account.js
-  - webapp/static/meetings.html
-  - webapp/static/review.html
-  - webapp/static/ask.html
-  - webapp/static/actions.html
-  - webapp/static/app.js
-  - webapp/static/search.html
-tests:
-  - webapp/test_server.py
--->
-
----
 ### Requirement: One page width
 
 `tokens.css` SHALL define `--page-width` (1280px) and `--page-gutter` (24px, 16px at most 700px wide). The header SHALL keep its content within `--page-width` with at least `--page-gutter` on each side, and the content of every page SHALL use the same width and gutter, so the left edge of the content lines up with the brand on every page.
@@ -455,6 +384,243 @@ code:
   - bench/interpret_e2e.mjs
   - 螢幕擷取畫面 2026-11-17 225637.png
   - webapp/static/interpret.js
+tests:
+  - webapp/test_server.py
+-->
+
+---
+### Requirement: Night and celadon palettes
+
+`webapp/static/tokens.css` SHALL give the dark theme the night palette and the light theme the celadon palette with exactly the colour values in the example table, keeping the existing token names so every page takes the new colours. It SHALL also define `--live` and `--live-text` in both themes, and `--font-ui` and `--font-mono` with the same value in both themes. `--live` SHALL be used only to mark a session that is recording or a sound level (the live bar's wave and level, the live status dot, the audio test meter while testing, and the subtitle colour of current speech); text in the recording colour SHALL use `--live-text`. `body` SHALL use `--font-ui` on every page, and no stylesheet SHALL load a web font.
+
+#### Scenario: Token values in both themes
+
+- **WHEN** any signed-in page and the sign-in page are opened with `data-theme` set to `dark` and then to `light`
+- **THEN** `getComputedStyle(document.documentElement)` returns the values of the example table for each token, and `--font-ui` is the same in both themes
+
+##### Example: palette values
+
+| Token | dark (night) | light (celadon) |
+| ----- | ------------ | --------------- |
+| `--page` | `#111214` | `#f2f5f3` |
+| `--panel` | `#17181b` | `#ffffff` |
+| `--field` | `#1f2024` | `#ffffff` |
+| `--border` | `#2a2b30` | `#dce4df` |
+| `--text` | `#ecedef` | `#14201b` |
+| `--muted` | `#a3a5ac` | `#4b5a53` |
+| `--faint` | `#80838c` | `#66736d` |
+| `--accent` | `#ecedef` | `#2e7a68` |
+| `--accent-ink` | `#111214` | `#ffffff` |
+| `--live` | `#f2a93b` | `#d98a0b` |
+| `--live-text` | `#f2a93b` | `#8a5300` |
+| `--danger` | `#f2726b` | `#b3261e` |
+
+#### Scenario: No web font
+
+- **WHEN** the live page is loaded and its network requests are recorded
+- **THEN** no request goes to `fonts.googleapis.com` or `fonts.gstatic.com` and no `@font-face` rule is defined
+
+
+<!-- @trace
+source: ui-night-celadon
+updated: 2026-11-23
+code:
+  - webapp/static/subtitles.css
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - webapp/static/overlay.css
+  - gpt-realtime-translate_demoUI.png
+  - webapp/static/tokens.css
+  - webapp/static/refine.css
+  - 20261122_215017.mp4
+  - webapp/static/series.css
+  - webapp/static/setup-sentence.js
+  - webapp/static/metrics.html
+  - webapp/static/review.css
+  - lab/realtime-translate/costs.jsonl
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - bench/meeting_end_e2e.mjs
+  - webapp/static/actions.html
+  - webapp/static/admin.html
+  - webapp/static/admin.css
+  - 20261122_211227.mp4
+  - lab/realtime-translate/index.html
+  - webapp/static/review.html
+  - webapp/static/login.css
+  - webapp/revise_pass.py
+  - webapp/static/not-found.html
+  - webapp/static/topbar.css
+  - webapp/static/search.html
+  - bench/ui_consistency_e2e.mjs
+  - webapp/static/login.html
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - webapp/static/actions.css
+  - webapp/static/minutes.html
+  - webapp/static/themes.css
+  - webapp/static/styles.css
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - webapp/static/app.js
+  - bench/translate_e2e.mjs
+  - webapp/static/meetings.html
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/static/speakers.css
+  - webapp/static/ask.html
+  - webapp/static/subtitles.js
+  - bench/ui_night_celadon_e2e.mjs
+  - webapp/static/index.html
+  - 螢幕擷取畫面 2026-11-23 214336.png
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - lab/realtime-translate/server.py
+  - webapp/static/mobile.css
+  - bench/ui_polish_e2e.mjs
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - webapp/server.py
+  - webapp/static/interpret.html
+  - chang01.png
+tests:
+  - webapp/test_server.py
+-->
+
+---
+### Requirement: Interface without decorative chrome
+
+No page SHALL show a decorative background glow (the `.ambient` elements), an English all-capitals eyebrow label (such as `REAL-TIME MULTILINGUAL MEETING`, `LIVE TRANSCRIPT`, `MEETINGS`, `ACTIONS`, `TEAMS`, `MY RECORDS`, `METRICS`, `SEARCH` or `ASK`), or text styled with `text-transform: uppercase`. Page titles (`h1`, `h2`, `h3`) and the brand name SHALL have a computed `font-weight` of at most 600. The page title of each sub-page SHALL stay as it is.
+
+#### Scenario: Pages after the change
+
+- **WHEN** `/`, `/meetings`, `/interpret`, `/actions`, `/metrics`, `/search`, `/ask`, `/admin` and `/login` are opened at 1440px in both themes
+- **THEN** no element has the class `ambient` or `eyebrow`, no visible element has a computed `text-transform` of `uppercase`, no visible text node consists only of 3 or more capital Latin letters and spaces, and every `h1`, `h2`, `h3` and `.brand b` has a computed `font-weight` of at most 600
+
+
+<!-- @trace
+source: ui-night-celadon
+updated: 2026-11-23
+code:
+  - webapp/static/subtitles.css
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - webapp/static/overlay.css
+  - gpt-realtime-translate_demoUI.png
+  - webapp/static/tokens.css
+  - webapp/static/refine.css
+  - 20261122_215017.mp4
+  - webapp/static/series.css
+  - webapp/static/setup-sentence.js
+  - webapp/static/metrics.html
+  - webapp/static/review.css
+  - lab/realtime-translate/costs.jsonl
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - bench/meeting_end_e2e.mjs
+  - webapp/static/actions.html
+  - webapp/static/admin.html
+  - webapp/static/admin.css
+  - 20261122_211227.mp4
+  - lab/realtime-translate/index.html
+  - webapp/static/review.html
+  - webapp/static/login.css
+  - webapp/revise_pass.py
+  - webapp/static/not-found.html
+  - webapp/static/topbar.css
+  - webapp/static/search.html
+  - bench/ui_consistency_e2e.mjs
+  - webapp/static/login.html
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - webapp/static/actions.css
+  - webapp/static/minutes.html
+  - webapp/static/themes.css
+  - webapp/static/styles.css
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - webapp/static/app.js
+  - bench/translate_e2e.mjs
+  - webapp/static/meetings.html
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/static/speakers.css
+  - webapp/static/ask.html
+  - webapp/static/subtitles.js
+  - bench/ui_night_celadon_e2e.mjs
+  - webapp/static/index.html
+  - 螢幕擷取畫面 2026-11-23 214336.png
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - lab/realtime-translate/server.py
+  - webapp/static/mobile.css
+  - bench/ui_polish_e2e.mjs
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - webapp/server.py
+  - webapp/static/interpret.html
+  - chang01.png
+tests:
+  - webapp/test_server.py
+-->
+
+---
+### Requirement: Header links are plain text
+
+The header page links SHALL be plain text links: no border, a transparent background, and the text in `--muted`. The link of the current page SHALL keep `aria-current="page"` and SHALL be marked with the `--field` background and `--text` colour. Hovering a link SHALL change only its colour and background. The links, their order, the widths at which they hide and the avatar menu SHALL stay as the site-navigation requirements state.
+
+#### Scenario: The header on the meetings list
+
+- **WHEN** `/meetings` is opened at 1440px
+- **THEN** every header page link has a computed `border-top-width` of `0px`, every link except 會議紀錄 has a transparent background, and 會議紀錄 has `aria-current="page"` and the `--field` background
+
+<!-- @trace
+source: ui-night-celadon
+updated: 2026-11-23
+code:
+  - webapp/static/subtitles.css
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - webapp/static/overlay.css
+  - gpt-realtime-translate_demoUI.png
+  - webapp/static/tokens.css
+  - webapp/static/refine.css
+  - 20261122_215017.mp4
+  - webapp/static/series.css
+  - webapp/static/setup-sentence.js
+  - webapp/static/metrics.html
+  - webapp/static/review.css
+  - lab/realtime-translate/costs.jsonl
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - bench/meeting_end_e2e.mjs
+  - webapp/static/actions.html
+  - webapp/static/admin.html
+  - webapp/static/admin.css
+  - 20261122_211227.mp4
+  - lab/realtime-translate/index.html
+  - webapp/static/review.html
+  - webapp/static/login.css
+  - webapp/revise_pass.py
+  - webapp/static/not-found.html
+  - webapp/static/topbar.css
+  - webapp/static/search.html
+  - bench/ui_consistency_e2e.mjs
+  - webapp/static/login.html
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - webapp/static/actions.css
+  - webapp/static/minutes.html
+  - webapp/static/themes.css
+  - webapp/static/styles.css
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - webapp/static/app.js
+  - bench/translate_e2e.mjs
+  - webapp/static/meetings.html
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/static/speakers.css
+  - webapp/static/ask.html
+  - webapp/static/subtitles.js
+  - bench/ui_night_celadon_e2e.mjs
+  - webapp/static/index.html
+  - 螢幕擷取畫面 2026-11-23 214336.png
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - lab/realtime-translate/server.py
+  - webapp/static/mobile.css
+  - bench/ui_polish_e2e.mjs
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - webapp/server.py
+  - webapp/static/interpret.html
+  - chang01.png
 tests:
   - webapp/test_server.py
 -->

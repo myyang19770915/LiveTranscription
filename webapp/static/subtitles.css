@@ -1,7 +1,7 @@
 /* The floating subtitles window (live-translation). Colours come from tokens.css; the size steps are the page's A−/A+. */
 html, body { margin: 0; height: 100%; }
 body { display: flex; flex-direction: column; background: var(--page); color: var(--text);
-  font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif; overflow: hidden; }
+  font-family: var(--font-ui); overflow: hidden; }
 body[data-size="1"] { font-size: 22px; }
 body[data-size="2"] { font-size: 28px; }
 body[data-size="3"] { font-size: 34px; }

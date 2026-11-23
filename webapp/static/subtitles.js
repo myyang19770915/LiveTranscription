@@ -136,7 +136,7 @@ window.Subtitles=(()=>{
     const d=opened.document;
     d.documentElement.lang='zh-Hant';
     d.title='語橋 Live 字幕';
-    for(const href of ['/assets/tokens.css?v=20261115d','/assets/subtitles.css?v=20261115c']){const link=d.createElement('link');link.rel='stylesheet';link.href=href;d.head.append(link)}
+    for(const href of ['/assets/tokens.css?v=20261123nd','/assets/subtitles.css?v=20261123nd']){const link=d.createElement('link');link.rel='stylesheet';link.href=href;d.head.append(link)}
     d.body.innerHTML='<div class="sub-bar"><button type="button" class="sub-toggle-source" aria-pressed="false" title="顯示原文">原文</button>'
       +'<button type="button" class="sub-smaller" title="縮小字">A−</button><button type="button" class="sub-bigger" title="放大字">A+</button>'
       +'<span class="sub-title">語橋 Live 字幕</span><button type="button" class="sub-close" title="關閉字幕視窗">✕</button></div>'

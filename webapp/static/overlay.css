@@ -6,7 +6,7 @@
 .overlay-subs { position: absolute; left: 50%; top: 88%; transform: translate(-50%, -50%); width: min(92vw, 1100px); max-height: 50vh; overflow: hidden; box-sizing: border-box;
   padding: 8px 18px 14px; border-radius: var(--radius-card); background: rgba(0, 0, 0, var(--ov-alpha, .55)); color: #fff;
   text-shadow: 0 1px 3px rgba(0, 0, 0, .6); cursor: grab; user-select: none; touch-action: none;
-  font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif; }
+  font-family: var(--font-ui); }
 .overlay-subs.dragging { cursor: grabbing; }
 /* At most 5.5% of the window height: five lines plus the toolbar stay within half of a short window (review-followups). */
 .overlay-subs[data-size="1"] { font-size: min(22px, 5.5vh); }

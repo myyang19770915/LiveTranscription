@@ -21,7 +21,7 @@ code { padding: 1px 6px; border-radius: var(--radius-small); background: var(--a
 .export summary .hint { margin: 0; }
 .export .filters { margin: 0; padding-top: 0; }
 .meeting-list { display: grid; gap: 10px; }
-.group-title { margin: 14px 0 0; color: var(--muted); font-size: 13px; font-weight: 700; letter-spacing: .08em; }
+.group-title { margin: 14px 0 0; color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: 0; }
 .group-title:first-child { margin-top: 0; }
 .meeting { display: flex; align-items: center; gap: 20px; padding: 16px 20px; }
 .meeting-main { flex: 1; min-width: 0; }
@@ -55,7 +55,7 @@ code { padding: 1px 6px; border-radius: var(--radius-small); background: var(--a
 .terms-dialog h2 { margin: 0; font-size: var(--text-section); }
 .terms-dialog .hint { margin: 0 0 6px; }
 .terms-head, .terms-row { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr) 76px 32px; gap: 8px; align-items: center; }
-.terms-head { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.terms-head { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: 0; }
 .terms-rows { display: grid; gap: 8px; }
 .terms-row .input { width: 100%; min-width: 0; }
 .terms-row .arrow { color: var(--muted); text-align: center; }
@@ -82,7 +82,7 @@ code { padding: 1px 6px; border-radius: var(--radius-small); background: var(--a
 .toggle input { width: 18px; height: 18px; accent-color: var(--accent); }
 
 .segment-head, .seg { display: grid; grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr) 76px; gap: 16px; align-items: start; }
-.segment-head { padding: 0 16px 8px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.segment-head { padding: 0 16px 8px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: 0; }
 .segments { display: grid; gap: 6px; }
 .seg { padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; }
 .seg:hover { border-color: var(--field-border); }

@@ -146,8 +146,8 @@ for (const [width, path, want] of [[850, '/', ['會議紀錄', '待辦看板', '
   const s = await page.evaluate(() => { const play = document.getElementById('interpretPlayRow').getBoundingClientRect(), start = document.getElementById('start').getBoundingClientRect();
     const note = document.querySelector('#start .button-copy small');
     return {context: getComputedStyle(document.querySelector('.context-field')).display, sameRow: Math.abs(play.top - start.top) <= 2 && play.right <= start.left,
-      note: note.textContent, oneLine: note.getBoundingClientRect().height < parseFloat(getComputedStyle(note).fontSize) * 2}; });
-  t('即時口譯: no 會議情境, 同步播放譯音 beside 開始口譯, a one-line note', [s.context, s.sameRow, s.note, s.oneLine], ['none', true, '聽譯音、看譯文', true]);
+      note: note.checkVisibility()}; });   // ui-night-celadon: the start button has no second line
+  t('即時口譯: no 會議情境, 同步播放譯音 beside 開始口譯, no second line', [s.context, s.sameRow, s.note], ['none', true, false]);
   await context.close();
 }
 await browser.close();

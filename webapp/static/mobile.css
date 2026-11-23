@@ -23,7 +23,7 @@
   /* Narrow phones: the status dot alone (the live bar says 正在聆聽) and the brand mark without its name. */
   @media (max-width: 430px) { .status { padding: 8px 9px; } .status span { display: none; } }
   .theme-toggle { width: 40px; min-width: 40px; min-height: 40px; }
-  main > header, .ambient { display: none; }
+  main > header { display: none; }
   .controls {
     flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr) !important;
     grid-template-areas: "source swap target" !important; gap: 6px; padding: 7px; margin: 0;   /* over refine.css's :has() rules */

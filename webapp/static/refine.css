@@ -1,10 +1,6 @@
 /* Calm, readable meeting workspace: simplify the visual hierarchy and clarify actions. Colours are tokens.css's (via the
    aliases in styles.css), so both themes come from one place. */
-body {
-  background:
-    radial-gradient(ellipse 65% 32% at 50% -10%, color-mix(in srgb, var(--glow) 70%, transparent), transparent 72%),
-    var(--bg);
-}
+body { background: var(--bg); }   /* one solid page colour (ui-night-celadon) */
 
 .brand { gap: 12px; }
 .brand-mark { width: 40px; height: 40px; border-radius: var(--radius-card); }
@@ -20,12 +16,11 @@ header {
   padding: 12px 2px 10px;
 }
 header > div:first-child { max-width: 760px; }
-.eyebrow { color: var(--mint); font-size: 9px; letter-spacing: .22em; line-height: 1.2; }
 h1 {
   margin: 4px 0 0;
   font-size: 24px;
-  font-weight: 650;
-  letter-spacing: -.02em;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 h1 em { color: var(--muted); }
 header p { display: none; }
@@ -44,7 +39,7 @@ header p { display: none; }
     "source swap target audio mic test"
     "hint hint hint hint hint hint"
     "h-adv h-adv h-adv h-adv h-adv h-adv"
-    "engine engine engine refine refine refine"
+    "refine refine refine refine refine refine"
     "context context context context context start";
   gap: 9px;
   padding: 13px;
@@ -64,7 +59,7 @@ header p { display: none; }
   background: var(--field);
 }
 .controls > .field:focus-within { border-color: var(--accent); }
-.field label { color: var(--muted); font-size: 9px; letter-spacing: .1em; }
+.field label { color: var(--muted); font-size: 12px; letter-spacing: 0; }
 select, input { font-size: 13px; }
 select { padding-top: 9px; }
 .language-field { grid-area: source !important; }
@@ -96,7 +91,7 @@ select { padding-top: 9px; }
 .mode-btn:disabled { opacity: .6; cursor: not-allowed; }
 .mode-note { color: var(--muted); font-size: 11px; }
 body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-mode #topicRow, body.translate-mode #seriesRow, body.translate-mode #seriesPanel { display: none !important; }
-.setup-heading { margin: 0; padding: 4px 4px 0; color: var(--mint); font-size: 10px; font-weight: 700; letter-spacing: .14em; }
+.setup-heading { margin: 0; padding: 4px 4px 0; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; }
 .setup-heading[hidden], .field[hidden] { display: none; }
 #setupMeeting { grid-area: h-meeting; padding-top: 0; }
 #setupAudio { grid-area: h-audio; }
@@ -104,7 +99,6 @@ body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-
 #teamRow { grid-area: team; }
 #topicRow { grid-area: topic; }
 #seriesRow { grid-area: series; }
-#asrEngineRow { grid-area: engine; }
 /* 雲端精修 and 精準模式 share the refine cell (quality-pass). */
 .refine-group { grid-area: refine; display: grid; gap: 8px; align-content: start; min-width: 0; }   /* stacked: each toggle has two lines of explanation */
 .refine-group:not(:has(> :not([hidden]))) { display: none; }
@@ -116,11 +110,10 @@ body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-
 .toggle-text b { display: block; font-size: 13px; }
 .toggle-text small { display: block; margin-top: 2px; color: var(--muted); font-size: var(--text-note); }
 .toggle-text .toggle-fit { margin-top: 1px; }   /* second line: what it sends, when to use it */
-.engine-value { display: block; padding: 6px 0 0; font-size: 13px; font-weight: 600; }   /* read-only: the spoken language decides */
-.controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting h-meeting h-meeting"     "team team topic topic series series"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
+.controls:not(:has(#cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting h-meeting h-meeting"     "team team topic topic series series"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
 /* 即時翻譯 (live-translation): no meeting rows. */
-.controls.translate { grid-template-areas:     "mode mode mode mode mode mode"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "h-adv h-adv h-adv h-adv h-adv h-adv"     "engine engine engine refine refine refine"     "context context context context context start"; }
-.controls.translate:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode mode mode"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
+.controls.translate { grid-template-areas:     "mode mode mode mode mode mode"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "h-adv h-adv h-adv h-adv h-adv h-adv"     "refine refine refine refine refine refine"     "context context context context context start"; }
+.controls.translate:not(:has(#cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode mode mode"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "context context context context context start"; }
 .source-hint {
   grid-area: hint !important;
   padding: 1px 4px 2px;
@@ -138,9 +131,10 @@ body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-
   grid-area: start !important;
   min-height: 62px;
   border-radius: var(--radius-control);
-  box-shadow: 0 6px 20px var(--accent-soft);
+  box-shadow: none;
 }
-.primary:hover { box-shadow: 0 10px 28px var(--accent-soft); transform: none; }   /* no movement on hover */
+.primary:hover { box-shadow: none; transform: none; background: color-mix(in srgb, var(--mint) 86%, var(--page)); }   /* no movement, no glow */
+.primary.stop:hover { background: color-mix(in srgb, var(--coral) 86%, var(--page)); }
 .button-copy b { font-size: 13px; }
 
 .live-bar {
@@ -157,7 +151,7 @@ body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-
   border-width: 1px;
   border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
 }
-.live-bar > span { color: var(--text); font-size: 10px; letter-spacing: .04em; text-transform: none; }
+.live-bar > span { color: var(--live-text); font-size: 13px; letter-spacing: 0; text-transform: none; }
 .live-bar strong { font-size: 10px; }
 
 .transcripts { gap: 14px; }
@@ -167,11 +161,11 @@ body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-
   border-radius: var(--radius-feature);
   background: var(--surface);
 }
-.translation-card { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.translation-card { background: var(--surface); }   /* no tint (ui-night-celadon) */
 .card-head { min-height: 76px; padding: 16px 20px; }
 .card-title { gap: 13px; }
 .language-dot { width: 36px; height: 36px; border-radius: var(--radius-control); }
-.label { font-size: 9px; letter-spacing: .15em; }
+.label { font-size: 12px; letter-spacing: 0; }
 .card-head h2 { margin-top: 4px; font-size: 14px; }
 .copy {
   padding: 26px 28px;
@@ -179,12 +173,13 @@ body.translate-mode #setupMeeting, body.translate-mode #teamRow, body.translate-
   line-height: 1.78;
   overflow-wrap: anywhere;
 }
-.translated { color: color-mix(in srgb, var(--accent) 25%, var(--text)); }
+.translated { color: var(--text); }
+body:not(.no-translation) #transcript { color: var(--muted); }   /* the source reads quieter than the translation; alone, it is the text */
 #transcript .tentative { color: var(--sub-now); }   /* the cloud engine's text not yet confirmed (mai-intermediate) */
 .empty-state { max-width: 300px; padding: 18px; }
 .empty-state b { color: var(--muted); font-size: 13px; }
 .empty-state small { color: var(--dim); line-height: 1.65; }
-.card-foot { min-height: 42px; align-items: center; padding: 10px 20px; letter-spacing: .045em; }
+.card-foot { min-height: 42px; align-items: center; padding: 10px 20px; letter-spacing: 0; }
 footer { padding: 13px 4px 0; }
 .secure-note { color: var(--muted); }
 .text-btn { padding: 8px 11px; }
@@ -207,12 +202,12 @@ button:focus-visible, select:focus-visible, input:focus-visible {
       "mic mic test start"
       "hint hint hint hint"
       "h-adv h-adv h-adv h-adv"
-      "engine engine refine refine"
+      "refine refine refine refine"
       "context context context context";
   }
-  .controls:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting"     "team topic topic series"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
-  .controls.translate { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "h-adv h-adv h-adv h-adv"     "engine engine refine refine"     "context context context context"; }
-  .controls.translate:not(:has(#asrEngineRow:not([hidden]), #cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
+  .controls:not(:has(#cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting"     "team topic topic series"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
+  .controls.translate { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "h-adv h-adv h-adv h-adv"     "refine refine refine refine"     "context context context context"; }
+  .controls.translate:not(:has(#cloudRefineRow:not([hidden]), #qualityRow:not([hidden]))) { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "context context context context"; }
 }
 
 /* Up to 760px mobile.css takes over the controls (one row; the rest moves into the settings dialog); these areas are the
@@ -238,7 +233,6 @@ button:focus-visible, select:focus-visible, input:focus-visible {
       "test test"
       "hint hint"
       "h-adv h-adv"
-      "engine engine"
       "refine refine"
       "context context"
       "start start";
@@ -298,7 +292,7 @@ button:focus-visible, select:focus-visible, input:focus-visible {
     content: ""; top: 50%; right: 3px; width: 7px; height: 7px; margin-top: -2px;
     border-right: 1.6px solid var(--muted); border-bottom: 1.6px solid var(--muted); transform: translateY(-50%) rotate(45deg); pointer-events: none;
   }
-  .controls .setup-heading { padding: 6px 2px 0; font-size: 13px; letter-spacing: .06em; }
+  .controls .setup-heading { padding: 6px 2px 0; font-size: 13px; letter-spacing: 0; }
   .controls #setupMeeting { padding-top: 2px; }
   .controls .mode-note { font-size: 13px; }
   .controls .field-note, .controls .mic-health { font-size: 12px; }
@@ -325,7 +319,7 @@ button:focus-visible, select:focus-visible, input:focus-visible {
   .setup-toggle:not(:disabled):hover .setup-toggle-label { text-decoration: underline; text-underline-offset: 3px; }
   .setup-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-small); }
   .setup-toggle[aria-expanded="false"] .setup-toggle-summary { display: inline; color: var(--muted); font-weight: 500; letter-spacing: 0; text-transform: none; }
-  .controls.advanced-folded #asrEngineRow, .controls.advanced-folded .refine-group { display: none; }
+  .controls.advanced-folded .refine-group { display: none; }
   .controls.advanced-folded:has(#setupAdvanced:not([hidden])) { grid-template-areas:     "mode mode mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting h-meeting h-meeting"     "team team topic topic series series"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "h-adv h-adv h-adv h-adv h-adv h-adv"     "context context context context context start"; }
   .controls.translate.advanced-folded:has(#setupAdvanced:not([hidden])) { grid-template-areas:     "mode mode mode mode mode mode"     "h-audio h-audio h-audio h-audio h-audio h-audio"     "source swap target audio mic test"     "hint hint hint hint hint hint"     "h-adv h-adv h-adv h-adv h-adv h-adv"     "context context context context context start"; }
 }
@@ -333,12 +327,12 @@ button:focus-visible, select:focus-visible, input:focus-visible {
   .controls.advanced-folded:has(#setupAdvanced:not([hidden])) { grid-template-areas:     "mode mode mode mode"     "h-meeting h-meeting h-meeting h-meeting"     "team topic topic series"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "h-adv h-adv h-adv h-adv"     "context context context context"; }
   .controls.translate.advanced-folded:has(#setupAdvanced:not([hidden])) { grid-template-areas:     "mode mode mode mode"     "h-audio h-audio h-audio h-audio"     "source swap target audio"     "mic mic test start"     "hint hint hint hint"     "h-adv h-adv h-adv h-adv"     "context context context context"; }
 }
-.setup-toggle:disabled, .mobile-settings-fields .setup-toggle:disabled { opacity: 1; cursor: default; color: var(--mint); }   /* a heading on phones, not a dimmed control */
+.setup-toggle:disabled, .mobile-settings-fields .setup-toggle:disabled { opacity: 1; cursor: default; color: var(--muted); }   /* a heading on phones, not a dimmed control */
 
 /* 即時口譯 mode of the live page (interpret-mode-on-home): its own options; the text-translation options do not apply. */
 .interpret-only { display: none; }
 body.interpret-mode .interpret-only { display: flex; }
-body.interpret-mode #refineGroup, body.interpret-mode #setupAdvanced, body.interpret-mode #asrEngineRow, body.interpret-mode .context-field,
+body.interpret-mode #refineGroup, body.interpret-mode #setupAdvanced, body.interpret-mode .context-field,
 body.interpret-mode #cloudRefineRow, body.interpret-mode #qualityRow { display: none; }   /* phones move the two rows into the settings dialog */
 .mode-btn[data-locked="1"] { cursor: not-allowed; }
 .saved-link { color: var(--accent); text-decoration: none; font-size: 10px; }
@@ -359,3 +353,69 @@ main { width: min(calc(var(--page-width) + 2 * var(--page-gutter)), 100%); paddi
 body.no-translation .translation-card { display: none; }
 body.no-translation .transcripts { grid-template-columns: 1fr; }
 body.no-translation #cloudRefineRow { display: none; }
+
+/* ui-night-celadon: the setup as one sentence (meeting-setup-layout). Wide windows only; phones hide main > header. */
+main > header.setup-head { align-items: flex-end; gap: var(--space-6); padding: 40px 2px 28px; }
+.setup-sentence { max-width: 960px; min-height: 2.9em; margin: 0; color: var(--muted); font-size: 32px; font-weight: 400; line-height: 1.45; letter-spacing: 0; }   /* two lines kept: no jump when the microphone names arrive */
+.sentence-pick { display: inline; margin: 0; padding: 0; border: 0; border-radius: 2px; background: none; color: var(--text); font: inherit; font-weight: 500;
+  text-decoration: underline 2px var(--accent); text-underline-offset: 6px; cursor: pointer; }
+.sentence-pick:hover { text-decoration-color: var(--text); }
+.sentence-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.setup-head .privacy { flex: none; margin-bottom: 8px; }
+@media (max-width: 1180px) { .setup-sentence { font-size: 26px; } }
+@media (max-width: 760px) { .setup-sentence { display: none; } }
+
+/* ui-night-celadon: quiet setup on wide windows. Fields are a label over a native menu on a hairline, not boxes; the
+   modes are one segmented control; 測試音源 stays a button with its status inside. Phones keep their own sheet. */
+@media (min-width: 761px) {
+  .controls > .field, .controls > .direction {
+    border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none;
+  }
+  .controls > .field { padding: 8px 2px 8px; }
+  .controls > .field:hover, .controls > .direction:hover:not(:disabled) { border-bottom-color: var(--field-border); }
+  .controls > .field:focus-within { border-bottom-color: var(--accent); box-shadow: 0 1px 0 0 var(--accent); }
+  .controls > .mic-test { border: 1px solid var(--border); border-radius: var(--radius-control); background: transparent; }
+  .controls > .toggle-field { border-bottom: 0; }
+  .controls .select-wrap::after { right: 4px; }
+  #modeRow { gap: 6px 0; }
+  #modeRow .mode-btn { margin: 0; padding: 7px 16px; border: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--muted); font-weight: 500; }
+  #modeRow .mode-btn + .mode-btn { margin-left: -1px; }
+  #modeRow .mode-btn:first-child { border-radius: var(--radius-control) 0 0 var(--radius-control); }
+  #modeInterpret { border-radius: 0 var(--radius-control) var(--radius-control) 0 !important; margin-right: 14px !important; }
+  #modeRow .mode-btn[aria-pressed="true"] { position: relative; z-index: 1; background: var(--field); color: var(--text); border-color: var(--field-border); }
+  #modeRow .mode-btn:hover:not(:disabled) { color: var(--text); }
+}
+
+/* ui-night-celadon: during a session on a wide window the setup folds away and the live bar floats at the bottom with the
+   end button (meeting-setup-layout "A session folds the settings into a floating recorder bar"). No pause button. */
+.live-action:empty { display: none; }
+@media (min-width: 761px) {
+  body.live-session section.controls { display: none; }
+  body.live-session main > header.setup-head { padding: 16px 2px 16px; }
+  body.live-session .setup-sentence { min-height: 0; font-size: 17px; line-height: 1.6; }
+  body.live-session main { padding-bottom: calc(56px + 24px + 32px); }   /* the bar's height, its distance, and air */
+  body.live-session .live-bar.visible {
+    position: fixed; z-index: 25; left: 50%; bottom: 24px; transform: translateX(-50%);
+    width: max-content; max-width: calc(100% - 2 * var(--page-gutter)); height: 56px; margin: 0; padding: 0 8px 0 20px; gap: 16px;
+    overflow: visible; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--field);
+    box-shadow: 0 12px 32px rgb(0 0 0 / .45);
+  }
+  :root[data-theme="light"] body.live-session .live-bar.visible { box-shadow: var(--shadow-card); }
+  body.live-session .live-bar time { margin-left: 0; color: var(--text); font-size: 14px; }
+  body.live-session .live-bar strong { font-size: 13px; }
+  body.live-session .live-action { display: flex; align-items: center; height: 40px; padding-left: 16px; border-left: 1px solid var(--border); }
+  body.live-session .live-action .primary { min-height: 40px; height: 40px; padding: 0 14px 0 8px; gap: 8px; }
+  body.live-session .live-action .record-icon { width: 24px; height: 24px; }
+  body.live-session .live-action .button-copy small { display: none; }
+  body.live-session .live-action .button-copy b { font-size: 14px; }
+  body.live-session .toast { bottom: 104px; }
+  body.live-session .transcript-card { height: max(430px, calc(100dvh - 330px)); }   /* the folded setup's room goes to the text */
+}
+
+/* ui-night-celadon: no explanatory small print in the setup, at any width (meeting-setup-layout "The setup shows no
+   explanatory small print"). 雲端精修 and 精準模式 keep their explanation in the row's title; the data destination notice says
+   what leaves the server. Kept: why 即時口譯 is unavailable, the tab-sharing steps, the audio test status. */
+#modeNote, .field > label > span, #start .button-copy small, .mic-test .mic-test-copy > small,
+.toggle-text .toggle-desc, .toggle-text .toggle-fit, .card-foot > span:last-child:not(:first-child) { display: none; }
+#sourceHint[hidden] { display: none; }
+.hint-stack:not(:has(> :not([hidden]))) { display: none; }   /* nothing to say: no empty row */

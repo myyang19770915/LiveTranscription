@@ -37,7 +37,7 @@ try {
   await page.click('#modeTranslate');
   const hidden = await page.evaluate(() => ['setupMeeting', 'teamRow', 'topicRow', 'seriesRow', 'seriesPanel'].every(id => !document.getElementById(id).offsetParent));
   check('即時翻譯 hides team, topic, series and the series panel', hidden && (await page.textContent('#start')).includes('開始翻譯')
-    && (await page.textContent('#modeNote')).includes('不建立會議紀錄'));
+    && !(await page.isVisible('#modeNote')));   // ui-night-celadon: no mode note
   await page.screenshot({path: join(out, 'translate-mode.png'), clip: {x: 0, y: 0, width: 1440, height: 520}});
   await page.reload(); await page.evaluate(() => window.accountReady);
   check('the mode survives a reload', await page.getAttribute('#modeTranslate', 'aria-pressed') === 'true' && (await page.textContent('#start')).includes('開始翻譯'));
@@ -64,9 +64,9 @@ try {
   await page.selectOption('#language', 'zh_ja');
   const form = await page.evaluate(() => ({tags: [...document.querySelectorAll('#swap .lang-tag')].map(t => t.textContent),
     label: getComputedStyle(document.querySelector('.language-field label')).fontSize, value: getComputedStyle(document.getElementById('language')).fontSize,
-    engine: document.getElementById('asrEngineValue').textContent}));
+    engineRow: !!document.getElementById('asrEngineRow'), engine: asrEngine()}));
   check('the setup form is readable and the swap button shows 中 and 日', form.tags.join() === '中,日' && form.label === '12px' && form.value === '15px', form);
-  check('the local engine is shown as 本機 without a model name (engine-auto-and-mode-help: 中日雙向 uses it)', form.engine === '本機（語橋主機）' && !/confucius/i.test(form.engine), form.engine);
+  check('中日雙向 uses the local engine, with no 辨識引擎 row (ui-night-celadon)', !form.engineRow && form.engine === 'local', form);
 
   // A translate-only session: no meeting is created; the transcript can be downloaded.
   await page.selectOption('#language', 'zh'); await page.selectOption('#audioSource', 'microphone');
@@ -130,7 +130,6 @@ try {
     check('closing the window resets the button', (await page.getAttribute('#subtitles', 'aria-pressed')) === 'false');
   }
   check("the footer note says the session is saved as the user's own record", (await page.textContent('#storeNote')) === '存成你的紀錄，只有你看得到');
-  check('the engine note says the spoken language decides the engine', (await page.textContent('#asrEngineRow .field-note')).startsWith('依語音語言自動選擇'));
   // The cloud engine's tentative text (mai-intermediate): shown after the confirmed transcript, part of the current speech, never exported.
   const tentativeEvent = text => JSON.stringify({status: 'success', msg: {text: '', reset: false, speech_end: false, language: ''}, tentative: text});
   await page.evaluate(e => onMessage({data: e}), tentativeEvent('正在講的暫定字'));

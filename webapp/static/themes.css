@@ -21,12 +21,11 @@
 .theme-moon, .theme-label { display: none; }
 
 /* Light theme (brand-palette-blue): colours come from tokens.css; only the layout differences stay here. */
-:root[data-theme="light"] .ambient { display: none; }
 /* Switching the theme changes only colours, never the size or position of anything (ui-consistency-pass). */
 :root[data-theme="light"] .controls :disabled { opacity: .48; }
 .translation-draft { display: block; margin-top: 14px; padding: 12px 16px; border-left: 3px solid var(--mint); border-radius: 0 var(--radius-control) var(--radius-control) 0; background: var(--accent-soft); color: var(--text); opacity: .84; }
 .translation-draft .unsure { opacity: .55; }   /* the end of a draft: the next draft may still change it */
-.translation-draft::before { content: "暫譯 · 句末自動修訂"; display: block; margin-bottom: 5px; color: var(--mint); font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.translation-draft::before { content: "暫譯 · 句末自動修訂"; display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; font-weight: 500; letter-spacing: 0; }
 :root[data-theme="light"] .theme-sun { display: none; }
 :root[data-theme="light"] .theme-moon { display: block; }
 

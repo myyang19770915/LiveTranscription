@@ -1,58 +1,68 @@
-/* Colour tokens for every page, one set per theme (brand-palette-blue: lake blue + warm orange; contrast checked: fields 3:1+,
-   accent against its ink 4.5:1+). The meeting page aliases its older names (--bg, --surface, --line, --mint…) to these in styles.css. */
+/* Colour tokens for every page, one set per theme (ui-night-celadon): night (dark) is graphite with an off-white accent,
+   celadon (light) is a green-grey page with a celadon accent. Amber (--live) marks only a recording session and sound
+   levels; text in that colour uses --live-text (#d98a0b is 2.5:1 on white). The meeting page aliases its older names
+   (--bg, --surface, --line, --mint…) to these in styles.css. */
 :root {
   --page-width: 1280px;          /* ui-consistency-pass: the header and every page's content share this width */
   --page-gutter: 24px;           /* at least this much space on each side (16px on phones, below) */
-  --sub-now: #ffd86b;            /* subtitles: the speech being translated now and its draft (dark panels) */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Noto Sans TC", "Microsoft JhengHei UI", "PingFang TC", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
   color-scheme: dark;
-  --page: #0d141c;
-  --glow: #163152;
-  --intro: linear-gradient(160deg, #142638 0%, #0f1822 65%);
-  --panel: #151f2b;
-  --border: #263445;
-  --text: #ecf2f8;
-  --muted: #9bacbe;
-  --faint: #7a8b9c;
-  --field: #0b1118;
-  --field-border: #566a80;       /* 3.4:1 against the field */
-  --field-hover: #74889e;
-  --accent: #4cb8ff;
-  --accent-ink: #06192a;
-  --accent-soft: #4cb8ff26;
-  --accent-2: #ff9a4d;           /* the contrast colour: new, hints, the second chart series */
-  --accent-2-ink: #2a1400;
-  --accent-2-soft: #ff9a4d26;
-  --danger: #ff8d72;
-  --danger-soft: #ff795d1f;
-  --warn: #f2c66d;
-  --shadow-card: none;           /* dark panels stand apart by their border; a shadow on a dark page only blurs the edge */
-  font-family: Inter, "Noto Sans TC", "Microsoft JhengHei UI", system-ui, sans-serif;
+  --page: #111214;
+  --glow: #111214;               /* no glow: the page is one solid colour */
+  --intro: #111214;
+  --panel: #17181b;
+  --border: #2a2b30;
+  --text: #ecedef;
+  --muted: #a3a5ac;
+  --faint: #80838c;
+  --field: #1f2024;
+  --field-border: #45474d;
+  --field-hover: #5c5f66;
+  --accent: #ecedef;             /* off-white: the primary button is off-white with dark ink */
+  --accent-ink: #111214;
+  --accent-soft: #ecedef14;
+  --accent-2: #7fbfae;           /* the second series (interpret waveform, search marks) */
+  --accent-2-ink: #111214;
+  --accent-2-soft: #7fbfae26;
+  --live: #f2a93b;               /* recording: wave, level, live dot, audio test meter */
+  --live-text: #f2a93b;
+  --sub-now: #f2a93b;            /* subtitles: the speech being translated now and its draft */
+  --danger: #f2726b;
+  --danger-soft: #f2726b1f;
+  --warn: #f2a93b;
+  --shadow-card: none;           /* dark panels stand apart by their border */
+  font-family: var(--font-ui);
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --sub-now: #8a5a00;            /* the same role on the light panel: 5.9:1 on #f3f6fa */
-  --page: #f3f6fa;
-  --glow: #dfeafa;
-  --intro: linear-gradient(160deg, #e4eefb 0%, #f3f6fa 70%);
+  --page: #f2f5f3;
+  --glow: #f2f5f3;
+  --intro: #f2f5f3;
   --panel: #ffffff;
-  --border: #dbe3ec;
-  --text: #16202b;
-  --muted: #5d6b7a;
-  --faint: #7d8a98;
+  --border: #dce4df;
+  --text: #14201b;
+  --muted: #4b5a53;
+  --faint: #66736d;
   --field: #ffffff;
-  --field-border: #8591a0;       /* 3.1:1 against white */
-  --field-hover: #65717f;
-  --accent: #1479c7;             /* 4.6:1 under white text */
+  --field-border: #8a9892;       /* 3:1 against white */
+  --field-hover: #66736d;
+  --accent: #2e7a68;             /* 5.3:1 under white text */
   --accent-ink: #ffffff;
-  --accent-soft: #1479c71f;
-  --accent-2: #e8781f;
-  --accent-2-ink: #221400;       /* dark ink: white would be 2.9:1 */
-  --accent-2-soft: #e8781f1f;
-  --danger: #c23a24;             /* 4.9:1 under white text and on white */
-  --danger-soft: #c23a2416;
+  --accent-soft: #2e7a6814;
+  --accent-2: #3d6fa8;
+  --accent-2-ink: #ffffff;
+  --accent-2-soft: #3d6fa81f;
+  --live: #d98a0b;               /* a mark only */
+  --live-text: #8a5300;          /* 6:1+ on white */
+  --sub-now: #8a5300;
+  --danger: #b3261e;
+  --danger-soft: #b3261e14;
   --warn: #8a5a00;
-  --shadow-card: 0 8px 24px rgb(20 40 70 / .06);
+  --shadow-card: 0 1px 2px rgb(20 32 27 / .05), 0 8px 24px rgb(20 32 27 / .05);
 }
+body { font-family: var(--font-ui); }
+h1, h2, h3, .brand b { font-weight: 600; }   /* hierarchy from size and colour, not weight (ui-night-celadon) */
 
 /* Shape, spacing and type scale shared by every page, in both themes. Page styles use these instead of their own numbers. */
 :root {
@@ -73,7 +83,7 @@
    and inputs inside a bold label would inherit its weight. */
 button, input, select, textarea { font: inherit; }
 input, select, textarea { font-weight: 400; }
-code, kbd { font-family: ui-monospace, "Cascadia Mono", Consolas, "Noto Sans Mono", monospace; font-size: .88em; }
+code, kbd { font-family: var(--font-mono); font-size: .88em; }
 
 /* One spinner for every wait (loading-feedback): the sign-in button and the loading row of search and Q&A. */
 .spinner { box-sizing: border-box; display: inline-block; flex: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spinner-turn .8s linear infinite; }

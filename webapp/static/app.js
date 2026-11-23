@@ -194,7 +194,8 @@ function renderTranslation(){
 function updateCounts(){ $('transcriptCount').textContent=`${transcript.length.toLocaleString()} 字`; $('translationCount').textContent=`${visibleTranslation().length.toLocaleString()} 字`; }
 function toast(message,duration=2200){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),duration)}
 const screenAwake=ScreenAwake.create(navigator,document);   // screen-awake: held while a session runs
-function setControls(active){active?screenAwake.hold():screenAwake.release();for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active||b.dataset.locked==='1';const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active||qualityChosen();$('quality').disabled=active;$('swap').disabled=active||pair||interpretOn()||noTranslation();$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active))}
+function setControls(active){active?screenAwake.hold():screenAwake.release();for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active||b.dataset.locked==='1';const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active||qualityChosen();$('quality').disabled=active;$('swap').disabled=active||pair||interpretOn()||noTranslation();$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active));
+  syncLiveSession();placeStart();showSentence()}   // wide windows fold the setup into the floating bar (ui-night-celadon)
 function updateTranslationDirection(){
   const pair=$('language').value==='zh_ja';
   if(pair){if($('targetLanguage').value!=='zh_ja')fixedTarget=$('targetLanguage').value;$('targetLanguage').value='zh_ja'}
@@ -217,10 +218,36 @@ function updateTranslationDirection(){
   $('targetLabel').closest('.card-title').querySelector('.language-dot').textContent=languageTags[direction.target]||direction.target.toUpperCase();
   $('translateState').textContent='就緒';$('translateState').className='state-chip';
   if(transcript)scheduleTranslation(true);
-  showEngine();showPrivacy();   // the spoken language decides the engine, and so where the audio goes
+  showPrivacy();   // the spoken language decides the engine, and so where the audio goes
+  showSentence();
 }
 function selectedSource(){return $('audioSource').value}
-function updateSourceUI(){const mode=selectedSource(),system=mode!=='microphone';$('microphone').closest('.mic-field').classList.toggle('is-hidden',mode==='system');$('sourceHint').textContent=system?'點「測試音源」或「開始會議」後，在 Chrome 分享視窗勾選「分享分頁音訊」或「分享系統音訊」。只選畫面、不分享音訊，無法轉錄。'+(mode==='mixed'?'混合模式也會收取麥克風；建議使用耳機。':''):'使用耳機開會可避免喇叭聲被麥克風重複收進來。';$('testMic').querySelector('small').textContent=system?'開啟分享選擇器':'確認有聲音';if(!testStream)mediaUnavailable()?setMicStatus(mediaUnavailable(),'error'):setMicStatus(system?'尚未連接分享音訊':'尚未測試音源')}
+// The setup as one sentence (ui-night-celadon, meeting-setup-layout): wide windows show it as the page title; each named
+// setting is a button that focuses its own control and opens a menu's list. During a session it is plain text.
+function sentenceState(){
+  const label=id=>$(id).selectedOptions?.[0]?.textContent.trim()||'',team=$('team'),hasTeam=!team.hidden&&team.options.length>0;
+  return {mode:interpretOn()?'interpret':translateOnly()?'translate':'meeting',source:$('language').value,sourceLabel:label('language'),
+    target:$('targetLanguage').value,targetLabel:interpretOn()?label('targetLanguage').replace(/（.*/,'').replace(/\s+[㐀-鿿]+$/,''):label('targetLanguage'),   // 口譯's menu is bilingual: English 英文 → English
+    audio:selectedSource(),micLabel:label('microphone'),
+    team:hasTeam?team.value:'',teamLabel:hasTeam?label('team'):'',play:$('interpretPlay').checked};
+}
+function showSentence(){
+  const box=$('setupSentence');if(!box||!window.SetupSentence)return;
+  const names={language:'語音語言',targetLanguage:'翻譯成',audioSource:'音訊來源',microphone:'麥克風來源',team:'團隊',interpretPlay:'同步播放譯音'};
+  const live=document.body.classList.contains('live-session');
+  box.replaceChildren(...SetupSentence.compose(sentenceState()).map(part=>{
+    if(!part.field||live)return document.createTextNode(part.text);
+    const button=Object.assign(document.createElement('button'),{type:'button',className:'sentence-pick',textContent:part.text});
+    button.dataset.field=part.field;button.setAttribute('aria-label',`更改${names[part.field]}`);return button;
+  }));
+}
+$('setupSentence').addEventListener('click',event=>{
+  const button=event.target.closest('.sentence-pick'),control=button&&$(button.dataset.field);if(!control)return;
+  control.focus();
+  if(control.tagName==='SELECT'&&!control.disabled)try{control.showPicker()}catch{}   // no picker (or not allowed): the focus alone
+});
+function updateSourceUI(){const mode=selectedSource(),system=mode!=='microphone';$('sourceHint').hidden=!system;   // the headphone tip is gone; sharing steps stay
+  $('microphone').closest('.mic-field').classList.toggle('is-hidden',mode==='system');$('sourceHint').textContent=system?'點「測試音源」或「開始會議」後，在 Chrome 分享視窗勾選「分享分頁音訊」或「分享系統音訊」。只選畫面、不分享音訊，無法轉錄。'+(mode==='mixed'?'混合模式也會收取麥克風；建議使用耳機。':''):'使用耳機開會可避免喇叭聲被麥克風重複收進來。';$('testMic').querySelector('small').textContent=system?'開啟分享選擇器':'確認有聲音';if(!testStream)mediaUnavailable()?setMicStatus(mediaUnavailable(),'error'):setMicStatus(system?'尚未連接分享音訊':'尚未測試音源');showSentence()}
 function audioConstraints(){const selected=$('microphone').value;return{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true,...(selected&&selected!=='default'?{deviceId:{exact:selected}}:{})}}
 function setMicStatus(text,kind=''){$('micStatus').textContent=text;$('micStatus').className=kind}
 // Browsers offer media capture only on secure pages (https or localhost): over http the API is missing and calling it
@@ -275,6 +302,7 @@ async function refreshMicrophones(preferredId=''){
   devices.forEach((device,index)=>{const option=document.createElement('option');option.value=device.deviceId;option.textContent=device.label||`麥克風 ${index+1}`;$('microphone').appendChild(option)});
   if(!devices.length){const option=document.createElement('option');option.value='default';option.textContent='找不到麥克風';$('microphone').appendChild(option);setMicStatus('沒有可用的輸入裝置','error');return}
   if([...$('microphone').options].some(o=>o.value===current))$('microphone').value=current;
+  showSentence();
 }
 function stopMicTest(){cancelAnimationFrame(testAnimation);clearTimeout(testSilence);clearInterval(testSampler);testSources.forEach(source=>source.disconnect());testStreams.forEach(media=>media.getTracks().forEach(track=>track.stop()));testAudioContext?.close();testStream=testAudioContext=testAnalyser=null;testStreams=[];testSources=[];$('testMic').classList.remove('testing');$('testMic').querySelector('b').textContent='測試音源';$('microphone').disabled=false;$('audioSource').disabled=false;$('micTestLevel').style.transform='scaleX(.03)';updateSourceUI()}
 async function toggleMicTest(){
@@ -568,8 +596,8 @@ function cloudRefineOn(){return !interpretOn()&&!noTranslation()&&!$('cloudRefin
 // local model, every other language uses MAI when the server offers it. Keep in step with server.asr_engine()'s 混合 rule.
 const LOCAL_ENGINE_LANGUAGES=['zh','yue','auto','zh_ja'];
 function engineForLanguage(language){return LOCAL_ENGINE_LANGUAGES.includes(language)?'local':'mai'}
-function asrEngine(){return $('asrEngineRow').hidden?'local':engineForLanguage($('language').value)}   // the row shows only with MAI
-function showEngine(){$('asrEngineValue').textContent=asrEngine()==='mai'?'雲端辨識（音訊會傳送到外部服務）':'本機（語橋主機）'}
+var maiOffered=false;   // /api/config's mai: the engine follows the spoken language only when MAI is offered
+function asrEngine(){return maiOffered?engineForLanguage($('language').value):'local'}   // no 辨識引擎 row (ui-night-celadon): the data destination notice says where audio goes
 function showRefineFit(){$('cloudRefineFit').textContent=qualityChosen()?'精準模式已包含，不需另外開啟':'傳送文字到外部服務 · 適合辨識已正確、想要譯文更通順'}
 // 團隊: every meeting belongs to one of the user's teams; the last choice stays in this browser.
 const NO_TEAM='尚未加入任何團隊，請聯絡管理員';
@@ -578,8 +606,9 @@ window.accountSoon.then(({teams})=>{   // page-switching: the remembered account
   $('team').replaceChildren(...teams.map(team=>Object.assign(document.createElement('option'),{value:team.id,textContent:team.name})));
   if(teams.some(team=>String(team.id)===saved))$('team').value=saved;
   $('team').hidden=!teams.length;$('teamHint').textContent=teams.length?'':NO_TEAM;
+  showSentence();
 });
-$('team').onchange=()=>{try{localStorage.setItem('team',$('team').value)}catch{}};
+$('team').onchange=()=>{try{localStorage.setItem('team',$('team').value)}catch{};showSentence()};
 async function createMeeting(teamId){
   const response=await fetch('/api/meetings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({team_id:teamId,language:$('language').value,engine:asrEngine(),title:$('topic').value.trim(),series_id:window.MeetingSeries?.seriesId()??null})});
   if(response.status===401){location.replace(ReturnPath.loginUrl(location.pathname,location.search));throw new Error('請先登入')}
@@ -610,11 +639,11 @@ checkServices();
 window.appConfig=fetch('/api/config').then(r=>r.ok?r.json():null).catch(()=>null);
 window.appConfig.then(config=>config||{cloudTranslate:true}).then(({cloudRefine,mai,quality:qualityReady,cloudTranslate})=>{
   cloudTranslation=!!cloudTranslate;
-  $('cloudRefineRow').hidden=!cloudRefine;$('asrEngineRow').hidden=!mai;$('qualityRow').hidden=!qualityReady;$('setupAdvanced').hidden=!(cloudRefine||mai||qualityReady);
+  maiOffered=!!mai;$('cloudRefineRow').hidden=!cloudRefine;$('qualityRow').hidden=!qualityReady;$('setupAdvanced').hidden=!(cloudRefine||qualityReady);
   try{$('quality').checked=localStorage.getItem('quality')==='1'}catch{}
   $('cloudRefine').disabled=qualityChosen();
   try{$('cloudRefine').checked=localStorage.getItem('cloudRefine')==='1'}catch{}
-  showEngine();showRefineFit();showPrivacy();showAdvanced();
+  showRefineFit();showPrivacy();showAdvanced();
 }).catch(()=>{});
 // Where audio and text go for the current choices (privacy-notice); the header and the footer say the same.
 let cloudTranslation=null;   // the translation model is an external service (cloud-translation); null until /api/config answered
@@ -759,7 +788,8 @@ window.InterpretMode?.ready.then(()=>{
 $('testMic').onclick=toggleMicTest;
 $('audioSource').onchange=updateSourceUI;
 updateSourceUI();
-$('microphone').onchange=()=>setMicStatus('已切換，請先測試音源');
+$('microphone').onchange=()=>{setMicStatus('已切換，請先測試音源');showSentence()};
+$('interpretPlay').addEventListener('change',showSentence);
 navigator.mediaDevices?.addEventListener('devicechange',()=>refreshMicrophones());
 refreshMicrophones().catch(()=>setMicStatus('無法讀取麥克風清單','error'));
 $('language').onchange=updateTranslationDirection;
@@ -778,7 +808,7 @@ const mobileQuery=matchMedia('(max-width: 760px), (max-width: 1000px) and (max-h
 const mobilePanels={transcript:$('transcript').closest('article'),translation:$('translation').closest('article')};
 const mobileFollow={transcript:true,translation:true};
 let mobileView='translation';
-const mobileSettingsNodes=[$('modeRow'),$('setupMeeting'),$('teamRow'),$('topicRow'),$('seriesRow'),$('setupAudio'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('interpretPlayRow'),$('setupAdvanced'),$('asrEngineRow'),$('cloudRefineRow'),$('qualityRow')];
+const mobileSettingsNodes=[$('modeRow'),$('setupMeeting'),$('teamRow'),$('topicRow'),$('seriesRow'),$('setupAudio'),$('audioSource').closest('.field'),$('microphone').closest('.field'),$('testMic'),$('sourceHint'),$('context').closest('.field'),$('interpretPlayRow'),$('setupAdvanced'),$('cloudRefineRow'),$('qualityRow')];
 const movableControls=[...mobileSettingsNodes,$('start')].map(node=>{
   const anchor=document.createComment('responsive-control');node.before(anchor);return{node,anchor};
 });
@@ -798,13 +828,26 @@ function setMobileView(view,focus=false){
   if(focus)$(`${view}Tab`).focus();
   if(mobileQuery.matches&&mobileFollow[view])requestAnimationFrame(()=>{$(view).scrollTop=$(view).scrollHeight});
 }
+// The start/end button: the phone's bottom slot; on wide windows the floating live bar during a session; else its own
+// place in the setup. Always the same node, so its handler, the stop class and 結束中… move with it.
+function placeStart(){
+  const start=$('start'),home=movableControls.find(c=>c.node===start).anchor,focused=document.activeElement===start;
+  if(mobileQuery.matches)$('mobileActionSlot').appendChild(start);
+  else if(document.body.classList.contains('live-session'))$('liveActionSlot').appendChild(start);
+  else home.after(start);
+  if(focused&&document.activeElement!==start)start.focus({preventScroll:true});   // moving a node drops its focus
+}
+// body.live-session: a session on a wide layout. Phones (mobileQuery, sideways ones included) keep their own layout.
+function syncLiveSession(){document.body.classList.toggle('live-session',$('liveBar').classList.contains('visible')&&!mobileQuery.matches)}
 function syncMobileLayout(){
   const mobile=mobileQuery.matches;
   if(!mobile&&$('mobileSettings').open)$('mobileSettings').close();
   movableControls.forEach(({node,anchor})=>{
-    if(mobile)(node.id==='start'?$('mobileActionSlot'):$('mobileSettingsFields')).appendChild(node);
+    if(node.id==='start')return;   // placeStart()
+    if(mobile)$('mobileSettingsFields').appendChild(node);
     else anchor.after(node);
   });
+  syncLiveSession();placeStart();showSentence();
   $('download').textContent=mobile?'↓ 匯出':'↓ 匯出逐字稿';
   setMobileView(mobileView);
   showAdvanced();
@@ -823,7 +866,7 @@ try{advancedOpen=localStorage.getItem('setupAdvancedOpen')==='1'}catch{}
 function showAdvanced(){
   const button=$('setupAdvanced'),folding=!mobileQuery.matches;
   button.disabled=!folding;
-  if(folding){button.setAttribute('aria-expanded',String(advancedOpen));button.setAttribute('aria-controls','asrEngineRow refineGroup')}
+  if(folding){button.setAttribute('aria-expanded',String(advancedOpen));button.setAttribute('aria-controls','refineGroup')}
   else{button.removeAttribute('aria-expanded');button.removeAttribute('aria-controls')}
   document.querySelector('.controls').classList.toggle('advanced-folded',folding&&!advancedOpen);
   $('advancedSummary').textContent=advancedSummary();

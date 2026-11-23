@@ -70,7 +70,7 @@ try {
   check('no border-radius outside the tokens (other than %, inherit, 0, <= 4px)', stray.length === 0, stray);
 
   // --- meeting-setup-layout ---
-  const ADVANCED = ['#asrEngineRow', '#cloudRefineRow', '#qualityRow'];
+  const ADVANCED = ['#cloudRefineRow', '#qualityRow'];   // ui-night-celadon: no 辨識引擎 row any more
   const visible = (page, selector) => page.locator(selector).isVisible();
   const loadMeeting = async page => { await page.goto(`${app}/`); await page.waitForFunction(() => !document.getElementById('setupAdvanced').hidden, null, {timeout: 10000}); };
   for (const width of [1280, 850]) {
@@ -78,11 +78,11 @@ try {
     await loadMeeting(page);
     check(`${width}px first visit: 進階 is folded`, await page.getAttribute('#setupAdvanced', 'aria-expanded') === 'false');
     const shown = await Promise.all(ADVANCED.map(s => visible(page, s)));
-    check(`${width}px first visit: 辨識引擎, 雲端精修, 精準模式 hidden`, shown.every(v => !v), shown);
+    check(`${width}px first visit: 雲端精修, 精準模式 hidden, no 辨識引擎 row`, shown.every(v => !v) && await page.locator('#asrEngineRow').count() === 0, shown);
     check(`${width}px first visit: 會議情境 visible`, await visible(page, '#context'));
     if (width === 1280) await page.screenshot({path: join(out, 'meeting-folded-1280.png')});
     await page.click('#setupAdvanced');
-    check(`${width}px pressing 進階 unfolds`, await visible(page, '#asrEngineRow') && await page.getAttribute('#setupAdvanced', 'aria-expanded') === 'true');
+    check(`${width}px pressing 進階 unfolds`, await visible(page, '#cloudRefineRow') && await page.getAttribute('#setupAdvanced', 'aria-expanded') === 'true');
     await page.reload(); await loadMeeting(page);
     check(`${width}px unfolded is remembered after a reload`, await page.getAttribute('#setupAdvanced', 'aria-expanded') === 'true'
       && (await Promise.all(ADVANCED.map(s => visible(page, s)))).every(Boolean));
@@ -92,7 +92,7 @@ try {
     // localStorage unavailable: folded, no error.
     const {context, page} = await open({init: () => Object.defineProperty(window, 'localStorage', {get() { throw new Error('blocked'); }})});
     await loadMeeting(page);
-    check('no storage: 進階 starts folded', await page.getAttribute('#setupAdvanced', 'aria-expanded') === 'false' && !await visible(page, '#asrEngineRow'));
+    check('no storage: 進階 starts folded', await page.getAttribute('#setupAdvanced', 'aria-expanded') === 'false' && !await visible(page, '#cloudRefineRow'));
     await context.close();
   }
   // The engine is not in the summary: the spoken language decides it.
@@ -139,7 +139,7 @@ try {
     const {context, page} = await open({width: 500});
     await page.goto(`${app}/`); await sleep(1500);
     await page.click('#mobileSettingsOpen');
-    check('500px: 辨識引擎 and 雲端精修 in the settings dialog without pressing 進階', await visible(page, '#mobileSettings #asrEngineRow') && await visible(page, '#mobileSettings #cloudRefineRow'));
+    check('500px: 雲端精修 in the settings dialog without pressing 進階, no 辨識引擎 row', await page.locator('#asrEngineRow').count() === 0 && await visible(page, '#mobileSettings #cloudRefineRow'));
     check('500px: 進階 is not a fold button there', await page.getAttribute('#setupAdvanced', 'aria-expanded') === null && await page.isDisabled('#setupAdvanced'));
     const look = await page.evaluate(() => { const s = getComputedStyle(document.getElementById('setupAdvanced'), '::after'); return {opacity: getComputedStyle(document.getElementById('setupAdvanced')).opacity, chevron: s.content}; });
     check('500px: 進階 looks like a heading (full strength, no chevron)', look.opacity === '1' && (look.chevron === 'none' || look.chevron === 'normal'), look);
@@ -151,7 +151,6 @@ try {
   const LOCAL_TEXT = '本機（語橋主機）', MAI_TEXT = '雲端辨識（音訊會傳送到外部服務）';
   const REFINE = ['只改寫譯文：每句定稿後幾秒內由雲端服務帶前後文重譯，原文不變', '傳送文字到外部服務 · 適合辨識已正確、想要譯文更通順'];
   const QUALITY = ['重新辨識再翻譯：語句結束後把音訊交給較準的辨識重新修字、斷句、翻譯，取代即時結果，約慢 10–25 秒', '傳送音訊與文字到外部服務 · 適合重要會議、需要準確紀錄；已包含雲端精修'];
-  const COVERED = '精準模式已包含，不需另外開啟';
   // Start a meeting in `language` and return the engine sent to POST /api/meetings and in the stream header.
   const startIn = async (language, {storage = {}, width = 1280, mai = true} = {}) => {
     const {context, page} = await open({width, storage});
@@ -162,7 +161,7 @@ try {
     await page.routeWebSocket('**/ws/transcribe', ws => ws.onMessage(message => { if (started === null && typeof message === 'string') { started = JSON.parse(message); ws.close(); } }));
     await page.goto(`${app}/`); await page.waitForFunction(() => !document.getElementById('setupAdvanced').hidden, null, {timeout: 10000});
     await page.selectOption('#language', language);
-    const row = await page.evaluate(() => ({hidden: document.getElementById('asrEngineRow').hidden, text: document.getElementById('asrEngineValue').textContent}));
+    const row = await page.evaluate(() => ({none: !document.getElementById('asrEngineRow')}));
     await page.click(width > 760 ? '#start' : '#mobileActionSlot #start');
     for (let i = 0; i < 50 && started === null; i++) await sleep(100);
     await context.close();
@@ -177,43 +176,44 @@ try {
   for (const [language, mai, text, engine] of [['zh', true, LOCAL_TEXT, 'local'], ['yue', true, LOCAL_TEXT, 'local'], ['auto', true, LOCAL_TEXT, 'local'],
     ['zh_ja', true, LOCAL_TEXT, 'local'], ['ja', true, MAI_TEXT, 'mai'], ['en', true, MAI_TEXT, 'mai'], ['ja', false, null, 'local']]) {
     const r = await startIn(language, {mai});
-    check(`engine by language: ${language}${mai ? '' : ' without MAI'} → ${text ?? '(row hidden)'}, sends ${engine}`,
-      (text === null ? r.row.hidden : !r.row.hidden && r.row.text === text) && r.meeting === engine && r.stream === engine, r);
+    check(`engine by language: ${language}${mai ? '' : ' without MAI'} sends ${engine}, no 辨識引擎 row`,
+      r.row.none && r.meeting === engine && r.stream === engine, r);
   }
   {
     const r = await startIn('zh', {storage: {asrEngine: 'mai'}});
-    check('an old stored asrEngine=mai is ignored: 中文 starts with local', r.row.text === LOCAL_TEXT && r.meeting === 'local' && r.stream === 'local', r);
+    check('an old stored asrEngine=mai is ignored: 中文 starts with local', r.meeting === 'local' && r.stream === 'local', r);
   }
   {
     const {context, page} = await open({storage: {cloudRefine: '0', quality: '0'}});
     await page.route('**/api/config', async route => { const r = await route.fetch(); route.fulfill({response: r, json: {...await r.json(), cloudTranslate: false}}); });
     await loadMeeting(page);
     await page.selectOption('#language', 'zh'); await page.selectOption('#targetLanguage', 'ja');
-    const note = async () => ({label: await page.textContent('#secureLabel'), engine: await page.textContent('#asrEngineValue'), header: await page.textContent('#privacyNote')});
+    const note = async () => ({label: await page.textContent('#secureLabel'), header: await page.textContent('#privacyNote')});
     const zh = await note();
-    check('中文 → 日本語: 本機 and 自架主機', zh.engine === LOCAL_TEXT && zh.label === '自架主機', zh);
+    check('中文 → 日本語: 自架主機', zh.label === '自架主機', zh);
     await page.click('#swap');
     const swapped = await note();
-    check('swap to 日本語 → 中文: the engine text and the privacy notice change without a reload',
-      await page.inputValue('#language') === 'ja' && swapped.engine === MAI_TEXT && swapped.label === '雲端辨識' && swapped.header.includes('音訊會傳送到外部服務'), swapped);
+    check('swap to 日本語 → 中文: the privacy notice names 雲端辨識 without a reload',
+      await page.inputValue('#language') === 'ja' && swapped.label === '雲端辨識' && swapped.header.includes('音訊會傳送到外部服務'), swapped);
     await context.close();
   }
+  // ui-night-celadon: the rows show only their names; both explanation lines live in the row's title.
   const explanations = page => page.evaluate(() => Object.fromEntries(['cloudRefineRow', 'qualityRow'].map(id => [id,
-    [...document.querySelectorAll(`#${id} .toggle-text small`)].map(s => ({text: s.textContent, shown: s.getBoundingClientRect().height > 0 && s.scrollWidth <= s.clientWidth + 1}))])));
+    {title: document.getElementById(id).title, small: [...document.querySelectorAll(`#${id} .toggle-text small`)].some(s => s.checkVisibility())}])));
   for (const width of [1280, 390]) {
     const {context, page} = await open({width, storage: {setupAdvancedOpen: '1', quality: '0'}});
     await page.goto(`${app}/`); await sleep(1500);
     if (width <= 760) await page.click('#mobileSettingsOpen');
     const seen = await explanations(page);
-    const ok = (rows, want) => rows.length === 2 && rows.every((r, i) => r.text === want[i] && r.shown);
-    check(`${width}px: 雲端精修 shows both explanation lines`, ok(seen.cloudRefineRow, REFINE), seen.cloudRefineRow);
-    check(`${width}px: 精準模式 shows both explanation lines`, ok(seen.qualityRow, QUALITY), seen.qualityRow);
+    const ok = (row, want) => !row.small && want.every(line => row.title.includes(line));
+    check(`${width}px: 雲端精修 shows its name only, both lines in its title`, ok(seen.cloudRefineRow, REFINE), seen.cloudRefineRow);
+    check(`${width}px: 精準模式 shows its name only, both lines in its title`, ok(seen.qualityRow, QUALITY), seen.qualityRow);
     await page.screenshot({path: join(out, `mode-help-${width}.png`)});
     if (width === 1280) {
       await page.check('#quality');
-      check('checking 精準模式: 雲端精修 is disabled and says 精準模式 covers it', await page.isDisabled('#cloudRefine') && await page.textContent('#cloudRefineFit') === COVERED);
+      check('checking 精準模式: 雲端精修 is disabled and the notice says 精準模式', await page.isDisabled('#cloudRefine') && (await page.textContent('#privacyNote')).startsWith('精準模式'));
       await page.uncheck('#quality');
-      check('unchecking 精準模式: 雲端精修 says what it sends again', !await page.isDisabled('#cloudRefine') && await page.textContent('#cloudRefineFit') === REFINE[1]);
+      check('unchecking 精準模式: 雲端精修 is available again', !await page.isDisabled('#cloudRefine'));
     }
     await context.close();
   }
@@ -235,7 +235,7 @@ try {
     await page.screenshot({path: join(out, 'meeting-390.png')});
     await page.click('#mobileSettingsOpen');
     const order = await page.evaluate(() => [...document.querySelectorAll('#mobileSettingsFields > :not([hidden])')].map(e => e.id).filter(id => ['asrEngineRow', 'cloudRefineRow', 'qualityRow'].includes(id)));
-    check('390px: the dialog shows 辨識引擎, 雲端精修, 精準模式 in that order', JSON.stringify(order) === JSON.stringify(['asrEngineRow', 'cloudRefineRow', 'qualityRow']), order);
+    check('390px: the dialog shows 雲端精修, 精準模式 in that order', JSON.stringify(order) === JSON.stringify(['cloudRefineRow', 'qualityRow']), order);
     await page.keyboard.press('Escape');
     await page.setViewportSize({width: 1280, height: 900}); await sleep(400);
     check('back at 1280px: 精準模式 returns to the 進階 group', await page.evaluate(() => document.getElementById('qualityRow').parentElement.id) === 'refineGroup');

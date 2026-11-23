@@ -34,7 +34,7 @@
 .series-suggestion-head { margin: 0; font-size: 12px; }
 .series-suggestion-head b { color: var(--mint); }
 .series-evidence { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-.series-evidence span { font-family: ui-monospace, monospace; }
+.series-evidence span { font-family: var(--font-mono); }
 .series-suggestion-actions { display: flex; gap: 6px; }
 .series-suggestion-actions button { padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--radius-small); background: transparent; color: var(--text); font-size: 12px; cursor: pointer; }
 .series-suggestion-actions .series-apply { border-color: var(--mint); background: var(--mint); color: var(--accent-ink); font-weight: 700; }
