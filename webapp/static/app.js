@@ -235,14 +235,21 @@ function showSentence(){
   const box=$('setupSentence');if(!box||!window.SetupSentence)return;
   const names={language:'語音語言',targetLanguage:'翻譯成',audioSource:'音訊來源',microphone:'麥克風來源',team:'團隊',interpretPlay:'同步播放譯音'};
   const live=document.body.classList.contains('live-session');
-  box.replaceChildren(...SetupSentence.compose(sentenceState()).map(part=>{
-    if(!part.field||live)return document.createTextNode(part.text);
-    const button=Object.assign(document.createElement('button'),{type:'button',className:'sentence-pick',textContent:part.text});
-    button.dataset.field=part.field;button.setAttribute('aria-label',`更改${names[part.field]}`);return button;
-  }));
+  // One span per clause (ui-setup-collapse): lines break between clauses, a clause wider than the line still wraps.
+  const clauses=[],clause=()=>{const span=Object.assign(document.createElement('span'),{className:'sentence-clause'});clauses.push(span);return span};
+  let current=clause();
+  for(const part of SetupSentence.compose(sentenceState())){
+    if(part.field&&!live){
+      const button=Object.assign(document.createElement('button'),{type:'button',className:'sentence-pick',textContent:part.text});
+      button.dataset.field=part.field;button.setAttribute('aria-label',`更改${names[part.field]}`);current.append(button);continue;
+    }
+    for(const piece of part.text.split(/(?<=，)/)){if(!piece)continue;current.append(piece);if(piece.endsWith('，'))current=clause()}
+  }
+  box.replaceChildren(...clauses.filter(span=>span.textContent));
 }
 $('setupSentence').addEventListener('click',event=>{
   const button=event.target.closest('.sentence-pick'),control=button&&$(button.dataset.field);if(!control)return;
+  if(document.querySelector('.controls').classList.contains('setup-folded'))setSetupMore(true);   // a hidden control can take no focus
   control.focus();
   if(control.tagName==='SELECT'&&!control.disabled)try{control.showPicker()}catch{}   // no picker (or not allowed): the focus alone
 });
@@ -850,7 +857,7 @@ function syncMobileLayout(){
   syncLiveSession();placeStart();showSentence();
   $('download').textContent=mobile?'↓ 匯出':'↓ 匯出逐字稿';
   setMobileView(mobileView);
-  showAdvanced();
+  showAdvanced();showSetupMore();
 }
 // 進階 folds away on wide windows and remembers the choice (meeting-setup-layout); folded, its button names the advanced
 // options in use. Folding only hides the fields: their values and what a meeting sends stay the same. Phones keep the
@@ -871,6 +878,17 @@ function showAdvanced(){
   document.querySelector('.controls').classList.toggle('advanced-folded',folding&&!advancedOpen);
   $('advancedSummary').textContent=advancedSummary();
 }
+// 更多設定 (ui-setup-collapse): on wide windows the setup starts folded to the mode buttons, this button and the start
+// button; the choice is remembered. Phones keep the settings dialog. Folding only hides fields, never changes them.
+let setupMoreOpen=false;
+try{setupMoreOpen=localStorage.getItem('setupMoreOpen')==='1'}catch{}
+function showSetupMore(){
+  const wide=!mobileQuery.matches,button=$('setupMore');
+  button.hidden=!wide;button.setAttribute('aria-expanded',String(setupMoreOpen));
+  document.querySelector('.controls').classList.toggle('setup-folded',wide&&!setupMoreOpen);
+}
+function setSetupMore(open){if(!open&&testStream)stopMicTest();setupMoreOpen=open;try{localStorage.setItem('setupMoreOpen',open?'1':'0')}catch{}showSetupMore()}
+$('setupMore').onclick=()=>setSetupMore(!setupMoreOpen);
 $('setupAdvanced').onclick=()=>{
   if(mobileQuery.matches)return;
   advancedOpen=!advancedOpen;

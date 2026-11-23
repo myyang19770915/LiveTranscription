@@ -20,6 +20,7 @@ async function open({silent = false, width = 1280, noFrames = false} = {}) {
   const context = await browser.newContext({permissions: ['microphone'], viewport: {width, height: 900}});
   await context.addCookies([{name: 'yq_session', value: process.env.YUQIAO_SESSION, url: app}]);
   const page = await context.newPage();
+  await page.addInitScript(() => { try { localStorage.setItem('setupMoreOpen', '1'); } catch {} });   // ui-setup-collapse: 測試音源 is in the unfolded setup
   await page.addInitScript(({silent, noFrames}) => {
     const devices = navigator.mediaDevices, realUser = devices.getUserMedia.bind(devices);
     const outs = [];

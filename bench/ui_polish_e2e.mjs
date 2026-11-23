@@ -36,7 +36,8 @@ const check = (name, ok, detail = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} 
 const open = async ({width = 1280, storage = {}, reducedMotion = 'no-preference', signedIn = true, init} = {}) => {
   const context = await browser.newContext({viewport: {width, height: 900}, reducedMotion, permissions: signedIn ? ['microphone'] : []});
   if (signedIn) await context.addCookies([{name: 'yq_session', value: token, url: `${app}/`}]);
-  await context.addInitScript(entries => { try { for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v); } catch {} }, storage);
+  // ui-setup-collapse: the setup starts folded on wide windows; these checks need it unfolded.
+  await context.addInitScript(entries => { try { for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v); } catch {} }, {setupMoreOpen: '1', ...storage});
   if (init) await context.addInitScript(init);
   const page = await context.newPage();
   page.on('pageerror', e => check('no page errors', false, e.message));

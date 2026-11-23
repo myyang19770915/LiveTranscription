@@ -29,6 +29,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
 .lead { max-width: 640px; margin: 10px 0 0; color: var(--muted); font-size: 15px; line-height: 1.7; }
 .lead strong { color: var(--text); font-weight: 600; }
+.retention-note { margin: 8px 0 0; color: var(--muted); font-size: 13px; }   /* 我的紀錄: how long records are kept */
+.retention-note:has(#retention:empty) { display: none; }
 .summary { margin: 0; color: var(--muted); font-size: 14px; white-space: nowrap; }
 
 .card { border: 1px solid var(--border); border-radius: var(--radius-feature); background: var(--panel); box-shadow: var(--shadow-card); }

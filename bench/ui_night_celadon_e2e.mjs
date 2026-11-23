@@ -63,6 +63,7 @@ async function open(path, {width = 1440, height = 900, signedIn = true, touch = 
   const context = await browser.newContext({permissions: ['microphone'], viewport: {width, height}, hasTouch: touch, isMobile: touch});
   if (signedIn) await context.addCookies([{name: 'yq_session', value: process.env.YUQIAO_SESSION, url: app}]);
   await context.route('**/api/meetings**', route => route.request().method() === 'POST' ? route.abort() : route.continue());
+  await context.addInitScript(() => { try { localStorage.setItem('setupMoreOpen', '1'); } catch {} });   // ui-setup-collapse: these checks need the whole setup
   const page = await context.newPage();
   const errors = [], requests = [];
   page.on('pageerror', e => errors.push(String(e)));

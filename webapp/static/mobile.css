@@ -55,7 +55,7 @@
   .transcripts[data-view="transcript"] .translation-card { display: none; }
   .card-head { flex: 0 0 58px; min-height: 58px; padding: 9px 12px; }
   .card-title { gap: 8px; min-width: 0; }
-  .language-dot { width: 30px; height: 30px; border-radius: var(--radius-control); }
+  .language-dot { min-width: 30px; width: auto; height: 30px; padding: 0 6px; white-space: nowrap; border-radius: var(--radius-control); }
   .label { display: none; }
   .card-head h2 { margin: 0; font-size: 13px; }
   .head-actions { gap: 4px; }

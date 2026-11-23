@@ -117,6 +117,7 @@ async function records({path = 'interpret', retentionDays = 90} = {}) {
 async function home({allowed = true, configured = true, saveMs = 0, setup} = {}) {
   const context = await browser.newContext();
   await context.addCookies([{name: 'yq_session', value: process.env.YUQIAO_SESSION, url: app}]);
+  await context.addInitScript(() => { try { localStorage.setItem('setupMoreOpen', '1'); } catch {} });   // ui-setup-collapse: the options are in the unfolded setup
   if (saveMs) await context.addInitScript(ms => { window.YQ_LIVE_SAVE_MS = ms; }, saveMs);
   const page = await context.newPage();
   const seen = {translateRequests: 0};

@@ -624,3 +624,61 @@ code:
 tests:
   - webapp/test_server.py
 -->
+
+---
+### Requirement: List pages carry no lead paragraph
+
+The meeting list (`/meetings`) and 我的紀錄 (`/interpret`) SHALL NOT show an explanatory paragraph under the page title. The team administration page (`/admin`) SHALL keep its paragraph, which states who can see which meetings.
+
+#### Scenario: Page headers
+
+- **WHEN** `/meetings`, `/interpret` and `/admin` are opened at 1440px
+- **THEN** `/meetings` and `/interpret` have no visible `p.lead`, and `/admin` has one
+
+<!-- @trace
+source: ui-setup-collapse
+updated: 2026-11-23
+code:
+  - webapp/static/admin.css
+  - webapp/static/review.html
+  - bench/audio_test_e2e.mjs
+  - webapp/static/app.js
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - webapp/static/actions.html
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - webapp/static/meetings.html
+  - webapp/static/minutes.html
+  - bench/ui_polish_e2e.mjs
+  - webapp/revise_pass.py
+  - webapp/static/search.html
+  - webapp/static/ask.html
+  - bench/ui_consistency_e2e.mjs
+  - bench/meeting_end_e2e.mjs
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - bench/interpret_e2e.mjs
+  - 螢幕擷取畫面 2026-11-23 214336.png
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - webapp/static/interpret.html
+  - 20261122_215017.mp4
+  - lab/realtime-translate/costs.jsonl
+  - lab/realtime-translate/index.html
+  - webapp/static/admin.html
+  - webapp/static/index.html
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - webapp/static/mobile.css
+  - bench/ui_night_celadon_e2e.mjs
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - 20261122_211227.mp4
+  - lab/realtime-translate/server.py
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - webapp/static/metrics.html
+  - webapp/static/refine.css
+  - webapp/server.py
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - chang01.png
+  - gpt-realtime-translate_demoUI.png
+  - bench/ui_setup_collapse_e2e.mjs
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+tests:
+  - webapp/test_server.py
+-->

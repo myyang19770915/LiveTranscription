@@ -23,7 +23,7 @@ const MARKED = {'/': '即時會議', '/meetings': '會議紀錄', '/interpret': 
 async function open(path, {width = 1440, theme = 'dark', signedIn = true} = {}) {
   const context = await browser.newContext({viewport: {width, height: 900}});
   if (signedIn) await context.addCookies([{name: 'yq_session', value: process.env.YUQIAO_SESSION, url: app + '/'}]);
-  await context.addInitScript(t => { try { localStorage.setItem('interpreter-theme', t); } catch {} }, theme);
+  await context.addInitScript(t => { try { localStorage.setItem('interpreter-theme', t); localStorage.setItem('setupMoreOpen', '1'); } catch {} }, theme);   // ui-setup-collapse: unfolded
   const page = await context.newPage();
   await page.goto(app + path); await page.waitForTimeout(1000);
   return {page, context};
