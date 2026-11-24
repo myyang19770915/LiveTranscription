@@ -95,6 +95,7 @@ function setLiveMode(mode,persist=true){
   // 開會 the remembered choice returns. Done after the swap, on the menu that is shown now.
   const none=$('targetLanguage').querySelector('option[value="none"]');
   if(none)none.hidden=translate;
+  if(translate&&!interpret&&$('language').value!=='zh_ja'){const kept=recalled('translateTarget'),option=kept&&kept!=='none'&&$('targetLanguage').querySelector(`option[value="${CSS.escape(kept)}"]`);if(option&&!option.hidden)$('targetLanguage').value=kept}
   if(translate&&$('targetLanguage').value==='none')$('targetLanguage').value='en';
   else if(!translate&&none&&rememberedTarget&&$('language').value!=='zh_ja'&&$('targetLanguage').querySelector(`option[value="${CSS.escape(rememberedTarget)}"]`))$('targetLanguage').value=rememberedTarget;
   if(translate&&fixedTarget==='none')fixedTarget='en';
@@ -196,7 +197,9 @@ function toast(message,duration=2200){const el=$('toast');el.textContent=message
 const screenAwake=ScreenAwake.create(navigator,document);   // screen-awake: held while a session runs
 function setControls(active){active?screenAwake.hold():screenAwake.release();for(const b of document.querySelectorAll('.mode-btn'))b.disabled=active||b.dataset.locked==='1';const pair=direction.source==='zh_ja';$('language').disabled=active;$('targetLanguage').disabled=active||pair;$('audioSource').disabled=active;$('microphone').disabled=active;$('testMic').disabled=active;$('context').disabled=active;$('team').disabled=active;$('topic').disabled=active;window.MeetingSeries?.lock(active);$('cloudRefine').disabled=active||qualityChosen();$('quality').disabled=active;$('swap').disabled=active||pair||interpretOn()||noTranslation();$('liveBar').classList.toggle('visible',active);$('liveBar').setAttribute('aria-hidden',String(!active));
   syncLiveSession();placeStart();showSentence()}   // wide windows fold the setup into the floating bar (ui-night-celadon)
-function updateTranslationDirection(){
+// chosen: the user picked the language or 翻譯成 (or swapped them); only then is it remembered (remember-setup-choices),
+// never when the page adjusts a control by itself (a mode without 不翻譯 or 中日雙向).
+function updateTranslationDirection(chosen=false){
   const pair=$('language').value==='zh_ja';
   if(pair){if($('targetLanguage').value!=='zh_ja')fixedTarget=$('targetLanguage').value;$('targetLanguage').value='zh_ja'}
   else if($('targetLanguage').value==='zh_ja')$('targetLanguage').value=fixedTarget==='none'&&translateOnly()?'en':fixedTarget;
@@ -204,9 +207,11 @@ function updateTranslationDirection(){
   direction={source:$('language').value,target:$('targetLanguage').value};
   if(!pair&&direction.source===direction.target){$('targetLanguage').value=direction.source==='en'?'zh':'en';direction.target=$('targetLanguage').value}
   document.body.classList.toggle('no-translation',noTranslation());
-  if(!translateOnly()){   // 開會's choices are remembered (transcript-only): the spoken language, and 翻譯成 with 不翻譯 included
-    try{localStorage.setItem('meetingLanguage',direction.source)}catch{}
-    if(!pair){rememberedTarget=direction.target;try{localStorage.setItem('meetingTarget',direction.target)}catch{}}
+  if(!translateOnly()&&!pair)rememberedTarget=direction.target;   // 開會's 翻譯成 (不翻譯 included) comes back after another mode
+  if(chosen===true){
+    // One spoken language for the three modes; 翻譯成 for 開會 and for 即時翻譯 apart (即時口譯 keeps its own, interpret-mode.js).
+    remember('meetingLanguage',direction.source);
+    if(!pair&&!interpretOn())remember(translateOnly()?'translateTarget':'meetingTarget',direction.target);
   }
   if(noTranslation())$('swap').disabled=true;   // nothing to swap with
   translationEpoch++;activeTranslation?.abort();activeTranslation=null;clearTimeout(translationTimer);clearTimeout(pauseTimer);translated='';draftText='';translationOffset=0;translationHistory=[];flushRequested=false;lastDraftSource='';translationFailures=0;renderTranslation();
@@ -264,7 +269,9 @@ $('setupSentence').addEventListener('click',event=>{
 });
 function updateSourceUI(){const mode=selectedSource(),system=mode!=='microphone';$('sourceHint').hidden=!system;   // the headphone tip is gone; sharing steps stay
   $('microphone').closest('.mic-field').classList.toggle('is-hidden',mode==='system');$('sourceHint').textContent=system?'點「測試音源」或「開始會議」後，在 Chrome 分享視窗勾選「分享分頁音訊」或「分享系統音訊」。只選畫面、不分享音訊，無法轉錄。'+(mode==='mixed'?'混合模式也會收取麥克風；建議使用耳機。':''):'使用耳機開會可避免喇叭聲被麥克風重複收進來。';$('testMic').querySelector('small').textContent=system?'開啟分享選擇器':'確認有聲音';if(!testStream)mediaUnavailable()?setMicStatus(mediaUnavailable(),'error'):setMicStatus(system?'尚未連接分享音訊':'尚未測試音源');showSentence()}
-function audioConstraints(){const selected=$('microphone').value;return{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true,...(selected&&selected!=='default'?{deviceId:{exact:selected}}:{})}}
+// Before the browser gives access, the list has no device ids: the remembered microphone is asked for as `ideal`, so the
+// first test or meeting after a reload opens it (remember-setup-choices), or the default one when it is unplugged.
+function audioConstraints(){const selected=$('microphone').value,unnamed=[...$('microphone').options].every(o=>!o.value),kept=unnamed&&!micChosen?recalled('microphoneId'):'';return{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true,...(selected&&selected!=='default'?{deviceId:{exact:selected}}:kept?{deviceId:{ideal:kept}}:{})}}
 function setMicStatus(text,kind=''){$('micStatus').textContent=text;$('micStatus').className=kind}
 // Browsers offer media capture only on secure pages (https or localhost): over http the API is missing and calling it
 // throws a script error nobody can act on (microphone-access).
@@ -306,18 +313,29 @@ async function acquireAudio(){
   }catch(error){streams.forEach(media=>media.getTracks().forEach(track=>track.stop()));throw error}
 }
 function streamLabel(streams){const names=streams.flatMap(media=>media.getAudioTracks().map(track=>track.label)).filter(Boolean);return names.join(' + ')||'已連接音訊'}
+// remember-setup-choices: what the user chose stays after a reload or 清除. Storage that cannot be used is ignored.
+function remember(key,value){try{localStorage.setItem(key,value)}catch{}}
+function recalled(key){try{return localStorage.getItem(key)||''}catch{return ''}}
+let micChosen=false;   // the user picked a microphone since the page loaded
 async function refreshMicrophones(preferredId=''){
   if(mediaUnavailable()){setMicStatus(mediaUnavailable(),'error');return}
   if(!navigator.mediaDevices?.enumerateDevices){setMicStatus('瀏覽器不支援裝置選擇','error');return}
   const permission=await microphonePermission();
   if(permission==='denied')setMicStatus('Chrome 已封鎖麥克風，請在網址列解除','error');
   else if(permission==='prompt')setMicStatus('請先按「測試音源」並允許麥克風');
-  const current=preferredId||$('microphone').value;
+  const shown=$('microphone').value;
   const devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput');
   $('microphone').innerHTML='';
   devices.forEach((device,index)=>{const option=document.createElement('option');option.value=device.deviceId;option.textContent=micName(device.label)||`麥克風 ${index+1}`;$('microphone').appendChild(option)});
   if(!devices.length){const option=document.createElement('option');option.value='default';option.textContent='找不到麥克風';$('microphone').appendChild(option);setMicStatus('沒有可用的輸入裝置','error');return}
-  if([...$('microphone').options].some(o=>o.value===current))$('microphone').value=current;
+  // Which one stays selected: the one in use, else the remembered one by its id (what the user chose last, on this visit
+  // or an earlier one), else, until the user chooses on this visit, the remembered one by its name (ids change when site
+  // data is cleared), else the one shown before, else the first. Only a choice by the user is stored (the microphone's
+  // change event), so a microphone that is unplugged or drops out is selected again when it returns.
+  const options=[...$('microphone').options],has=id=>id&&options.some(o=>o.value===id);
+  const byName=!micChosen&&recalled('microphoneLabel')?options.find(o=>o.textContent===recalled('microphoneLabel'))?.value:'';
+  const pick=[preferredId,recalled('microphoneId'),byName,shown].find(has);
+  if(pick)$('microphone').value=pick;
   showSentence();
 }
 function stopMicTest(){cancelAnimationFrame(testAnimation);clearTimeout(testSilence);clearInterval(testSampler);testSources.forEach(source=>source.disconnect());testStreams.forEach(media=>media.getTracks().forEach(track=>track.stop()));testAudioContext?.close();testStream=testAudioContext=testAnalyser=null;testStreams=[];testSources=[];$('testMic').classList.remove('testing');$('testMic').querySelector('b').textContent='測試音源';$('microphone').disabled=false;$('audioSource').disabled=false;$('micTestLevel').style.transform='scaleX(.03)';updateSourceUI()}
@@ -793,10 +811,10 @@ $('start').onclick=()=>stream?stopMeeting():startMeeting();
 for(const b of document.querySelectorAll('.mode-btn'))b.onclick=()=>setLiveMode(b.dataset.mode);
 let rememberedMode='meeting';try{rememberedMode=localStorage.getItem('liveMode')||'meeting'}catch{}
 let rememberedTarget='';try{rememberedTarget=localStorage.getItem('meetingTarget')||''}catch{}
-if(rememberedMode==='meeting'){
-  let language='';try{language=localStorage.getItem('meetingLanguage')||''}catch{}
+{
+  const language=recalled('meetingLanguage');
   if(language&&$('language').querySelector(`option[value="${CSS.escape(language)}"]`))$('language').value=language;
-  if(rememberedTarget&&$('targetLanguage').querySelector(`option[value="${CSS.escape(rememberedTarget)}"]`))$('targetLanguage').value=rememberedTarget;
+  if(rememberedMode==='meeting'&&rememberedTarget&&$('targetLanguage').querySelector(`option[value="${CSS.escape(rememberedTarget)}"]`))$('targetLanguage').value=rememberedTarget;
 }
 setLiveMode(rememberedMode==='meeting'?'meeting':'translate',false);
 // 即時口譯 is offered to granted users only; a disabled button explains nothing on hover, so the reason stands next to the modes.
@@ -805,15 +823,17 @@ window.InterpretMode?.ready.then(()=>{
   const why=window.InterpretMode.reason();$('interpretLocked').textContent=why;$('interpretLocked').hidden=!why;
 });
 $('testMic').onclick=toggleMicTest;
-$('audioSource').onchange=updateSourceUI;
+$('audioSource').onchange=()=>{remember('audioSource',$('audioSource').value);updateSourceUI()};
+// A browser that cannot share tab or system audio is set back to the microphone further down.
+{const kept=recalled('audioSource');if(kept&&$('audioSource').querySelector(`option[value="${CSS.escape(kept)}"]`))$('audioSource').value=kept}
 updateSourceUI();
-$('microphone').onchange=()=>{setMicStatus('已切換，請先測試音源');showSentence()};
+$('microphone').onchange=()=>{micChosen=true;remember('microphoneId',$('microphone').value);remember('microphoneLabel',$('microphone').selectedOptions[0]?.textContent||'');setMicStatus('已切換，請先測試音源');showSentence()};
 $('interpretPlay').addEventListener('change',showSentence);
 navigator.mediaDevices?.addEventListener('devicechange',()=>refreshMicrophones());
 refreshMicrophones().catch(()=>setMicStatus('無法讀取麥克風清單','error'));
-$('language').onchange=updateTranslationDirection;
-$('targetLanguage').onchange=updateTranslationDirection;
-$('swap').onclick=()=>{if($('language').value==='auto')return toast('請先選擇明確的語音語言，再交換翻譯方向');const source=$('language').value;$('language').value=$('targetLanguage').value;$('targetLanguage').value=source;updateTranslationDirection()};
+$('language').onchange=()=>updateTranslationDirection(true);
+$('targetLanguage').onchange=()=>updateTranslationDirection(true);
+$('swap').onclick=()=>{if($('language').value==='auto')return toast('請先選擇明確的語音語言，再交換翻譯方向');const source=$('language').value;$('language').value=$('targetLanguage').value;$('targetLanguage').value=source;updateTranslationDirection(true)};
 updateTranslationDirection();
 $('clear').onclick=()=>location.reload();
 $('download').onclick=()=>saveFile(transcriptFile(),`${filePrefix()}-${meetingStamp||new Date().toISOString().slice(0,19).replaceAll(':','-')}.txt`);
