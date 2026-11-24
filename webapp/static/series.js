@@ -135,7 +135,9 @@
     showNewForm(false);store.set(`series:${teamId}`,$('series').value);loadItems();
   };
   $('seriesCreate').onclick=createSeries;
-  $('seriesName').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();createSeries()}if(event.key==='Escape'){$('series').value=store.get(`series:${teamId}`)||'';showNewForm(false)}};
+  // An input method's own Enter (picking a candidate) or Escape (cancelling the composition) is left to it
+  // (ime-safe-enter-submit): Safari sends compositionend first, so keyCode 229 also marks it.
+  $('seriesName').onkeydown=event=>{if(event.isComposing||event.keyCode===229)return;if(event.key==='Enter'){event.preventDefault();createSeries()}if(event.key==='Escape'){$('series').value=store.get(`series:${teamId}`)||'';showNewForm(false)}};
   $('seriesCancel').onclick=()=>{$('series').value=store.get(`series:${teamId}`)||'';showNewForm(false);loadItems()};
   $('detect').checked=store.get('progressDetect')==='1';
   $('detect').onchange=()=>{store.set('progressDetect',$('detect').checked?'1':'0');if($('detect').checked)maybeCheck(true)};

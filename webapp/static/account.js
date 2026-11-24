@@ -158,6 +158,41 @@ window.AvatarPhoto=(()=>{
   return {crop,upload,remove,pick,initial};
 })();
 
+// Menus as popovers (web-platform-polish, viewport-aware-dropdowns): popover="auto" puts an open menu in the top
+// layer, so nothing on the page covers it, and the browser closes it on a click outside (light dismiss). Browsers
+// without Popover (before 2025) get the `hidden` attribute and a hand-made outside click instead. The caller still
+// places the menu and handles Escape, so the focus always goes back to the button that opened it.
+// opener(): the button that opened the menu, or null. closed(focusWasInside): the menu is closing, by any means.
+window.MenuPopover=(()=>{
+  const native=typeof HTMLElement.prototype.showPopover==='function';
+  const isOpen=menu=>native?menu.matches(':popover-open'):!menu.hidden;
+  function setup(menu,opener,closed){
+    // The opener pressed while its menu is open: the click that follows closes the menu and must not reopen it, also
+    // where the light dismiss already closed it (browsers without the `source` option of showPopover).
+    let pressed=null,pressedAt=0;
+    document.addEventListener('pointerdown',event=>{
+      const button=opener();
+      pressed=button&&isOpen(menu)&&button.contains(event.target)?button:null;pressedAt=performance.now();
+      if(!native&&isOpen(menu)&&!menu.contains(event.target)&&!pressed){menu.hidden=true;closed(false)}
+    },true);
+    if(native){
+      menu.hidden=false;menu.setAttribute('popover','auto');
+      menu.addEventListener('beforetoggle',event=>{if(event.newState==='closed')closed(menu.contains(document.activeElement))});
+    }else menu.hidden=true;
+    return {
+      isOpen:()=>isOpen(menu),
+      pressedAgain(button){const hit=pressed===button&&performance.now()-pressedAt<1000;pressed=null;return hit},
+      show(button){
+        if(isOpen(menu))return;
+        if(!native){menu.hidden=false;return}
+        try{menu.showPopover({source:button})}catch{menu.showPopover()}
+      },
+      hide(){if(!isOpen(menu))return;if(native)menu.hidePopover();else menu.hidden=true},
+    };
+  }
+  return {setup};
+})();
+
 // The header's page links (site-navigation). /review and /minutes belong to 會議紀錄, /ask to 搜尋.
 const NAV_LINKS=[{key:'live',href:'/',text:'即時會議'},{key:'meetings',href:'/meetings',text:'會議紀錄'},
   {key:'interpret',href:'/interpret',text:'我的紀錄',narrow:true},{key:'actions',href:'/actions',text:'待辦看板'},
@@ -223,7 +258,7 @@ function ownAvatar(me,make,signOut,here=''){
   const wrap=make('span',{className:'account-me'});
   const button=make('button',{type:'button',className:'account-avatar',title:'更換我的照片',ariaLabel:'我的照片'});
   button.setAttribute('aria-haspopup','menu');button.setAttribute('aria-expanded','false');
-  const menu=make('div',{className:'account-menu',hidden:true});
+  const menu=make('div',{className:'account-menu'});
   menu.setAttribute('role','menu');
   const message=make('p',{className:'account-menu-error',hidden:true});
   const face=()=>{
@@ -233,13 +268,42 @@ function ownAvatar(me,make,signOut,here=''){
     img.onerror=()=>img.replaceWith(letter());
     return img;
   };
-  const open=()=>{
-    menu.hidden=false;button.setAttribute('aria-expanded','true');
-    document.addEventListener('pointerdown',outside);document.addEventListener('keydown',escape);
+  // A popover below the avatar, right edges aligned (web-platform-polish, MenuPopover): a click outside closes it, and
+  // it works from the keyboard as a menu button (site-navigation "The avatar menu works from the keyboard").
+  let shown=false;
+  const dismiss=event=>{if(event.type==='scroll'&&menu.contains(event.target))return;close(menu.contains(document.activeElement))};
+  const finish=refocus=>{   // the menu is closing, by any means
+    if(!shown)return;
+    shown=false;button.setAttribute('aria-expanded','false');
+    removeEventListener('resize',dismiss);removeEventListener('scroll',dismiss,true);
+    if(refocus)button.focus({preventScroll:true});
   };
-  const close=()=>{menu.hidden=true;button.setAttribute('aria-expanded','false');document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape)};
-  const outside=event=>{if(!wrap.contains(event.target))close()};
-  const escape=event=>{if(event.key==='Escape'){close();button.focus()}};
+  const pop=MenuPopover.setup(menu,()=>shown?button:null,finish);
+  const items=()=>[...menu.querySelectorAll('[role=menuitem]')].filter(item=>item.checkVisibility?.()??item.getClientRects().length>0);   // the ones shown at this width
+  const place=()=>{const r=button.getBoundingClientRect();menu.style.top=`${r.bottom+6}px`;menu.style.left=`${Math.max(12,r.right-menu.offsetWidth)}px`};
+  // focus: 'first' or 'last' item, or null to leave the focus where it is.
+  const open=(focus=null)=>{
+    if(!shown){
+      pop.show(button);shown=true;button.setAttribute('aria-expanded','true');place();
+      addEventListener('resize',dismiss);addEventListener('scroll',dismiss,true);
+    }
+    const list=items();
+    (focus==='first'?list[0]:focus==='last'?list.at(-1):null)?.focus();
+  };
+  const close=(refocus=false)=>{if(!shown)return;finish(refocus);pop.hide()};
+  menu.addEventListener('keydown',event=>{
+    if(event.key==='Escape'||event.key==='Tab'){event.preventDefault();close(true);return}
+    const list=items(),at=list.indexOf(document.activeElement);
+    const go=index=>{event.preventDefault();list[(index+list.length)%list.length]?.focus()};
+    if(event.key==='ArrowDown')go(at+1);
+    else if(event.key==='ArrowUp')go(at<0?list.length-1:at-1);
+    else if(event.key==='Home')go(0);
+    else if(event.key==='End')go(list.length-1);
+  });
+  button.addEventListener('keydown',event=>{
+    if(event.key!=='ArrowDown'&&event.key!=='ArrowUp')return;
+    event.preventDefault();message.hidden=true;open(event.key==='ArrowUp'?'last':'first');
+  });
   const show=avatarUrl=>{me.avatarUrl=avatarUrl;button.replaceChildren(face());render()};
   const changed=avatarUrl=>{
     show(avatarUrl);
@@ -274,9 +338,10 @@ function ownAvatar(me,make,signOut,here=''){
   render();
   button.append(face());
   button.onclick=()=>{
-    if(!menu.hidden){close();return}
-    message.hidden=true;open();
-    menu.querySelector('button')?.focus();
+    const again=pop.pressedAgain(button);
+    if(shown){close(true);return}
+    if(again)return;   // that press already closed the menu (light dismiss)
+    message.hidden=true;open('first');
   };
   wrap.append(button,menu);
   return wrap;

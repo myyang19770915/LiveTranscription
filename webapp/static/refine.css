@@ -477,7 +477,19 @@ main > header.setup-head { align-items: flex-start; gap: var(--space-6); padding
   padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); color: var(--text);
   box-shadow: 0 16px 40px rgb(0 0 0 / .35); overscroll-behavior: contain; scrollbar-width: thin; outline: none; }
 :root[data-theme="light"] .sentence-menu { box-shadow: 0 12px 32px rgb(20 32 27 / .14); }
+/* web-platform-polish: a popover; inset and margin undo the browser's centring so the top and left set by sentence-menu.js
+   place it below the word. Closed: display none, also where :popover-open is unknown (the hidden attribute). */
+.sentence-menu { inset: auto; margin: 0; }
 .sentence-menu[hidden] { display: none; }
+.sentence-menu[popover]:not(:popover-open) { display: none; }
+/* web-platform-polish (visual-tokens "Menus fade in when they open"): 150ms fade-in from the top layer; a 4px slide only
+   without reduced motion. Closing is not animated (no display or overlay transition). */
+.sentence-menu:popover-open { opacity: 1; transition: opacity 150ms ease-out; }
+@starting-style { .sentence-menu:popover-open { opacity: 0; } }
+@media (prefers-reduced-motion: no-preference) {
+  .sentence-menu:popover-open { translate: 0 0; transition: opacity 150ms ease-out, translate 150ms ease-out; }
+  @starting-style { .sentence-menu:popover-open { translate: 0 -4px; } }
+}
 .sentence-menu-group { padding: 10px 12px 4px; color: var(--muted); font-size: 12px; font-weight: 500; }
 .sentence-menu-option { position: relative; display: flex; align-items: center; min-height: 44px; padding: 0 36px 0 12px; border-radius: var(--radius-control);
   font-size: 15px; line-height: 1.35; cursor: pointer; outline: none; }

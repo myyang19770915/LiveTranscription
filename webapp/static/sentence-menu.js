@@ -1,17 +1,19 @@
 // The live page's sentence menus (ui-sentence-menus, meeting-setup-layout "Sentence words open their setting"): a setting
 // word opens a listbox right below it with the options of its own control. The control stays the only state: choosing
 // sets it and fires its change event, exactly as choosing it in the settings area would. One menu at a time.
+// The menu is a popover (web-platform-polish): top layer, closed by a click outside. Uses window.MenuPopover, so
+// account.js loads before this file.
 (function () {
-  let menu = null, opener = null, done = null;
+  let menu = null, opener = null, done = null, pop = null;
 
   function element() {
     if (menu) return menu;
-    menu = Object.assign(document.createElement('div'), {id: 'sentenceMenu', className: 'sentence-menu', hidden: true, tabIndex: -1});
+    menu = Object.assign(document.createElement('div'), {id: 'sentenceMenu', className: 'sentence-menu', tabIndex: -1});
     menu.setAttribute('role', 'listbox');
     document.body.append(menu);
+    pop = MenuPopover.setup(menu, () => opener, inside => finish(inside));
     menu.addEventListener('keydown', onKey);
     menu.addEventListener('click', event => { const option = event.target.closest('[role=option]'); if (option) choose(option); });
-    document.addEventListener('pointerdown', event => { if (!menu.hidden && !menu.contains(event.target) && event.target !== opener) close(false); }, true);
     addEventListener('resize', () => close(inMenu()));
     addEventListener('scroll', event => { if (event.target !== menu && !menu.contains(event.target)) close(inMenu()); }, true);   // the list's own scrolling keeps it open
     return menu;
@@ -51,7 +53,9 @@
 
   function open(button, control, onDone) {
     element();
-    if (!menu.hidden && opener === button) { close(true); return; }
+    const again = pop.pressedAgain(button);
+    if (pop.isOpen() && opener === button) { close(true); return; }
+    if (again) return;   // that press already closed this word's menu (light dismiss)
     close(false);
     if (!control || control.disabled) return;
     opener = button; done = onDone;
@@ -64,7 +68,7 @@
       if (item.disabled) o.setAttribute('aria-disabled', 'true');
       return o;
     }));
-    menu.hidden = false;
+    pop.show(button);
     button.setAttribute('aria-expanded', 'true');
     place(button);
     focusOption(menu.querySelector('[role=option][aria-selected="true"]:not([aria-disabled="true"])') || options()[0]);
@@ -99,11 +103,18 @@
 
   // refocus: the menu closed without a choice and the focus goes back to the word that opened it.
   function close(refocus) {
-    if (!menu || menu.hidden) return;
-    menu.hidden = true;
+    if (!pop || !pop.isOpen()) return;
+    const button = finish(false);
+    pop.hide();
+    if (refocus && button?.isConnected) button.focus({preventScroll: true});
+  }
+  // The menu is closing, also by itself (a click outside): the word is no longer expanded, and a focus left inside
+  // the menu goes back to the word.
+  function finish(refocus) {
     const button = opener; opener = null; done = null;
     if (button) { button.setAttribute('aria-expanded', 'false'); if (refocus && button.isConnected) button.focus({preventScroll: true}); }
+    return button;
   }
 
-  window.SentenceMenu = {open, close, isOpen: () => !!menu && !menu.hidden};
+  window.SentenceMenu = {open, close, isOpen: () => !!pop && pop.isOpen()};
 })();

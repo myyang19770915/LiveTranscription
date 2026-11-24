@@ -915,7 +915,9 @@ Object.keys(mobilePanels).forEach(view=>{
 $('mobileSettingsOpen').onclick=()=>$('mobileSettings').showModal();
 $('mobileSettingsClose').onclick=$('mobileSettingsDone').onclick=()=>$('mobileSettings').close();
 $('mobileSettings').addEventListener('close',()=>{if(testStream)stopMicTest()});
-$('mobileSettings').addEventListener('click',event=>{if(event.target!==$('mobileSettings'))return;const rect=event.target.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)event.target.close()});
+// A tap on the backdrop closes the dialog: closedby="any" in index.html (light-dismiss-a-dialog); this script only where
+// the browser does not know closedby yet (Safari).
+if(!('closedBy' in HTMLDialogElement.prototype))$('mobileSettings').addEventListener('click',event=>{if(event.target!==$('mobileSettings'))return;const rect=event.target.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)event.target.close()});
 mobileQuery.addEventListener('change',syncMobileLayout);
 if(!navigator.mediaDevices?.getDisplayMedia){
   [...$('audioSource').options].filter(option=>option.value!=='microphone').forEach(option=>{option.disabled=true;option.textContent+='（此瀏覽器不支援）'});
