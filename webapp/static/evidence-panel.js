@@ -77,7 +77,7 @@
     }
     function syncPlayer(){if(view?.meeting)document.querySelectorAll('.peek-play').forEach(syncButton)}
     async function play(segment){
-      const meetingId=view.meetingId,span=MeetingTimeline.playWindow(segment.startMs,segment.endMs,view.meeting.durationMs||Infinity);
+      const meetingId=view.meetingId,span=MeetingTimeline.playWindow(segment.startMs,segment.endMs,view.meeting.durationMs||Infinity,segment.timed);
       const asked=view;
       try{
         const response=await fetch(`/api/meetings/${meetingId}/audio?start=${span.start}&end=${span.end}`);

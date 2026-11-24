@@ -5021,6 +5021,69 @@ class DiarizeRulesTests(unittest.TestCase):
         self.assertEqual(diarize.speaker_of(4500, 6000, "這個報價我來處理", late), 1)
         self.assertEqual(diarize.assign([{"seq": 7, "start_ms": 4500, "end_ms": 6000, "source": "好的，謝謝大家"}], late), {7: 2})
 
+    @staticmethod
+    def words(turn, count):
+        """`count` characters no other turn has (the tests carry no meeting text)."""
+        return "".join(chr(0x4E00 + turn * 60 + k) for k in range(count))
+
+    def test_segment_times_follow_the_turns_of_a_measured_meeting(self):
+        """segment-audio-times, the spec's table: the turn times of a 71 s meeting (measured 2026-11-24) and the times its
+        segments were stored with; the text is replaced by characters of the same number."""
+        T, w = diarize.Turn, self.words
+        spans = [(830, 6120, 20), (7380, 10210, 16), (10830, 18720, 36), (21330, 27040, 30), (27810, 28650, 4), (28650, 33820, 26),
+                 (35370, 39940, 22), (40960, 43640, 15), (45750, 51040, 24), (52060, 58620, 30), (59660, 66950, 34), (69340, 70670, 8)]
+        turns = [T(start, end, 1, w(i, count)) for i, (start, end, count) in enumerate(spans)]
+        text = [t.text for t in turns]
+        sources = [text[0], text[1] + text[2][:14], text[2][14:], text[3], text[4] + text[5], text[6], text[7], text[8], text[9], text[10], text[11]]
+        stored = [0, 5448, 12811, 17578, 27508, 35276, 40056, 44040, 50499, 58237, 68800, 70780]
+        segments = [{"seq": i + 1, "start_ms": stored[i], "end_ms": stored[i + 1], "source": source} for i, source in enumerate(sources)]
+        times = diarize.retime(segments, turns, 70780)
+        self.assertEqual(sorted(times), list(range(1, 12)))
+        self.assertEqual([times[seq][0] for seq in (2, 4, 8, 10)], [7380, 21330, 45750, 59660])
+        self.assertEqual(times[4], (21330, 27040))                 # a sentence after a pause: the turn's own span
+        self.assertEqual(times[2][1], times[3][0])                 # two segments share the third turn: one ends where the next starts
+        self.assertEqual(times[3], (round(10830 + 7890 * 14 / 36), 18720))
+        self.assertEqual(times[5], (27810, 33820))                 # one segment over two turns
+
+    def test_segment_times_examples(self):
+        T, w = diarize.Turn, self.words
+        # Two segments in one turn: divided by the number of characters.
+        turn = T(10000, 18000, 1, w(0, 40))
+        two = [{"seq": 1, "start_ms": 9000, "end_ms": 12000, "source": turn.text[:16]}, {"seq": 2, "start_ms": 12000, "end_ms": 18500, "source": turn.text[16:]}]
+        self.assertEqual(diarize.retime(two, [turn]), {1: (10000, 13200), 2: (13200, 18000)})
+        # Text that does not match (fewer than half of the characters): left out, it keeps its times.
+        self.assertEqual(diarize.retime([{"seq": 1, "start_ms": 9000, "end_ms": 12000, "source": turn.text[:6] + w(5, 10)}], [turn]), {})
+        self.assertEqual(diarize.retime([{"seq": 1, "start_ms": 9000, "end_ms": 12000, "source": "，。"}], [turn]), {})
+        # Simplified turns, Traditional segments, punctuation ignored (as for the speakers).
+        said = T(1800, 5200, 1, "我们下周五前把报价单寄出去吧")
+        self.assertEqual(diarize.retime([{"seq": 1, "start_ms": 1000, "end_ms": 2000, "source": "我們下週五前把報價單寄出去。"}], [said]),
+                         {1: (1800, round(1800 + 3400 * 13 / 14))})
+        # A phrase said twice: the second segment takes the second time, not the first again.
+        twice = [T(1000, 2000, 1, "好的好的"), T(5000, 6000, 2, "好的好的")]
+        again = [{"seq": 1, "start_ms": 0, "end_ms": 2500, "source": "好的好的"}, {"seq": 2, "start_ms": 2500, "end_ms": 6500, "source": "好的好的"}]
+        self.assertEqual(diarize.retime(again, twice), {1: (1000, 2000), 2: (5000, 6000)})
+        # Never before an earlier corrected segment: the words of segment 2 were only said before segment 1's.
+        early, late = T(12000, 14000, 1, w(1, 10)), T(20000, 22000, 1, w(2, 10))
+        order = [{"seq": 1, "start_ms": 19000, "end_ms": 21000, "source": late.text}, {"seq": 2, "start_ms": 21000, "end_ms": 23000, "source": early.text}]
+        self.assertEqual(diarize.retime(order, [early, late]), {1: (20000, 22000)})
+        # The two recognizers end a sentence differently, and the next sentence holds the same words: the segment is not
+        # stretched over that sentence, which is still there for the next segment.
+        said = [T(0, 4000, 1, "我们今天先看报价单然后讨论"), T(4200, 8000, 1, "报价单的部分我觉得还可以再谈")]
+        heard = [{"seq": 1, "start_ms": 0, "end_ms": 3000, "source": "我們今天先看報價單然後再談"},
+                 {"seq": 2, "start_ms": 3000, "end_ms": 7000, "source": "報價單的部分我覺得還可以再談"}]
+        self.assertEqual(diarize.retime(heard, said), {1: (0, round(4000 * 11 / 13)), 2: (4200, 8000)})
+        # Words the turn has and the segment has not (a filler) are passed over inside one stretch of speech.
+        filler = T(1000, 5000, 1, w(0, 6) + w(4, 3) + w(1, 6))
+        self.assertEqual(diarize.retime([{"seq": 1, "start_ms": 0, "end_ms": 4000, "source": w(0, 6) + w(1, 6)}], [filler]), {1: (1000, 5000)})
+        # At the very end of the recording a start moved back to keep 200 ms never passes an earlier segment's start.
+        tail = [T(9000, 9950, 1, w(0, 8)), T(9960, 10000, 1, w(1, 4))]
+        close = [{"seq": 1, "start_ms": 8000, "end_ms": 9900, "source": w(0, 8)}, {"seq": 2, "start_ms": 9900, "end_ms": 10000, "source": w(1, 4)}]
+        self.assertEqual(diarize.retime(close, tail, 10000), {1: (9000, 9950), 2: (9800, 10000)})
+        self.assertEqual(diarize.retime([dict(close[0], source=w(1, 4), seq=1), dict(close[1], source=w(5, 4), seq=2)], [T(9990, 10000, 1, w(1, 4))], 10000), {1: (9800, 10000)})
+        # A stray single character elsewhere does not stretch the span; the end stays inside the recording.
+        stray = [T(0, 1000, 1, w(3, 4) + w(0, 1)), T(4000, 6000, 1, w(0, 10))]
+        self.assertEqual(diarize.retime([{"seq": 1, "start_ms": 3000, "end_ms": 6500, "source": w(0, 10)}], stray, 5500), {1: (4000, 5500)})
+
     def test_service_language(self):
         self.assertEqual(diarize.service_language({"source_language": "zh", "language": "zh"}), "zh")
         self.assertEqual(diarize.service_language({"source_language": "", "language": "en"}), "en")
@@ -5068,6 +5131,39 @@ class DiarizeApiTests(ReviewTestCase):
 
     def segment_speakers(self):
         return [s["speaker"] for s in self.alice.get(f"/api/meetings/{self.meeting}").json()["segments"]]
+
+    def test_a_finished_run_corrects_the_segment_times(self):
+        """segment-audio-times: start, end and the timed mark follow the turns; version, text, state and speaker do not change."""
+        with psycopg.connect(TEST_DATABASE_URL) as conn:   # segment 3 was reviewed, segment 4 says something the turns do not
+            conn.execute("UPDATE segments SET state = 'confirmed', version = 5 WHERE seq = 3")
+            conn.execute("UPDATE segments SET source = '完全不同的一句話在這裡' WHERE seq = 4")
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue()
+        rows = self.query("SELECT seq, start_ms, end_ms, timed, version, state FROM segments ORDER BY seq")
+        self.assertEqual([tuple(r) for r in rows], [
+            (1, 480, 1660, True, 1, "unreviewed"), (2, 1800, round(1800 + 3400 * 13 / 14), True, 1, "unreviewed"),
+            (3, 5400, 6000, True, 5, "confirmed"), (4, 3000, 4000, False, 1, "unreviewed")])
+        shown = self.alice.get(f"/api/meetings/{self.meeting}").json()["segments"]
+        self.assertEqual([(s["startMs"], s["endMs"], s["timed"]) for s in shown], [(480, 1660, True), (1800, 4957, True), (5400, 6000, True), (3000, 4000, False)])
+        self.assertEqual(self.segment_speakers()[:3], [1, 2, 1])   # the speakers are as before the times were corrected
+        self.assertEqual(self.query("SELECT source, target FROM segments WHERE seq = 3")[0], ("嗯對。", "Yes."))
+        # Run again after segment 1 was rewritten: it no longer matches, and keeps the times and the mark it had.
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("UPDATE segments SET source = '這句話已經被改寫成別的內容了' WHERE seq = 1")
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue()
+        self.assertEqual(tuple(self.query("SELECT start_ms, end_ms, timed FROM segments WHERE seq = 1")[0]), (480, 1660, True))
+
+    def test_the_command_corrects_meetings_diarized_before(self):
+        self.alice.post(f"/api/meetings/{self.meeting}/speakers/run")
+        self.run_queue()
+        with psycopg.connect(TEST_DATABASE_URL) as conn:   # as stored before this existed
+            conn.execute("UPDATE segments SET start_ms = (seq - 1) * 1000, end_ms = seq * 1000, timed = false")
+        self.assertEqual(asyncio.run(diarize.retime_stored("00000000-0000-0000-0000-000000000000")), {})
+        self.assertEqual(self.query("SELECT count(*) FROM segments WHERE timed")[0][0], 0)
+        self.assertEqual(asyncio.run(diarize.retime_stored(self.meeting)), {self.meeting: 4})
+        self.assertEqual([tuple(r) for r in self.query("SELECT start_ms, timed FROM segments ORDER BY seq")], [(480, True), (1800, True), (5400, True), (6100, True)])
+        self.assertEqual(asyncio.run(diarize.retime_stored()), {self.meeting: 4})   # every diarized meeting, and again without harm
 
     def test_manual_run_labels_segments_and_lists_speakers(self):
         self.assertEqual((self.speakers()["status"], self.speakers()["turns"]), ("none", []))

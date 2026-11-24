@@ -24,7 +24,7 @@ const bySeq=seq=>segments.find(s=>s.seq===seq);
 // --- Playback ---
 async function play(seq){
   const segment=bySeq(seq);if(!segment||!meeting.hasRecording)return;
-  const span=MeetingTimeline.playWindow(segment.startMs-extra.lead,segment.endMs+extra.tail,meeting.durationMs||Infinity);
+  const span=MeetingTimeline.playWindow(segment.startMs-extra.lead,segment.endMs+extra.tail,meeting.durationMs||Infinity,segment.timed);
   try{
     const response=await fetch(`/api/meetings/${meetingId}/audio?start=${span.start}&end=${span.end}`);
     if(!response.ok)throw new Error((await response.json().catch(()=>({}))).detail||'無法載入錄音');

@@ -12,6 +12,9 @@ for(const [start,end,total,want] of [[0,4200,60000,{start:0,end:4700}],[4200,910
   t(`playback ${start}-${end}`,T.playWindow(start,end,total),want);
 // Review page "往前 2 秒": the segment's start moves 2000 ms earlier before padding.
 t('extend start once: 0-9600',T.playWindow(4200-2000,9100,60000),{start:0,end:9600});
+// segment-audio-times: a timed segment plays from 0.3 s before its start to 0.3 s after its end, inside the recording.
+t('timed 4200-9100: 3900-9400',T.playWindow(4200,9100,60000,true),{start:3900,end:9400});
+t('timed, at the edges of the recording',T.playWindow(100,59900,60000,true),{start:0,end:60000});
 // Spec meeting-minutes "Viewing evidence in place", example "segments shown" (15 segments).
 const meeting15=Array.from({length:15},(_,i)=>({seq:i+1}));
 const shown=cited=>T.evidenceContext(meeting15,cited).map(r=>`${r.gapBefore?'| ':''}${r.segment.seq}${r.cited?'*':''}`).join(' ');

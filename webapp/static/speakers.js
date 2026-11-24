@@ -5,7 +5,7 @@
 // when it starts segment playback, and reads Speakers.speaking() to mark the segment at the play position.
 const Speakers=(()=>{
   let state={configured:false,status:'none',message:'',speakers:[],members:[],turns:[],durationMs:0},timer=null,editing=null,selected=null;
-  const COLOURS=8,CHUNK_MS=5*60*1000,SEGMENT_LEAD_MS=3000;
+  const COLOURS=8,CHUNK_MS=5*60*1000,SEGMENT_LEAD_MS=3000,TIMED_LEAD_MS=300;
   const colour=label=>label&&label<=COLOURS?`var(--spk-${label})`:'var(--faint)';
   const busy=()=>state.status==='queued'||state.status==='running';
   const url=path=>`/api/meetings/${meetingId}/${path}`;
@@ -150,8 +150,9 @@ const Speakers=(()=>{
 
   // The turn at a position: the latest one started before it and not yet ended (turns may overlap).
   function turnAt(ms){let found=-1;state.turns.forEach((t,i)=>{if(t[0]<=ms&&ms<t[1])found=i});return found}
-  // The segment at a position: segments are stamped after the speech, so each one starts 3 s earlier here.
-  function segmentAt(ms){let found=null;for(const s of segments)if(s.startMs-SEGMENT_LEAD_MS<=ms&&ms<=s.endMs)found=s.seq;return found}
+  // The segment at a position: segments are stamped after the speech, so each one starts 3 s earlier here; a timed one
+  // (segment-audio-times) has the times of the speech itself and starts 0.3 s earlier.
+  function segmentAt(ms){let found=null;for(const s of segments)if(s.startMs-(s.timed?TIMED_LEAD_MS:SEGMENT_LEAD_MS)<=ms&&ms<=s.endMs)found=s.seq;return found}
   function tick(force=false){
     cancelAnimationFrame(play.frame);
     const box=$('speakers'),ms=position(),playing=play.active&&!audio.paused;

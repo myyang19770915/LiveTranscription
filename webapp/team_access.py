@@ -263,7 +263,7 @@ async def get_meeting(meeting_id: str, user: auth.CurrentUser):
         team = await (await conn.execute("SELECT name FROM teams WHERE id = %s", (meeting["team_id"],))).fetchone()
         series = await series_name(conn, meeting["series_id"], meeting["team_id"])
         segments = await (await conn.execute(
-            "SELECT seq, start_ms, end_ms, asr_text, source, live_target, target, detected, state, version, speaker "
+            "SELECT seq, start_ms, end_ms, asr_text, source, live_target, target, detected, state, version, speaker, timed "
             "FROM segments WHERE meeting_id = %s ORDER BY seq", (meeting["id"],))).fetchall()
     duration = await asyncio.to_thread(recorded_ms, meeting)
     return {"id": str(meeting["id"]), "teamId": meeting["team_id"], "team": team["name"], "startedAt": meeting["started_at"].isoformat(),
@@ -293,7 +293,8 @@ def recorded_ms(meeting: dict, repair: bool = True) -> int:
 def segment_payload(row: dict) -> dict:
     return {"seq": row["seq"], "startMs": row["start_ms"], "endMs": row["end_ms"], "asrText": row["asr_text"], "source": row["source"],
             "liveTarget": row["live_target"], "target": row["target"], "detected": row["detected"], "state": row["state"],
-            "version": row["version"], "speaker": row.get("speaker")}
+            "version": row["version"], "speaker": row.get("speaker"),
+            "timed": bool(row.get("timed"))}   # times corrected from the recording (segment-audio-times)
 
 
 RECORDING_TYPES = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a"}

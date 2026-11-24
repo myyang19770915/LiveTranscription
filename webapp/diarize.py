@@ -36,6 +36,12 @@ MIN_RECORDING_BYTES = 10 * 32000    # 10 s of 16 kHz PCM16
 # with its text; a match needs MIN_SHARE of its characters (and MIN_CHARS). Otherwise its span, moved LAG_MS earlier
 # (segments are stamped when text appears, after the speech), is compared with the turns.
 WINDOW_BEFORE_MS, WINDOW_AFTER_MS, MIN_SHARE, MIN_CHARS, LAG_MS = 12_000, 3_000, 0.3, 2, 1_000
+# Segment times from the turns (segment-audio-times): a segment is corrected when RETIME_SHARE of its characters are
+# found in the turns near it, and then lasts RETIME_MIN_MS at least. Matched runs count outward from the longest one,
+# while the turn text between two runs is not longer than the segment's own text between them by more than
+# RETIME_GAP characters (or RETIME_GAP_SHARE of the segment): the two recognizers word things differently, and the
+# same words in the next sentence must not stretch the segment over it.
+RETIME_SHARE, RETIME_MIN_MS, RETIME_GAP, RETIME_GAP_SHARE = 0.5, 200, 4, 0.25
 MAX_NAME = 40
 NOT_CONFIGURED, RUNNING, NO_RECORDING = "說話者辨識未設定", "說話者辨識已在排隊或進行中", "這場會議沒有錄音"
 STILL_RECORDING = "會議還在錄音，結束後會自動辨識說話者"
@@ -100,6 +106,98 @@ def assign(segments: list[dict], turns: list[Turn]) -> dict[int, int | None]:
     return {s["seq"]: speaker_of(s["start_ms"], s["end_ms"], s["source"], turns) for s in segments}
 
 
+def retime(segments: list[dict], turns: list[Turn], duration_ms: int | None = None) -> dict[int, tuple[int, int]]:
+    """{seq: (start_ms, end_ms)} for the segments (seq, start_ms, end_ms, source) whose text is found in the turns.
+
+    The meeting page's times are estimates (the quality pass divides a chunk among its sentences by their length; the
+    live engine stamps text when it appears). A turn has the times of the speech itself, so each of its characters gets
+    a time by its position in the turn, and a segment starts at its first matched character and ends at its last.
+    Segments that do not match are left out: they keep their times."""
+    spoken, at = [], 0   # (turn, its characters, the number of characters said before it)
+    for turn in turns:
+        words = normalize(turn.text)
+        spoken.append((turn, words, at))
+        at += len(words)
+    result: dict[int, tuple[int, int]] = {}
+    last_start, used = 0, -1   # used: the last character a corrected segment took; what was said up to it is not matched
+    for segment in sorted(segments, key=lambda s: s["seq"]):   # again, so a phrase said twice is not taken for its first time
+        text = normalize(segment["source"])
+        if not text:
+            continue
+        pool, starts, ends, places = "", [], [], []
+        for turn, words, before in spoken:
+            if not words or turn.end_ms < segment["start_ms"] - WINDOW_BEFORE_MS or turn.start_ms > segment["end_ms"] + WINDOW_AFTER_MS:
+                continue
+            span = turn.end_ms - turn.start_ms
+            for k in range(max(0, used + 1 - before), len(words)):
+                pool += words[k]
+                starts.append(turn.start_ms + span * k / len(words))
+                ends.append(turn.start_ms + span * (k + 1) / len(words))
+                places.append(before + k)
+        blocks = together([block for block in SequenceMatcher(None, text, pool, autojunk=False).get_matching_blocks() if block.size], len(text))
+        if sum(block.size for block in blocks) < max(MIN_CHARS, math.ceil(RETIME_SHARE * len(text))):
+            continue
+        solid = [block for block in blocks if block.size >= 2] or blocks   # a stray single character must not stretch the span
+        first, last = solid[0].b, solid[-1].b + solid[-1].size - 1
+        start, end = round(starts[first]), max(round(ends[last]), round(starts[first]) + RETIME_MIN_MS)
+        if duration_ms:
+            end = min(end, duration_ms)
+            start = min(start, max(0, end - RETIME_MIN_MS))
+        if start < last_start:
+            continue
+        result[segment["seq"]] = (start, end)
+        last_start, used = start, places[last]
+    return result
+
+
+def together(blocks: list, length: int) -> list:
+    """The matched runs that belong to one stretch of speech: the longest, and its neighbours on either side for as long
+    as the turn text skipped to reach the next one is about what the segment's own text skips there."""
+    if not blocks:
+        return []
+    allowed = max(RETIME_GAP, math.ceil(RETIME_GAP_SHARE * length))
+    centre = max(range(len(blocks)), key=lambda i: (blocks[i].size, -i))
+    low = high = centre
+    while low > 0 and (blocks[low].b - blocks[low - 1].b - blocks[low - 1].size) - (blocks[low].a - blocks[low - 1].a - blocks[low - 1].size) <= allowed:
+        low -= 1
+    while high < len(blocks) - 1 and (blocks[high + 1].b - blocks[high].b - blocks[high].size) - (blocks[high + 1].a - blocks[high].a - blocks[high].size) <= allowed:
+        high += 1
+    return blocks[low:high + 1]
+
+
+async def retime_segments(conn, meeting_id, turns: list[Turn]) -> int:
+    """Correct the meeting's segment times from `turns`; returns how many segments were corrected. Only start_ms, end_ms
+    and timed change: not the version (times are not what a reviewer edits), text, state or speaker."""
+    segments = await (await conn.execute(
+        "SELECT seq, start_ms, end_ms, source FROM segments WHERE meeting_id = %s", (meeting_id,))).fetchall()
+    meeting = await (await conn.execute("SELECT audio_bytes FROM meetings WHERE id = %s", (meeting_id,))).fetchone()
+    duration = (meeting["audio_bytes"] or 0) // meeting_audio.BYTES_PER_MS if meeting else 0
+    times = await asyncio.to_thread(retime, segments, turns, duration or None)   # text alignment is CPU work
+    if times:
+        async with conn.cursor() as cursor:
+            await cursor.executemany("UPDATE segments SET start_ms = %s, end_ms = %s, timed = true WHERE meeting_id = %s AND seq = %s",
+                                     [(start, end, meeting_id, seq) for seq, (start, end) in times.items()])
+    return len(times)
+
+
+async def retime_stored(meeting_id: str | None = None) -> dict[str, int]:
+    """`python -m diarize retime [meeting_id]`: correct the segment times of meetings diarized before this existed
+    (all of them without an id). Returns {meeting id: segments corrected, or -1 when it failed}."""
+    done: dict[str, int] = {}
+    async with db.connect() as conn:
+        rows = await (await conn.execute(
+            "SELECT meeting_id, turns FROM diarizations WHERE status = 'done' AND (%s::uuid IS NULL OR meeting_id = %s::uuid) ORDER BY queued_at",
+            (meeting_id, meeting_id))).fetchall()
+    for row in rows:   # one meeting at a time: a failure undoes that meeting only, and no rows stay locked for the whole run
+        try:
+            async with db.connect() as conn:
+                done[str(row["meeting_id"])] = await retime_segments(conn, row["meeting_id"], [Turn(*t) for t in row["turns"]])
+        except Exception as error:
+            logger.warning("segment times of %s were not corrected: %s", row["meeting_id"], type(error).__name__)
+            done[str(row["meeting_id"])] = -1
+    return done
+
+
 def service_language(meeting: dict) -> str:
     language = meeting.get("source_language") or meeting.get("language") or ""
     return language if language in ("zh", "en") else ""
@@ -157,6 +255,11 @@ async def store_result(conn, meeting_id, turns: list[Turn], seconds: float) -> N
     await conn.execute(
         "UPDATE diarizations SET status = 'done', message = '', turns = %s, finished_at = now(), seconds = %s WHERE meeting_id = %s",
         (Jsonb([list(t) for t in turns]), seconds, meeting_id))
+    try:   # the speakers are stored whatever happens here: wrong times are a lesser fault than no speakers
+        async with conn.transaction():
+            await retime_segments(conn, meeting_id, turns)
+    except Exception as error:
+        logger.warning("segment times of %s were not corrected: %s", meeting_id, type(error).__name__)
 
 
 async def run_next() -> bool:
@@ -356,3 +459,11 @@ async def set_segment_speaker(meeting_id: str, seq: int, body: SegmentSpeakerIn,
         if not row:
             raise HTTPException(status_code=404, detail="沒有這個段落")
     return team_access.segment_payload(row)
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2 or sys.argv[1] != "retime" or len(sys.argv) > 3:
+        sys.exit("usage: python -m diarize retime [meeting_id]")
+    for meeting, count in asyncio.run(retime_stored(sys.argv[2] if len(sys.argv) == 3 else None)).items():
+        print(f"{meeting}: {count} segments corrected" if count >= 0 else f"{meeting}: failed, nothing changed")
