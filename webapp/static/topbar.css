@@ -71,3 +71,27 @@
   .account .account-menu .menu-nav, .account .account-menu .menu-phone { display: flex; }
   .topbar-actions { gap: 6px; }
 }
+
+/* ui-sentence-menus: wider windows give the brand room (visual-tokens "The header gives the brand room"); phones keep the
+   sizes above. One step up the type scale: links 16px in 40px targets, the brand name 20px beside a 48px mark. */
+@media (min-width: 701px) {
+  .topbar { min-height: 72px; gap: 16px; }
+  .topbar .brand { gap: 12px; }
+  .topbar .brand-mark { width: 48px; height: 48px; border-radius: var(--radius-card); }
+  .topbar .brand-mark img { width: 40px; height: 40px; }
+  .topbar .brand b { font-size: 20px; font-weight: 600; line-height: 1.2; }
+  .topbar .brand small { font-size: 13px; }
+  .topbar-status .status { height: 40px; padding: 0 14px; font-size: 13px; }
+  .account { font-size: 16px; }
+  .account > a, .account > button, .account .account-avatar { height: 40px; font-size: 16px; }
+  .account > a { padding: 0 14px; }
+  .account .account-name b { font-size: 16px; }
+  .account .account-avatar { width: 40px; }
+  .topbar #themeToggle { width: 40px; height: 40px; }
+}
+@media (min-width: 701px) and (max-width: 1023px) {   /* all seven links still show here (site-navigation): one step tighter */
+  .topbar { gap: 10px; }
+  .account { gap: 2px; }
+  .account > a, .account > button { font-size: 15px; }
+  .account > a { padding: 0 10px; }
+}

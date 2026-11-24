@@ -44,8 +44,11 @@ const shown = (page, sel) => page.evaluate(sel => { const el = document.querySel
   await page.click('#setupMore').catch(() => {});
   t('1440: pressing again folds', await page.evaluate(() => [document.getElementById('setupMore')?.getAttribute('aria-expanded'), document.getElementById('team').checkVisibility()]), ['false', false]);
   // A sentence word while folded unfolds, then focuses its control.
-  await page.locator('#setupSentence button.sentence-pick[data-field="team"]').click().catch(() => {}); await page.keyboard.press('Escape');
-  t('1440 folded: pressing the team word unfolds and focuses #team', await page.evaluate(() => [document.getElementById('setupMore')?.getAttribute('aria-expanded'), document.getElementById('team').checkVisibility(), document.activeElement?.id]), ['true', true, 'team']);
+  // ui-sentence-menus: a sentence word opens its own menu and leaves the setup folded.
+  await page.locator('#setupSentence button.sentence-pick[data-field="team"]').click().catch(() => {}); await page.waitForTimeout(150);
+  t('1440 folded: pressing the team word opens its menu, the setup stays folded', await page.evaluate(() => [document.getElementById('setupMore')?.getAttribute('aria-expanded'), document.getElementById('sentenceMenu')?.dataset.field ?? null]), ['false', 'team']);
+  await page.keyboard.press('Escape');
+  await page.click('#setupMore');
   await page.click('#testMic'); await page.waitForTimeout(800);
   await page.click('#setupMore');
   t('1440: folding stops a running audio test', await page.evaluate(() => document.getElementById('testMic').classList.contains('testing')), false);

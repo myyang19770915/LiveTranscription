@@ -162,10 +162,14 @@ const mode = (page, m) => page.evaluate(m => setLiveMode(m), m);
   await mode(page, 'meeting'); await page.evaluate(() => { document.getElementById('team').hidden = false; }); await pickTeam(page); await pick(page, 'audioSource', 'microphone'); await pick(page, 'language', 'zh_ja');
   const teamWord = page.locator('#setupSentence button.sentence-pick', {hasText: '智慧應用部'});
   t('/ 1440: the team word is a button named for its setting', await teamWord.getAttribute('aria-label').catch(() => null), '更改團隊');
-  await teamWord.click().catch(() => {}); await page.keyboard.press('Escape');
-  t('/ 1440: pressing the team focuses #team', await page.evaluate(() => document.activeElement?.id), 'team');
-  await page.locator('#setupSentence button.sentence-pick', {hasText: '中文和日文'}).click().catch(() => {}); await page.keyboard.press('Escape');
-  t('/ 1440: pressing 中文和日文 focuses #language', await page.evaluate(() => document.activeElement?.id), 'language');
+  // ui-sentence-menus: a setting word opens its own menu (#sentenceMenu) for its control.
+  const menuFor = () => page.evaluate(() => { const m = document.getElementById('sentenceMenu'); return m && m.checkVisibility() ? m.dataset.field : null; });
+  await teamWord.click().catch(() => {}); await page.waitForTimeout(150);
+  t('/ 1440: pressing the team opens the team menu', await menuFor(), 'team');
+  await page.keyboard.press('Escape');
+  await page.locator('#setupSentence button.sentence-pick', {hasText: '中文和日文'}).click().catch(() => {}); await page.waitForTimeout(150);
+  t('/ 1440: pressing 中文和日文 opens the spoken language menu', await menuFor(), 'language');
+  await page.keyboard.press('Escape');
   t('/ 1440: no console error', errors, []);
   if (shots) await page.screenshot({path: join(shots, 'live-idle-1440.png'), fullPage: true});
 

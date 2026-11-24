@@ -682,3 +682,70 @@ code:
 tests:
   - webapp/test_server.py
 -->
+
+---
+### Requirement: The header gives the brand room
+
+On every page with the shared header, on a window wider than 700px, the brand mark (`.topbar .brand-mark`) SHALL be 48px square, the brand name (`.topbar .brand b`) SHALL be 20px, and the page links, the account name and the sign-out button SHALL use 40px-high targets with 16px text from 1024px up and 15px text from 701px to 1023px, where all seven links still show; the service status, the theme button and the avatar SHALL be 40px high. At 700px or less the header SHALL keep its earlier sizes. The links, their order, the widths at which they hide and the avatar menu SHALL stay as the site-navigation requirements state, and no page SHALL scroll sideways at any width from 901px to 1440px.
+
+#### Scenario: The header at 1440px
+
+- **WHEN** `/meetings` is opened at 1440px
+- **THEN** `.topbar .brand-mark` is 48px wide, `.topbar .brand b` has a computed font size of 20px, and every `#account > a` has a computed font size of 16px and a height of 40px
+
+#### Scenario: Narrower windows
+
+- **WHEN** `/` is opened at 960px and at 1101px
+- **THEN** the page has no horizontal scroll
+
+#### Scenario: A phone
+
+- **WHEN** `/` is opened at 390px
+- **THEN** `.topbar .brand-mark` is as wide as before this change
+
+<!-- @trace
+source: ui-sentence-menus
+updated: 2026-11-23
+code:
+  - 螢幕擷取畫面 2026-11-23 225421.png
+  - lab/realtime-translate/costs.jsonl
+  - webapp/static/minutes.html
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - gpt-realtime-translate_demoUI.png
+  - webapp/static/meetings.html
+  - webapp/server.py
+  - webapp/static/ask.html
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - webapp/static/index.html
+  - 螢幕擷取畫面 2026-11-23 214336.png
+  - bench/meeting_end_e2e.mjs
+  - webapp/static/search.html
+  - chang01.png
+  - webapp/revise_pass.py
+  - webapp/static/sentence-menu.js
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/static/refine.css
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - 20261122_211227.mp4
+  - webapp/static/topbar.css
+  - 20261122_215017.mp4
+  - webapp/static/metrics.html
+  - webapp/static/actions.html
+  - webapp/static/app.js
+  - webapp/static/interpret.html
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - lab/realtime-translate/server.py
+  - webapp/static/admin.html
+  - bench/ui_night_celadon_e2e.mjs
+  - webapp/static/login.html
+  - bench/ui_setup_collapse_e2e.mjs
+  - bench/ui_sentence_menus_e2e.mjs
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - lab/realtime-translate/index.html
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/static/review.html
+tests:
+  - webapp/test_server.py
+-->

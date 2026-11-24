@@ -471,3 +471,20 @@ main > header.setup-head { align-items: flex-start; gap: var(--space-6); padding
 .mic-test .mic-health { white-space: normal; }
 .mic-test .mic-health > span:first-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; text-overflow: clip; white-space: normal; line-height: 1.35; }
 .language-dot { min-width: 36px; width: auto; padding: 0 6px; white-space: nowrap; }
+
+/* ui-sentence-menus: a sentence word's own menu, right below the word (sentence-menu.js). Options are 44px touch targets. */
+.sentence-menu { position: fixed; z-index: 40; min-width: 220px; max-width: min(420px, calc(100vw - 24px)); max-height: 420px; overflow-y: auto;
+  padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--panel); color: var(--text);
+  box-shadow: 0 16px 40px rgb(0 0 0 / .35); overscroll-behavior: contain; scrollbar-width: thin; outline: none; }
+:root[data-theme="light"] .sentence-menu { box-shadow: 0 12px 32px rgb(20 32 27 / .14); }
+.sentence-menu[hidden] { display: none; }
+.sentence-menu-group { padding: 10px 12px 4px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.sentence-menu-option { position: relative; display: flex; align-items: center; min-height: 44px; padding: 0 36px 0 12px; border-radius: var(--radius-control);
+  font-size: 15px; line-height: 1.35; cursor: pointer; outline: none; }
+.sentence-menu-option:hover { background: var(--field); }
+.sentence-menu-option:focus-visible, .sentence-menu-option:focus { background: var(--field); box-shadow: inset 0 0 0 2px var(--accent); }
+.sentence-menu-option[aria-selected="true"] { background: var(--accent-soft); font-weight: 500; }
+.sentence-menu-option[aria-selected="true"]::after { content: ""; position: absolute; right: 14px; top: 50%; width: 10px; height: 5px; margin-top: -4px;
+  border: solid var(--accent); border-width: 0 0 2px 2px; transform: rotate(-45deg); }
+.sentence-menu-option[aria-disabled="true"] { color: var(--faint); cursor: not-allowed; }
+.sentence-pick[aria-expanded="true"] { text-decoration-color: var(--text); }

@@ -474,68 +474,72 @@ tests:
 ---
 ### Requirement: Sentence words open their setting
 
-Each setting named in the sentence SHALL be a `button` element in the sentence whose accessible name names the setting (for example 更改語音語言), and pressing it SHALL move the focus to that setting's own control: 語音語言 (`#language`), 翻譯成 (`#targetLanguage`), 音訊來源 (`#audioSource`), 麥克風來源 (`#microphone`), 團隊 (`#team`) or 同步播放譯音 (`#interpretPlay`). When the settings area is folded behind 更多設定, pressing a sentence word SHALL first unfold it and store `setupMoreOpen` as open. When the control is a `select` and the browser offers `showPicker()`, its list SHALL open; when `showPicker()` is missing or fails, only the focus SHALL move and no error SHALL be shown. The native controls SHALL stay in the settings area with their labels.
+Each setting named in the sentence SHALL be a `button` element in the sentence whose accessible name names the setting (for example 更改語音語言), with `aria-haspopup="listbox"`, unless that setting's control is disabled, in which case the word SHALL be plain text. Pressing it SHALL open a menu (`#sentenceMenu`, `role="listbox"`) directly below the word that lists the options of that setting's control — 語音語言 (`#language`), 翻譯成 (`#targetLanguage`), 音訊來源 (`#audioSource`), 麥克風來源 (`#microphone`), 團隊 (`#team`), or 同步播放譯音 (`#interpretPlay`) with the two options 同步播放譯音 and 不播放譯音 — with the group headings of the control, the current option marked `aria-selected="true"` and focused. The arrow keys SHALL move between enabled options, Home and End SHALL go to the first and last, Enter, Space or a click SHALL choose an option, and Escape, Tab or a click outside SHALL close the menu without a change. Choosing SHALL set that control exactly as choosing it in the settings area would, close the menu, update the sentence and return the focus to the same setting word. Opening the menu SHALL NOT unfold the settings area. The native controls SHALL stay in the settings area with their labels.
 
 #### Scenario: Changing the team from the sentence
 
-- **WHEN** the user presses 智慧應用部 in the sentence on `/` at 1440px
-- **THEN** `document.activeElement` is `#team`
+- **WHEN** the settings area is folded and the user presses the team name in the sentence on `/` at 1440px
+- **THEN** `#sentenceMenu` is visible below the word and lists every option of `#team`, the current team has `aria-selected="true"` and the focus, and `#setupMore` still shows `aria-expanded="false"`
 
-#### Scenario: Changing the spoken language from the sentence
+#### Scenario: Choosing with the keyboard
+
+- **WHEN** the team menu is open on a list of at least two teams and the user presses the down arrow and then Enter
+- **THEN** `#team` holds the second option, the sentence names it, the menu is closed and the focus is on the team word
+
+#### Scenario: Closing without a change
+
+- **WHEN** a sentence menu is open and the user presses Escape
+- **THEN** the menu is closed, the setting is unchanged and the focus is on the word that opened it
+
+#### Scenario: The spoken language menu
 
 - **WHEN** the user presses 中文和日文 in the sentence
-- **THEN** `document.activeElement` is `#language`
-
-#### Scenario: A sentence word while the setup is folded
-
-- **WHEN** the settings area is folded and the user presses 智慧應用部 in the sentence at 1440px
-- **THEN** `#setupMore` shows `aria-expanded="true"`, `#team` is visible and `document.activeElement` is `#team`
+- **THEN** the menu lists the groups 語言與對話模式 and 其他語言 · 效果可能因語言而異 with their options, and 中日雙向自動 is selected
 
 
 <!-- @trace
-source: ui-setup-collapse
+source: ui-sentence-menus
 updated: 2026-11-23
 code:
-  - webapp/static/admin.css
-  - webapp/static/review.html
-  - bench/audio_test_e2e.mjs
-  - webapp/static/app.js
-  - lab/realtime-translate/sessions/20261116-232831/output.wav
-  - webapp/static/actions.html
-  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
-  - webapp/static/meetings.html
-  - webapp/static/minutes.html
-  - bench/ui_polish_e2e.mjs
-  - webapp/revise_pass.py
-  - webapp/static/search.html
-  - webapp/static/ask.html
-  - bench/ui_consistency_e2e.mjs
-  - bench/meeting_end_e2e.mjs
-  - 螢幕擷取畫面 2026-11-17 225637.png
-  - bench/interpret_e2e.mjs
-  - 螢幕擷取畫面 2026-11-23 214336.png
-  - lab/realtime-translate/sessions/20261116-232831/input.wav
-  - webapp/static/interpret.html
-  - 20261122_215017.mp4
+  - 螢幕擷取畫面 2026-11-23 225421.png
   - lab/realtime-translate/costs.jsonl
-  - lab/realtime-translate/index.html
-  - webapp/static/admin.html
-  - webapp/static/index.html
-  - lab/realtime-translate/sessions/20261117-174651/output.wav
-  - webapp/static/mobile.css
-  - bench/ui_night_celadon_e2e.mjs
-  - lab/realtime-translate/sessions/20261117-174651/session.json
-  - 20261122_211227.mp4
-  - lab/realtime-translate/server.py
-  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
-  - webapp/static/metrics.html
-  - webapp/static/refine.css
-  - webapp/server.py
-  - lab/realtime-translate/sessions/20261116-232831/session.json
-  - chang01.png
+  - webapp/static/minutes.html
+  - 螢幕擷取畫面 2026-11-17 225637.png
   - gpt-realtime-translate_demoUI.png
+  - webapp/static/meetings.html
+  - webapp/server.py
+  - webapp/static/ask.html
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - webapp/static/index.html
+  - 螢幕擷取畫面 2026-11-23 214336.png
+  - bench/meeting_end_e2e.mjs
+  - webapp/static/search.html
+  - chang01.png
+  - webapp/revise_pass.py
+  - webapp/static/sentence-menu.js
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/static/refine.css
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - 20261122_211227.mp4
+  - webapp/static/topbar.css
+  - 20261122_215017.mp4
+  - webapp/static/metrics.html
+  - webapp/static/actions.html
+  - webapp/static/app.js
+  - webapp/static/interpret.html
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - lab/realtime-translate/server.py
+  - webapp/static/admin.html
+  - bench/ui_night_celadon_e2e.mjs
+  - webapp/static/login.html
   - bench/ui_setup_collapse_e2e.mjs
+  - bench/ui_sentence_menus_e2e.mjs
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - lab/realtime-translate/index.html
   - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/static/review.html
 tests:
   - webapp/test_server.py
 -->
@@ -944,6 +948,71 @@ code:
   - gpt-realtime-translate_demoUI.png
   - bench/ui_setup_collapse_e2e.mjs
   - lab/realtime-translate/sessions/20261117-174651/input.wav
+tests:
+  - webapp/test_server.py
+-->
+
+---
+### Requirement: Microphone names are readable
+
+The live page SHALL show each microphone by its device name without the trailing USB code (four hexadecimal digits, a colon and four more, in parentheses). A name that starts with `Default - ` SHALL be shown in the microphone menu as the rest of the name followed by （系統預設）, and one that starts with `Communications - ` as the rest followed by （通訊）. The setup sentence SHALL use the name without these marks. The microphone chosen and remembered SHALL NOT change.
+
+#### Scenario: A Windows USB microphone
+
+- **WHEN** the browser lists the microphones of the example table
+- **THEN** the microphone menu and the sentence show the names of the example table
+
+##### Example: microphone names
+
+| Device label | Menu | Sentence |
+| ------------ | ---- | -------- |
+| Default - 麥克風 (IPEVO V4K PRO) (1778:d002) | 麥克風 (IPEVO V4K PRO)（系統預設） | 麥克風 (IPEVO V4K PRO) |
+| Communications - 麥克風 (IPEVO V4K PRO) (1778:d002) | 麥克風 (IPEVO V4K PRO)（通訊） | 麥克風 (IPEVO V4K PRO) |
+| 麥克風 (Realtek(R) Audio) | 麥克風 (Realtek(R) Audio) | 麥克風 (Realtek(R) Audio) |
+
+<!-- @trace
+source: ui-sentence-menus
+updated: 2026-11-23
+code:
+  - 螢幕擷取畫面 2026-11-23 225421.png
+  - lab/realtime-translate/costs.jsonl
+  - webapp/static/minutes.html
+  - 螢幕擷取畫面 2026-11-17 225637.png
+  - gpt-realtime-translate_demoUI.png
+  - webapp/static/meetings.html
+  - webapp/server.py
+  - webapp/static/ask.html
+  - lab/realtime-translate/sessions/20261117-174651/output.wav
+  - webapp/static/index.html
+  - 螢幕擷取畫面 2026-11-23 214336.png
+  - bench/meeting_end_e2e.mjs
+  - webapp/static/search.html
+  - chang01.png
+  - webapp/revise_pass.py
+  - webapp/static/sentence-menu.js
+  - lab/realtime-translate/sessions/20261116-232831/session.json
+  - webapp/static/refine.css
+  - lab/realtime-translate/sessions/20261116-232831/input.wav
+  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
+  - 20261122_211227.mp4
+  - webapp/static/topbar.css
+  - 20261122_215017.mp4
+  - webapp/static/metrics.html
+  - webapp/static/actions.html
+  - webapp/static/app.js
+  - webapp/static/interpret.html
+  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
+  - lab/realtime-translate/server.py
+  - webapp/static/admin.html
+  - bench/ui_night_celadon_e2e.mjs
+  - webapp/static/login.html
+  - bench/ui_setup_collapse_e2e.mjs
+  - bench/ui_sentence_menus_e2e.mjs
+  - lab/realtime-translate/sessions/20261116-232831/output.wav
+  - lab/realtime-translate/index.html
+  - lab/realtime-translate/sessions/20261117-174651/input.wav
+  - webapp/static/review.html
 tests:
   - webapp/test_server.py
 -->

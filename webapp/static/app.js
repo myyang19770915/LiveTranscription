@@ -222,26 +222,36 @@ function updateTranslationDirection(){
   showSentence();
 }
 function selectedSource(){return $('audioSource').value}
+// Microphone names (ui-sentence-menus): no trailing USB code; Windows' Default / Communications devices are marked after
+// the name. The sentence leaves the mark out.
+function micName(label){
+  const name=String(label||'').replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)$/i,'');
+  const mark=name.match(/^(Default|Communications) - (.+)$/);
+  return mark?`${mark[2]}（${mark[1]==='Default'?'系統預設':'通訊'}）`:name;
+}
 // The setup as one sentence (ui-night-celadon, meeting-setup-layout): wide windows show it as the page title; each named
 // setting is a button that focuses its own control and opens a menu's list. During a session it is plain text.
 function sentenceState(){
   const label=id=>$(id).selectedOptions?.[0]?.textContent.trim()||'',team=$('team'),hasTeam=!team.hidden&&team.options.length>0;
   return {mode:interpretOn()?'interpret':translateOnly()?'translate':'meeting',source:$('language').value,sourceLabel:label('language'),
     target:$('targetLanguage').value,targetLabel:interpretOn()?label('targetLanguage').replace(/（.*/,'').replace(/\s+[㐀-鿿]+$/,''):label('targetLanguage'),   // 口譯's menu is bilingual: English 英文 → English
-    audio:selectedSource(),micLabel:label('microphone'),
+    audio:selectedSource(),micLabel:label('microphone').replace(/（(系統預設|通訊)）$/,''),
     team:hasTeam?team.value:'',teamLabel:hasTeam?label('team'):'',play:$('interpretPlay').checked};
 }
 function showSentence(){
   const box=$('setupSentence');if(!box||!window.SetupSentence)return;
+  window.SentenceMenu?.close(false);   // its word is about to be replaced
   const names={language:'語音語言',targetLanguage:'翻譯成',audioSource:'音訊來源',microphone:'麥克風來源',team:'團隊',interpretPlay:'同步播放譯音'};
   const live=document.body.classList.contains('live-session');
   // One span per clause (ui-setup-collapse): lines break between clauses, a clause wider than the line still wraps.
   const clauses=[],clause=()=>{const span=Object.assign(document.createElement('span'),{className:'sentence-clause'});clauses.push(span);return span};
   let current=clause();
   for(const part of SetupSentence.compose(sentenceState())){
-    if(part.field&&!live){
+    if(part.field&&!live&&!$(part.field)?.disabled){
       const button=Object.assign(document.createElement('button'),{type:'button',className:'sentence-pick',textContent:part.text});
-      button.dataset.field=part.field;button.setAttribute('aria-label',`更改${names[part.field]}`);current.append(button);continue;
+      button.dataset.field=part.field;button.setAttribute('aria-label',`更改${names[part.field]}`);
+      button.setAttribute('aria-haspopup','listbox');button.setAttribute('aria-controls','sentenceMenu');button.setAttribute('aria-expanded','false');
+      current.append(button);continue;
     }
     for(const piece of part.text.split(/(?<=，)/)){if(!piece)continue;current.append(piece);if(piece.endsWith('，'))current=clause()}
   }
@@ -249,9 +259,8 @@ function showSentence(){
 }
 $('setupSentence').addEventListener('click',event=>{
   const button=event.target.closest('.sentence-pick'),control=button&&$(button.dataset.field);if(!control)return;
-  if(document.querySelector('.controls').classList.contains('setup-folded'))setSetupMore(true);   // a hidden control can take no focus
-  control.focus();
-  if(control.tagName==='SELECT'&&!control.disabled)try{control.showPicker()}catch{}   // no picker (or not allowed): the focus alone
+  // ui-sentence-menus: the word opens its own menu below it; the setup stays folded or unfolded as it is.
+  SentenceMenu.open(button,control,field=>document.querySelector(`#setupSentence .sentence-pick[data-field="${field}"]`)?.focus());
 });
 function updateSourceUI(){const mode=selectedSource(),system=mode!=='microphone';$('sourceHint').hidden=!system;   // the headphone tip is gone; sharing steps stay
   $('microphone').closest('.mic-field').classList.toggle('is-hidden',mode==='system');$('sourceHint').textContent=system?'點「測試音源」或「開始會議」後，在 Chrome 分享視窗勾選「分享分頁音訊」或「分享系統音訊」。只選畫面、不分享音訊，無法轉錄。'+(mode==='mixed'?'混合模式也會收取麥克風；建議使用耳機。':''):'使用耳機開會可避免喇叭聲被麥克風重複收進來。';$('testMic').querySelector('small').textContent=system?'開啟分享選擇器':'確認有聲音';if(!testStream)mediaUnavailable()?setMicStatus(mediaUnavailable(),'error'):setMicStatus(system?'尚未連接分享音訊':'尚未測試音源');showSentence()}
@@ -306,7 +315,7 @@ async function refreshMicrophones(preferredId=''){
   const current=preferredId||$('microphone').value;
   const devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput');
   $('microphone').innerHTML='';
-  devices.forEach((device,index)=>{const option=document.createElement('option');option.value=device.deviceId;option.textContent=device.label||`麥克風 ${index+1}`;$('microphone').appendChild(option)});
+  devices.forEach((device,index)=>{const option=document.createElement('option');option.value=device.deviceId;option.textContent=micName(device.label)||`麥克風 ${index+1}`;$('microphone').appendChild(option)});
   if(!devices.length){const option=document.createElement('option');option.value='default';option.textContent='找不到麥克風';$('microphone').appendChild(option);setMicStatus('沒有可用的輸入裝置','error');return}
   if([...$('microphone').options].some(o=>o.value===current))$('microphone').value=current;
   showSentence();
@@ -333,7 +342,7 @@ async function toggleMicTest(){
     clearInterval(testSampler);testSampler=setInterval(()=>{if(level()>.08)signal()},TEST_SAMPLE_MS);
     clearTimeout(testSilence);testSilence=setTimeout(()=>{if(level()>.08)signal();if(!heard){shown='silent';setMicStatus(silenceAdvice(mode),'error')}},TEST_SILENCE_MS);
     draw();
-    $('testMic').classList.add('testing');$('testMic').querySelector('b').textContent='結束測試';$('testMic').querySelector('small').textContent=selectedSource()==='microphone'?'請對麥克風說話':'請播放影片或會議音訊';$('microphone').disabled=true;$('audioSource').disabled=true;$('testMic').disabled=false;
+    $('testMic').classList.add('testing');$('testMic').querySelector('b').textContent='結束測試';$('testMic').querySelector('small').textContent=selectedSource()==='microphone'?'請對麥克風說話':'請播放影片或會議音訊';$('microphone').disabled=true;$('audioSource').disabled=true;$('testMic').disabled=false;showSentence();   // their words are plain text while the test runs
     testStreams.forEach(media=>media.getTracks().forEach(mediaTrack=>mediaTrack.onended=()=>{stopMicTest();setMicStatus('音源已中斷','error')}));
   }catch(error){stopMicTest();setMicStatus(error.status||(error.name==='NotAllowedError'?(error.message||'Chrome 未允許麥克風'):'無法連接所選音源'),'error');toast(error.message,error.status?8000:undefined)}finally{$('testMic').disabled=false}
 }
