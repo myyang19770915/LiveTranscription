@@ -105,6 +105,7 @@ class _Traditional(OpenCC):
 # Characters only: s2twp's phrase table rewrites ordinary words into IT jargon (循环→迴圈, 扩展→擴充套件)
 # and doubles words that are already Taiwanese (演算法→演演算法). The translator writes Taiwanese wording itself.
 TO_TRADITIONAL = _Traditional("s2tw")
+STREAM_EOS = mai_asr.EOS   # the page's end of stream, passed on to the recognition engine
 LANGUAGES = {
     "zh": ("Chinese", "Traditional Chinese as used in Taiwan"),
     "en": ("English", "English"),
@@ -698,6 +699,7 @@ async def transcribe(browser: WebSocket):
         await browser.close(code=4429, reason=stream_limits.TOO_MANY.format(n=stream_limits.MAX_STREAMS_PER_USER))
         return
     audio, meeting, quality, record = None, None, None, None
+    ending = None   # the quality pass finishing early (faster-meeting-end), set below
     try:
         try:
             raw_header = await asyncio.wait_for(browser.receive_text(), stream_limits.STREAM_HEADER_TIMEOUT)
@@ -771,7 +773,11 @@ async def transcribe(browser: WebSocket):
         async with websockets.connect(ASR_WS_URL, ping_interval=None, max_size=None) as upstream:
             await upstream.send(json.dumps(safe_header, ensure_ascii=False))
 
+            ending = None   # faster-meeting-end: the quality pass finishing, started at the page's end of stream
+            live_done = asyncio.Event()   # the recognition engine has sent all its text (revision waits a little for it)
+
             async def browser_to_asr():
+                nonlocal ending
                 while True:
                     event = await guarded.receive()
                     if event.get("type") == "websocket.disconnect":
@@ -782,8 +788,17 @@ async def transcribe(browser: WebSocket):
                         await upstream.send(event["bytes"])
                     elif event.get("text") is not None:
                         await upstream.send(event["text"])
+                        # All the audio is in: the quality pass finishes while the recognition engine still does.
+                        if quality is not None and ending is None and event["text"] == STREAM_EOS:
+                            ending = asyncio.create_task(quality.finish(live_done))
 
             async def asr_to_browser():
+                try:
+                    await relay()
+                finally:
+                    live_done.set()
+
+            async def relay():
                 async for message in upstream:
                     if isinstance(message, bytes):
                         await browser.send_bytes(message)
@@ -807,7 +822,7 @@ async def transcribe(browser: WebSocket):
             for task in done:
                 task.result()
             if quality is not None and browser.client_state == WebSocketState.CONNECTED:
-                await quality.finish()   # the last sentences, then the connection closes
+                await (ending or quality.finish())   # the last sentences, then the connection closes
             if record is not None:
                 await record.finish()
             if browser.client_state == WebSocketState.CONNECTED:
@@ -825,6 +840,8 @@ async def transcribe(browser: WebSocket):
         except Exception:
             pass
     finally:
+        if ending is not None and not ending.done():
+            ending.cancel()   # the browser left while the quality pass was finishing
         if quality is not None:
             quality.cancel()   # no-op after finish(); stops the requests when the browser left
         stream_limits.free_place(user.username)

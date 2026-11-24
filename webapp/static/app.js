@@ -399,6 +399,9 @@ async function startMeeting() {
 
 async function stopMeeting(sendEos=true) {
   if(stopping)return;stopping=true;
+  // faster-meeting-end: closing takes a few seconds (the last sentences); say so instead of looking stuck.
+  $('start').disabled=true;$('start').querySelector('.button-copy b')?.replaceChildren('結束中…');$('start').querySelector('.button-copy small')?.replaceChildren(qualityOn?'正在完成最後幾句':'正在儲存');
+  if(qualityOn)setStatus('正在完成最後幾句…','live');
   await stopRecording().catch(error=>toast(`錄音儲存失敗：${error.message}`,5000));
   workletNode?.disconnect();sourceNodes.forEach(node=>{try{node.disconnect()}catch{}});
   if(workletNode)workletNode.port.onmessage=null;
@@ -416,7 +419,7 @@ async function stopMeeting(sendEos=true) {
   try{socket?.close();}catch{} captureStreams.forEach(media=>media.getTracks().forEach(track=>{track.onended=null;track.stop()}));
   try{sourceNodes.forEach(node=>node.disconnect());workletNode?.disconnect();await audioContext?.close();}catch{}
   tentative='';render('transcript',transcript);
-  socket=stream=audioContext=null;captureStreams=[];sourceNodes=[];workletNode=null;clearInterval(timerHandle);$('start').innerHTML=interpretOn()?interpretStartContent:translateOnly()?translateStartContent:startButtonContent;$('start').classList.remove('stop');setControls(false);if(topicUsed){$('topic').value='';topicUsed=false}setMicStatus(`已確認：${$('activeMic').textContent}`,'ok');setStatus(transcript||interpreted?(sessionPrefix==='interpret'?(interpreted?'口譯已結束，已存到我的紀錄':'口譯已結束'):translateOnly()?'翻譯已結束':'會議已結束'):'系統待機');if(interpreted)showSaved(interpreted);scheduleTranslation(true);if(sessionPrefix==='translate')saveFinalTranslation();storeTranscript();if(meetingId)window.MeetingSeries?.ended(meetingId);stopping=false;
+  socket=stream=audioContext=null;captureStreams=[];sourceNodes=[];workletNode=null;clearInterval(timerHandle);$('start').innerHTML=interpretOn()?interpretStartContent:translateOnly()?translateStartContent:startButtonContent;$('start').classList.remove('stop');setControls(false);if(topicUsed){$('topic').value='';topicUsed=false}setMicStatus(`已確認：${$('activeMic').textContent}`,'ok');setStatus(transcript||interpreted?(sessionPrefix==='interpret'?(interpreted?'口譯已結束，已存到我的紀錄':'口譯已結束'):translateOnly()?'翻譯已結束':'會議已結束'):'系統待機');if(interpreted)showSaved(interpreted);scheduleTranslation(true);if(sessionPrefix==='translate')saveFinalTranslation();storeTranscript();if(meetingId)window.MeetingSeries?.ended(meetingId);stopping=false;$('start').disabled=false;
 }
 // The meeting audio is kept only in this browser and saved next to the exported transcript.
 function startRecording(gains){

@@ -831,6 +831,17 @@ class AudioUntilEos(AudioAfter):
         await self.ended.wait()
 
 
+class SlowToClose(AudioUntilEos):
+    """A recognition engine that needs a second after the end of stream to send its last text and close."""
+
+    async def __aiter__(self):
+        async for message in AudioAfter.__aiter__(self):
+            yield message
+        await self.ended.wait()
+        await asyncio.sleep(1)
+        yield json.dumps({"msg": {"text": "最後一句"}})
+
+
 class MeetingTimelineTests(AccountTestCase):
     def recording(self):
         meeting = self.meeting_id()
@@ -3565,6 +3576,40 @@ class ReviserTest(unittest.TestCase):
         self.assertEqual(asked_before_the_first_answer, [2])      # sentences 7 to 13 did not wait for the first window
         self.assertEqual(events[0]["revision"]["sentences"], [{"id": 7, "source": "這是第7句話。", "target": "The seventh."}])
 
+    def run_live_end(self, set_after):
+        """A stream ending while the live engine still sends its last text: `set_after` seconds later it has sent all of
+        it (None: never). Returns the ALT lines of the requests."""
+        async def go():
+            live, reviewer = {"text": "early"}, FakeReviewer()
+
+            async def send(payload):
+                pass
+            reviser = revise_pass.Reviser(reviewer, send, "English", lambda start, end: live["text"], lambda text: text,
+                                          lambda text: quality_pass.units(text, quality_pass.in_words(text)))
+            reviser.add(shown(1, 4))
+            live_done = asyncio.Event()
+
+            async def engine():
+                await asyncio.sleep(set_after)
+                live["text"] = "early and late"
+                live_done.set()
+            if set_after is not None:
+                asyncio.create_task(engine())
+            await reviser.finish(live_done)
+            reviser.cancel()
+            return [line for user in reviewer.users for line in user.splitlines() if line.startswith("ALT:")]
+        return asyncio.run(go())
+
+    def test_the_last_windows_wait_for_the_live_text(self):
+        # faster-meeting-end: the quality pass ends before the live engine; its last text is in the ALT of the last window.
+        self.assertEqual(self.run_live_end(0.05), ["ALT: early and late"])
+
+    def test_the_wait_for_the_live_text_is_short(self):
+        with patch("revise_pass.LIVE_WAIT", 0.05):
+            started = time.monotonic()
+            self.assertEqual(self.run_live_end(None), ["ALT: early"])
+            self.assertLess(time.monotonic() - started, 1.0)
+
     def test_a_merge_at_the_end_and_what_was_not_done_in_time(self):
         async def never(window):
             await asyncio.sleep(5)
@@ -4281,6 +4326,29 @@ class QualityStreamTests(AccountTestCase):
             messages = self.stream({"quality": True})
         client.assert_not_called()
         self.assertFalse(any("quality" in message for message in messages))
+
+    def test_the_quality_pass_finishes_while_the_engine_does(self):
+        """faster-meeting-end: the final quality event does not wait for the recognition engine to close."""
+        service = FakeQualityService(["這個會議"], [{"sentences": [{"src": "這個會議。", "tgt": "This meeting."}], "carry": ""}])
+        self.configured(service)
+        audio = tone(3)
+        messages = []
+        with patch("server.websockets.connect", side_effect=lambda *a, **k: SlowToClose(len(audio))):
+            with self.signed_in("alice").websocket_connect("/ws/transcribe") as websocket:
+                websocket.send_json({"mode": "translate", "language": "zh", "quality": True, "target": "en"})
+                websocket.send_bytes(audio)
+                websocket.send_text(server.STREAM_EOS)
+                with contextlib.suppress(WebSocketDisconnect):
+                    while True:
+                        message = websocket.receive_json()
+                        if not {"record", "saved"} & message.keys():
+                            messages.append(message)
+        final = next(i for i, m in enumerate(messages) if m.get("quality", {}).get("final"))
+        last_text = next(i for i, m in enumerate(messages) if (m.get("msg") or {}).get("text") == "最後一句")
+        self.assertLess(final, last_text)   # sent during the engine's second, not after it
+
+    def test_revision_waits_at_most_15_seconds_at_the_end(self):
+        self.assertEqual(revise_pass.FINISH_TIMEOUT, 15.0)
 
     def test_chosen_gets_quality_events_and_the_last_one_is_final(self):
         service = FakeQualityService(["這個會議"], [{"sentences": [{"src": "這個會議。", "tgt": "This meeting."}], "carry": ""}])

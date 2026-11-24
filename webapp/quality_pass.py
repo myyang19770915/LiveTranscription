@@ -477,8 +477,9 @@ class QualityPass:
         if USE_ALT or self.reviser:   # only kept when it is used
             self.live_text.note(text, self.fed_ms)
 
-    async def finish(self) -> None:
-        """Process what is left as the last chunk and send the final event; at most FINISH_TIMEOUT."""
+    async def finish(self, live_done: asyncio.Event | None = None) -> None:
+        """Process what is left as the last chunk and send the final event; at most FINISH_TIMEOUT. live_done: set when
+        the live engine has sent all its text (revision waits a little for it, see revise_pass.LIVE_WAIT)."""
         if self.closing:
             return
         self.closing = True
@@ -498,7 +499,7 @@ class QualityPass:
                 await self._emit({"failed": True, "throughMs": self.fed_ms, "final": True})
         finally:
             if self.reviser:
-                await self.reviser.finish()   # the sentences not yet revised, within its own time limit
+                await self.reviser.finish(live_done)   # the sentences not yet revised, within its own time limit
             self.closed = True
             if self.mai:
                 self.mai.close()

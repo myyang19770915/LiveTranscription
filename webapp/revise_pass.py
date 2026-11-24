@@ -8,6 +8,7 @@ sentence the first pass cut in two can be merged into one (revision-merge); noth
 Anything that goes wrong leaves the first result in place.
 """
 import asyncio
+import contextlib
 import logging
 import time
 
@@ -15,7 +16,11 @@ logger = logging.getLogger("uvicorn.error")
 
 WINDOW, AFTER, BEFORE = 6, 3, 6     # sentences per window, sentences that must follow it, sentences shown before it
 ASK_TIMEOUT = 60.0                  # one answer; reasoning took 7-20 s at the median and 88 s at worst (bench/README.md)
-FINISH_TIMEOUT = 30.0               # everything still unrevised when the stream ends
+FINISH_TIMEOUT = 15.0               # everything still unrevised when the stream ends (faster-meeting-end: was 30 s;
+                                    # the page waited for it after 結束會議, and a slow answer often missed it anyway)
+LIVE_WAIT = 5.0                     # at the end, how long the last windows wait for the live engine's text (ALT); inside
+                                    # FINISH_TIMEOUT. The quality pass now ends before the live engine does, and that
+                                    # engine lagged 16 s in one meeting (faster-meeting-end)
 MAX_WAITING = 30                    # more sentences than this waiting: the oldest windows are given up
 NOTES_LIMIT = 900
 MERGE_MAX = 2                       # sentences that may become one: more made walls of text (bench/README.md)
@@ -109,17 +114,22 @@ class Reviser:
         self.added += len(sentences)
         self.wake.set()
 
-    async def finish(self) -> None:
-        """Revise what is left and return; at most FINISH_TIMEOUT. What is not done by then stays as it was."""
+    async def finish(self, live_done: asyncio.Event | None = None) -> None:
+        """Revise what is left and return; at most FINISH_TIMEOUT. What is not done by then stays as it was.
+        live_done: set when the live engine has sent all its text; until then (at most LIVE_WAIT) the last windows wait,
+        so their ALT holds the live text of their last seconds too."""
         if self.closed:
             return
         self.closing, self.deadline = True, time.monotonic() + FINISH_TIMEOUT
         self.wake.set()
+        if live_done is not None and not live_done.is_set():
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(live_done.wait(), LIVE_WAIT)
         # Every window that is left is asked for now, together and next to the one still being revised, so the last
         # sentences are in time. Their requests are built here, before anything else changes the list.
         self.tail = [asyncio.ensure_future(self._window(first, window, self._messages(first, window))) for first, window in self._last_windows()]
         try:
-            _, late = await asyncio.wait([self.worker, *self.tail], timeout=FINISH_TIMEOUT)
+            _, late = await asyncio.wait([self.worker, *self.tail], timeout=max(0.0, self.deadline - time.monotonic()))
             if late:
                 logger.warning("quality revision: %d sentences were not revised before the stream closed", self.added - self.done)
         finally:
