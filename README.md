@@ -506,14 +506,14 @@ curl http://<語橋主機 IP>:18000/v1/audio/transcriptions \
 
 ## 即時口譯與我的紀錄
 
-首頁的第三個模式「即時口譯」用 Azure GPT-Realtime-Translate 做即時口譯：說話後直接聽到譯音、看到譯文。系統管理員一律可用，其他人要由管理員在團隊管理頁的「即時口譯權限」加入帳號（`/api/admin/interpret-access`）；沒有權限的人看得到按鈕但不能按。口譯模式下原始逐字稿是語橋辨識的原文，翻譯欄、浮動字幕、畫面＋字幕都是口譯譯文，不另做文字翻譯；雲端精修、精準模式、中日雙向不適用。
+首頁的第三個模式「即時口譯」用 Azure GPT-Realtime-Translate 做即時口譯：說話後直接聽到譯音、看到譯文。系統管理員一律可用，其他人要由管理員在「管理」的「系統設定」分頁（`/admin/settings`）的「即時口譯權限」加入帳號（`/api/admin/interpret-access`）；沒有權限的人看得到按鈕但不能按。口譯模式下原始逐字稿是語橋辨識的原文，翻譯欄、浮動字幕、畫面＋字幕都是口譯譯文，不另做文字翻譯；雲端精修、精準模式、中日雙向不適用。
 
 - **原文**：由語橋辨識，跟即時翻譯模式相同：中文、中英混合、粵語用本機 Confucius，其他語言用雲端 MAI（記在 MAI 用量）。
 - **輸出語言**：模型支援的語言都能選（中文輸出轉成台灣繁體），每次連線只能翻成一種。說的話已經是輸出語言時，模型可能不翻。沒有術語表，也不能選聲音。
 - **同步播放譯音**：取消勾選就只看譯文、不出聲，譯音照樣存檔。
 - **我的紀錄**（`/interpret`，每位使用者都能開）：即時口譯與即時翻譯每次結束都存到 `output/interpret/<帳號>/<日期-時間>/`（`input.wav` 原音、口譯才有的 `output.wav` 譯音、`session.json`、`transcript.txt`、`bars.json` 波形），只有本人看得到。音訊邊收邊寫到以 `.recording-` 開頭的暫存資料夾，結束時改名。可載入重播（整段、只聽譯音、只聽原音，點或拖動波形從該處依目前模式播放）、下載、刪除。即時翻譯的譯文由頁面每 30 秒送一次（`PUT /api/interpret/live/<token>/translation`），結束後再送完整的（`PUT /api/interpret/sessions/<id>/translation`）。
 - **轉成會議紀錄**：「我的紀錄」每筆都有「轉成會議紀錄」，選自己的團隊與標題（預設如「即時翻譯 2026-11-18 14:03」），建立的會議屬於該團隊、建立者是本人，開始時間、語言與錄音照原紀錄（24 kHz 的口譯錄音轉成 16 kHz）。即時翻譯的紀錄存有逐句資料（每 30 秒與存檔時送出，存在 `session.json` 的 `segments`），會立即轉成段落，不經外部服務、不花費。沒有逐句資料的紀錄（即時口譯，或更早的即時翻譯）會把整段錄音交給精準模式：所有語言都由 Qwen3-ASR 辨識，再由文字模型斷句、修正、翻譯；轉換前畫面會說明音訊與文字會送到外部服務與大約要多久（約錄音長度的一半），轉換中顯示進度，任何一部分失敗就不建立會議。辨識或文字模型沒設定時不能轉換。原紀錄保留並標示「已轉成會議紀錄」，連到該會議，不能重複轉換。每人同時 1 個、全站最多 2 個轉換；轉換狀態只在記憶體，伺服器重啟後要重按。
-- **保存期限**：預設 90 天，管理員在團隊管理頁「紀錄保存期限」修改（`/api/admin/records-retention`，存在 `app_settings`）。伺服器啟動時與每 6 小時刪除過期紀錄與超過一天的暫存資料夾。
+- **保存期限**：預設 90 天，管理員在「管理」的「系統設定」分頁「紀錄保存期限」修改（`/api/admin/records-retention`，存在 `app_settings`）。伺服器啟動時與每 6 小時刪除過期紀錄與超過一天的暫存資料夾。
 - **費用**：依譯音長度每小時約 2.04 美元（`INTERPRET_USD_PER_HOUR`），記在資料表 `interpret_usage`，「管理」的「用量管理」分頁（`/admin/usage`）顯示每月、每日與每人用量；可在該頁設定累計金額上限（預設不設，達到只提示、不停用），不算進 MAI 上限。系統外的用量以 `docker exec -w /app <app 容器> python -m interpret_usage add <秒數> <用途>` 登記。
 - **串流名額**：一次口譯占兩條串流（翻譯與原文辨識），預設上限 2 條（`MAX_STREAMS_PER_USER`），開會中無法同時口譯。
 
@@ -626,6 +626,7 @@ curl http://<語橋主機 IP>:18000/v1/audio/transcriptions \
 | `POST /api/login`、`POST /api/logout`、`GET /api/me` | LDAP 登入、登出、目前使用者與所屬團隊（含 `email`、`emailSource`：`ldap`／`self`） |
 | `PUT /api/me/email` | 自行填寫或清除（`""`）自己的 Email；來自 LDAP 時 409，格式不符 422 |
 | `GET /admin`、`/api/admin/teams…` | 團隊管理（限系統管理員） |
+| `GET /admin/settings` | 系統設定：紀錄保存期限、即時口譯權限（限系統管理員） |
 | `GET /admin/usage`、`GET /api/admin/usage`、`PUT /api/admin/usage/budgets` | 用量管理：雲端辨識與即時口譯的用量、估算金額與上限（限系統管理員） |
 | `GET /interpret`、`GET /api/interpret/config`、`GET`／`DELETE /api/interpret/sessions…`、`PUT /api/interpret/sessions/<id>/translation`、`PUT /api/interpret/live/<token>/translation` | 我的紀錄（所有登入者；只限本人的紀錄） |
 | `WS /ws/interpret` | 即時口譯（系統管理員與被開放的帳號） |

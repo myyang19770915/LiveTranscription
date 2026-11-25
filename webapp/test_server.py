@@ -4237,6 +4237,13 @@ class UsageAdminTests(AccountTestCase):
         page = self.signed_in("admin").get("/admin/usage")
         self.assertEqual(page.status_code, 200)
         self.assertIn("用量管理", page.text)
+        # system-settings: the third administration page is served the same way.
+        refused = alice.get("/admin/settings", follow_redirects=False)
+        self.assertEqual((refused.status_code, "管理頁面只開放給系統管理員。" in refused.text), (403, True))
+        page = self.signed_in("admin").get("/admin/settings")
+        self.assertEqual((page.status_code, "紀錄保存期限" in page.text, "即時口譯權限" in page.text), (200, True, True))
+        team_page = self.signed_in("admin").get("/admin").text
+        self.assertEqual(("紀錄保存期限" in team_page, "即時口譯權限" in team_page, "建立新團隊" in team_page), (False, False, True))
 
     def test_budgets_before_and_after_an_administrator_saves_them(self):
         admin = self.signed_in("admin")

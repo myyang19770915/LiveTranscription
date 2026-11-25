@@ -440,7 +440,7 @@ tests:
 ---
 ### Requirement: Interpreting is open to granted users
 
-A user SHALL be allowed to interpret when the user is a system administrator or the username is in the table `interpret_access (username, granted_by, granted_at)`. `GET /api/admin/interpret-access`, `POST /api/admin/interpret-access` with `{"username": <name>}` and `DELETE /api/admin/interpret-access/<username>` SHALL require a system administrator (403 otherwise) and SHALL list, grant and withdraw access; a username SHALL be lower-cased and SHALL match `^[a-z0-9_][a-z0-9._-]{0,63}$`, otherwise the answer is 422. The team administration page SHALL show a section 即時口譯權限 listing the granted accounts with 移除, a field to add a 公司帳號, and a note that interpreting is used from the live page. `GET /api/interpret/config` SHALL answer every signed-in user with `configured`, `allowed`, `usdPerHour` and `targets`. `/ws/interpret` SHALL close with code 4401 without a session and with code 4403 and the reason 即時口譯需要申請權限，請聯絡系統管理員 when the user is not allowed, in both cases before any connection to the translation service; while a session runs, the periodic session re-check SHALL also re-check the access, and a withdrawn access SHALL stop the session with code 4403 and save what there is.
+A user SHALL be allowed to interpret when the user is a system administrator or the username is in the table `interpret_access (username, granted_by, granted_at)`. `GET /api/admin/interpret-access`, `POST /api/admin/interpret-access` with `{"username": <name>}` and `DELETE /api/admin/interpret-access/<username>` SHALL require a system administrator (403 otherwise) and SHALL list, grant and withdraw access; a username SHALL be lower-cased and SHALL match `^[a-z0-9_][a-z0-9._-]{0,63}$`, otherwise the answer is 422. The system settings page (`/admin/settings`, system-settings) SHALL show a section 即時口譯權限 listing the granted accounts with 移除, a field to add a 公司帳號, and a note that interpreting is used from the live page. `GET /api/interpret/config` SHALL answer every signed-in user with `configured`, `allowed`, `usdPerHour` and `targets`. `/ws/interpret` SHALL close with code 4401 without a session and with code 4403 and the reason 即時口譯需要申請權限，請聯絡系統管理員 when the user is not allowed, in both cases before any connection to the translation service; while a session runs, the periodic session re-check SHALL also re-check the access, and a withdrawn access SHALL stop the session with code 4403 and save what there is.
 
 #### Scenario: Granting a member
 
@@ -468,50 +468,29 @@ A user SHALL be allowed to interpret when the user is a system administrator or 
 
 
 <!-- @trace
-source: interpret-mode-on-home
-updated: 2026-11-17
+source: admin-settings-tab
+updated: 2026-11-25
 code:
-  - webapp/static/app.js
-  - lab/realtime-translate/sessions/20261117-174651/output.wav
-  - webapp/static/refine.css
-  - lab/realtime-translate/sessions/20261117-174651/input.wav
-  - webapp/static/interpret-mode.js
-  - lab/realtime-translate/index.html
-  - webapp/migrations/020_interpret_access.sql
-  - webapp/static/admin.css
-  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
-  - webapp/records_retention.py
-  - bench/privacy_e2e.mjs
-  - webapp/interpret_usage.py
-  - webapp/static/interpret-langs.js
-  - bench/translate_e2e.mjs
-  - webapp/server.py
-  - webapp/interpret.py
-  - webapp/static/review.html
-  - lab/realtime-translate/server.py
-  - webapp/static/meetings.html
-  - lab/realtime-translate/sessions/20261116-232831/session.json
-  - webapp/static/ask.html
-  - bench/interpret_e2e.mjs
-  - chang01.png
-  - lab/realtime-translate/sessions/20261116-232831/output.wav
-  - webapp/static/admin.html
-  - gpt-realtime-translate_demoUI.png
-  - webapp/static/metrics.html
-  - webapp/static/interpret.css
   - README.md
-  - webapp/static/index.html
-  - webapp/static/minutes.html
-  - webapp/static/interpret.html
-  - lab/realtime-translate/costs.jsonl
-  - webapp/static/interpret.js
-  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
-  - 螢幕擷取畫面 2026-11-17 225637.png
-  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - bench/interpret_e2e.mjs
+  - bench/ui_consistency_e2e.mjs
+  - bench/usage_admin_e2e.mjs
+  - webapp/team_access.py
   - webapp/static/account.js
+  - webapp/static/admin.css
+  - webapp/static/admin.html
+  - webapp/static/settings.html
+  - webapp/static/settings.js
+  - webapp/static/usage.html
   - webapp/static/actions.html
+  - webapp/static/ask.html
+  - webapp/static/index.html
+  - webapp/static/interpret.html
+  - webapp/static/meetings.html
+  - webapp/static/metrics.html
+  - webapp/static/minutes.html
+  - webapp/static/review.html
   - webapp/static/search.html
-  - lab/realtime-translate/sessions/20261116-232831/input.wav
 tests:
   - webapp/test_server.py
 -->
@@ -605,7 +584,7 @@ tests:
 ---
 ### Requirement: Saved records are kept for a set number of days
 
-Saved sessions of both kinds SHALL be kept for the number of days in the setting `records_retention_days` (table `app_settings`), 90 when it is not set. `GET /api/admin/records-retention` SHALL return `{"days": <n>}` and `PUT /api/admin/records-retention` with `{"days": <n>}` SHALL change it; both SHALL require a system administrator (403 otherwise), and `days` SHALL be an integer from 1 to 3650, otherwise the answer is 422. The server SHALL delete every saved session folder under `output/interpret/<username>/` whose id date (`YYYYMMDD`, in `MEETING_TIMEZONE`) is earlier than today minus the number of days, and every working folder starting with `.recording-` that was last changed more than one day ago: once when the server starts, every 6 hours after that, and right after the setting changes. A folder that cannot be deleted SHALL be logged and SHALL NOT stop the others. The team administration page SHALL show 紀錄保存期限 with the number of days, a way to change it and the note 即時翻譯與即時口譯紀錄超過天數會自動刪除. `GET /api/interpret/config` SHALL include `retentionDays`, and 我的紀錄 SHALL read 紀錄保存 <n> 天，到期自動刪除.
+Saved sessions of both kinds SHALL be kept for the number of days in the setting `records_retention_days` (table `app_settings`), 90 when it is not set. `GET /api/admin/records-retention` SHALL return `{"days": <n>}` and `PUT /api/admin/records-retention` with `{"days": <n>}` SHALL change it; both SHALL require a system administrator (403 otherwise), and `days` SHALL be an integer from 1 to 3650, otherwise the answer is 422. The server SHALL delete every saved session folder under `output/interpret/<username>/` whose id date (`YYYYMMDD`, in `MEETING_TIMEZONE`) is earlier than today minus the number of days, and every working folder starting with `.recording-` that was last changed more than one day ago: once when the server starts, every 6 hours after that, and right after the setting changes. A folder that cannot be deleted SHALL be logged and SHALL NOT stop the others. The system settings page (`/admin/settings`, system-settings) SHALL show 紀錄保存期限 with the number of days, a way to change it and the note 即時翻譯與即時口譯紀錄超過天數會自動刪除. `GET /api/interpret/config` SHALL include `retentionDays`, and 我的紀錄 SHALL read 紀錄保存 <n> 天，到期自動刪除.
 
 #### Scenario: Old records are removed
 
@@ -634,50 +613,29 @@ Saved sessions of both kinds SHALL be kept for the number of days in the setting
 
 
 <!-- @trace
-source: interpret-mode-on-home
-updated: 2026-11-17
+source: admin-settings-tab
+updated: 2026-11-25
 code:
-  - webapp/static/app.js
-  - lab/realtime-translate/sessions/20261117-174651/output.wav
-  - webapp/static/refine.css
-  - lab/realtime-translate/sessions/20261117-174651/input.wav
-  - webapp/static/interpret-mode.js
-  - lab/realtime-translate/index.html
-  - webapp/migrations/020_interpret_access.sql
-  - webapp/static/admin.css
-  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
-  - webapp/records_retention.py
-  - bench/privacy_e2e.mjs
-  - webapp/interpret_usage.py
-  - webapp/static/interpret-langs.js
-  - bench/translate_e2e.mjs
-  - webapp/server.py
-  - webapp/interpret.py
-  - webapp/static/review.html
-  - lab/realtime-translate/server.py
-  - webapp/static/meetings.html
-  - lab/realtime-translate/sessions/20261116-232831/session.json
-  - webapp/static/ask.html
-  - bench/interpret_e2e.mjs
-  - chang01.png
-  - lab/realtime-translate/sessions/20261116-232831/output.wav
-  - webapp/static/admin.html
-  - gpt-realtime-translate_demoUI.png
-  - webapp/static/metrics.html
-  - webapp/static/interpret.css
   - README.md
-  - webapp/static/index.html
-  - webapp/static/minutes.html
-  - webapp/static/interpret.html
-  - lab/realtime-translate/costs.jsonl
-  - webapp/static/interpret.js
-  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
-  - 螢幕擷取畫面 2026-11-17 225637.png
-  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - bench/interpret_e2e.mjs
+  - bench/ui_consistency_e2e.mjs
+  - bench/usage_admin_e2e.mjs
+  - webapp/team_access.py
   - webapp/static/account.js
+  - webapp/static/admin.css
+  - webapp/static/admin.html
+  - webapp/static/settings.html
+  - webapp/static/settings.js
+  - webapp/static/usage.html
   - webapp/static/actions.html
+  - webapp/static/ask.html
+  - webapp/static/index.html
+  - webapp/static/interpret.html
+  - webapp/static/meetings.html
+  - webapp/static/metrics.html
+  - webapp/static/minutes.html
+  - webapp/static/review.html
   - webapp/static/search.html
-  - lab/realtime-translate/sessions/20261116-232831/input.wav
 tests:
   - webapp/test_server.py
 -->

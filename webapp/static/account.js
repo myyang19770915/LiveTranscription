@@ -202,7 +202,7 @@ function currentNav(path=location.pathname){
   if(path==='/')return 'live';
   if(['/meetings','/review','/minutes'].includes(path)||path.startsWith('/meetings/'))return 'meetings';
   if(path==='/ask')return 'search';
-  if(path==='/admin/usage')return 'admin';   // the administration pages share the 管理 link (usage-admin)
+  if(path.startsWith('/admin/'))return 'admin';   // the administration pages share the 管理 link (usage-admin, system-settings)
   return NAV_LINKS.find(n=>n.href===path)?.key||'';
 }
 // The account this tab last saw (page-switching): the header is drawn from it at once, before /api/me answers, and

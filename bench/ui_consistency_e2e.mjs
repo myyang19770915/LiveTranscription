@@ -105,7 +105,7 @@ for (const [width, path, want] of [[850, '/', ['會議紀錄', '待辦看板', '
 
 // --- No sideways scrolling: 紀錄保存期限 on a phone
 {
-  const {page, context} = await open('/admin', {width: 390});
+  const {page, context} = await open('/admin/settings', {width: 390});   // system-settings: 紀錄保存期限 moved there
   const inside = await page.evaluate(() => { const card = document.getElementById('retention').getBoundingClientRect();
     return [...document.querySelectorAll('#retentionForm label, #retentionDays')].every(e => { const r = e.getBoundingClientRect(); return r.left >= card.left && r.right <= card.right; }); });
   t('團隊管理 on a phone: 保存期限 inside its card', inside, true);

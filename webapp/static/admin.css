@@ -34,6 +34,21 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 .section-tabs a[aria-current="page"] { border-bottom-color: var(--accent); color: var(--text); font-weight: 700; }
 .section-tabs a:focus-visible { outline-offset: -2px; }
 @media (forced-colors: active) { .section-tabs a[aria-current="page"] { border-bottom-color: Highlight; } }
+/* System settings (/admin/settings): one card, one setting per row; the name and its explanation on the left, the
+   controls on the right. Below 760px the controls go under the explanation. */
+.settings { padding: 4px 24px; }
+.setting { display: grid; grid-template-columns: 280px minmax(0, 640px); gap: 12px 40px; align-items: start; padding: 24px 0; }
+.setting + .setting { border-top: 1px solid var(--border); }
+.setting-text h2 { margin: 0 0 6px; font-size: 16px; }
+.setting-text p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; text-wrap: pretty; }
+.setting-control { min-width: 0; }
+.setting-control .members { margin: 0 0 10px; }
+.setting-note { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+.setting-note:empty { display: none; }
+@media (max-width: 760px) {
+  .settings { padding: 0 16px; }
+  .setting { grid-template-columns: minmax(0, 1fr); padding: 20px 0; }
+}
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
 .lead { max-width: 640px; margin: 10px 0 0; color: var(--muted); font-size: 15px; line-height: 1.7; }
@@ -85,8 +100,7 @@ button:disabled { opacity: .6; cursor: wait; }
 .member-actions .text-button.danger { color: var(--danger); }   /* 移出團隊 reads as destructive next to 移除照片 (ui-review-fixes) */
 
 .create { padding: 20px; margin-bottom: 16px; }
-.interpret-entry .summary, .create .summary { white-space: normal; }   /* card text wraps; only the page-head count stays on one line */
-.interpret-entry .members { margin: 10px 0; }
+.create .summary { white-space: normal; }   /* card text wraps; only the page-head count stays on one line */
 .retention-field { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; white-space: nowrap; }
 .retention-field .input, .row .retention-field .input { flex: none; width: 90px; }   /* not the phone .row rule's full width */
 .alert { margin: 0 0 16px; padding: 12px 16px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius: var(--radius-control); background: var(--danger-soft); color: var(--danger); font-size: 14px; }

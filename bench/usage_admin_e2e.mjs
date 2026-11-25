@@ -1,7 +1,7 @@
-// usage-admin in a real browser (Playwright, gstack's install): the usage management page with the API answered by
+// usage-admin and system-settings in a real browser (Playwright, gstack's install): the usage management page with the API answered by
 // the test (figures, budget states, the daily chart and its table, saving a budget, a failed read, a phone), the
-// section tabs shared with the team administration page, the header link 管理, and the team administration page
-// without its two usage cards. Nothing is written: every request that is not a GET is answered or refused here.
+// section tabs shared by the three administration pages, the header link 管理, the system settings page (one card, a
+// row per setting) and the team administration page with nothing but teams. Nothing is written: every request that is not a GET is answered or refused here.
 // With a folder as the third argument the real page is also photographed (1440 and 390 wide, both themes).
 // Usage: YUQIAO_SESSION=<administrator's session> node bench/usage_admin_e2e.mjs [app url] [screenshot folder]
 import {homedir} from 'node:os';
@@ -99,25 +99,30 @@ const marked = page => page.$$eval('#account a.nav-link[aria-current="page"]', n
 
   // Section tabs and the header link.
   const here = await tabs(page);
-  t('tabs on 用量管理', here.map(a => [a.text, a.href, a.current]), [['團隊管理', '/admin', null], ['用量管理', '/admin/usage', 'page']]);
+  t('tabs on 用量管理', here.map(a => [a.text, a.href, a.current]), [['團隊管理', '/admin', null], ['用量管理', '/admin/usage', 'page'], ['系統設定', '/admin/settings', null]]);
   t('tabs are at least 44 px high', here.every(a => a.h >= 44), true);
-  t('the current tab is marked by more than colour', await page.$$eval('.section-tabs a', a => a.map(x => [getComputedStyle(x).fontWeight, getComputedStyle(x).borderBottomColor !== 'rgba(0, 0, 0, 0)'])), [['600', false], ['700', true]]);
+  t('the current tab is marked by more than colour', await page.$$eval('.section-tabs a', a => a.map(x => [getComputedStyle(x).fontWeight, getComputedStyle(x).borderBottomColor !== 'rgba(0, 0, 0, 0)'])), [['600', false], ['700', true], ['600', false]]);
   t('header marks 管理 on /admin/usage', await marked(page), ['管理']);
   t('header links', (await texts(page, '#account a.nav-link')).join(' '), '即時會議 會議紀錄 我的紀錄 待辦看板 成效指標 管理 搜尋');
   await page.focus('#themeToggle');
   const focused = [];
-  for (let i = 0; i < 6 && focused.length < 2; i++) { await page.keyboard.press('Tab');
+  for (let i = 0; i < 6 && focused.length < 3; i++) { await page.keyboard.press('Tab');
     const got = await page.evaluate(() => { const a = document.activeElement; return a.closest('.section-tabs') ? [a.textContent, a.matches(':focus-visible') && getComputedStyle(a).outlineStyle !== 'none'] : null; });
     if (got) focused.push(got); }
-  t('Tab reaches both tabs and each shows its focus', focused, [['團隊管理', true], ['用量管理', true]]);
+  t('Tab reaches every tab and each shows its focus', focused, [['團隊管理', true], ['用量管理', true], ['系統設定', true]]);
   await page.focus('.section-tabs a');
   await page.keyboard.press('Enter'); await page.waitForURL(app + '/admin'); await page.waitForTimeout(700);
   const there = await tabs(page);
-  t('Enter on 團隊管理 opens /admin with that tab marked', there.map(a => [a.text, a.current]), [['團隊管理', 'page'], ['用量管理', null]]);
-  t('the tabs do not move between the two pages', there.map((a, i) => [Math.abs(a.x - here[i].x) <= 1, Math.abs(a.y - here[i].y) <= 1]), [[true, true], [true, true]]);
+  t('Enter on 團隊管理 opens /admin with that tab marked', there.map(a => [a.text, a.current]), [['團隊管理', 'page'], ['用量管理', null], ['系統設定', null]]);
+  t('the tabs do not move between the pages', there.every((a, i) => Math.abs(a.x - here[i].x) <= 1 && Math.abs(a.y - here[i].y) <= 1), true);
   t('header marks 管理 on /admin', await marked(page), ['管理']);
   await page.click('.section-tabs a[href="/admin/usage"]'); await page.waitForURL(app + '/admin/usage');
   t('用量管理 opens /admin/usage', new URL(page.url()).pathname, '/admin/usage');
+  await page.click('.section-tabs a[href="/admin/settings"]'); await page.waitForURL(app + '/admin/settings'); await page.waitForTimeout(700);
+  const settings = await tabs(page);
+  t('系統設定 opens /admin/settings with that tab marked', settings.map(a => [a.text, a.current]), [['團隊管理', null], ['用量管理', null], ['系統設定', 'page']]);
+  t('the tabs are in the same place on /admin/settings', settings.every((a, i) => Math.abs(a.x - here[i].x) <= 1 && Math.abs(a.y - here[i].y) <= 1), true);
+  t('header marks 管理 on /admin/settings', await marked(page), ['管理']);
   t('no page errors', errors, []);
   await context.close();
 }
@@ -196,7 +201,7 @@ const marked = page => page.$$eval('#account a.nav-link[aria-current="page"]', n
 }
 
 // --- A phone ---
-for (const [path, width] of [['/admin/usage', 390], ['/admin', 390], ['/admin/usage', 500]]) {
+for (const [path, width] of [['/admin/usage', 390], ['/admin', 390], ['/admin/settings', 390], ['/admin/usage', 500]]) {
   const {page, context} = await open(path, {width});
   t(`${path} at ${width} px does not scroll sideways`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   if (path === '/admin/usage' && width === 390) t('at 390 px the months table scrolls inside its card', await page.$eval('#monthly .table-wrap', w => w.scrollWidth > w.clientWidth && w.getBoundingClientRect().right <= innerWidth), true);
@@ -212,8 +217,55 @@ for (const [path, width] of [['/admin/usage', 390], ['/admin', 390], ['/admin/us
   const {page, context, errors, asked} = await open('/admin');
   t('/admin has no usage cards', await page.evaluate(() => [...document.querySelectorAll('h2, .label')].map(n => n.textContent).filter(x => x.includes('用量'))), []);
   t('/admin does not ask for the usage', asked.filter(a => a.includes('usage')), []);
-  t('/admin keeps its other cards', await page.evaluate(() => ['interpretAccess', 'retention', 'createTeam', 'teams'].map(id => !!document.getElementById(id))), [true, true, true, true]);
+  // system-settings: the team administration page shows only teams.
+  t('/admin has neither setting and starts with 建立新團隊', await page.evaluate(() => [!!document.getElementById('interpretAccess'), !!document.getElementById('retention'),
+    document.querySelector('main .card')?.id, !!document.getElementById('teams')]), [false, false, 'createTeam', true]);
+  t('/admin does not ask for the settings', asked.filter(a => a.includes('interpret-access') || a.includes('records-retention')), []);
   t('/admin: no page errors', errors, []);
+  await context.close();
+}
+
+// --- The system settings page: one card, a row per setting; the APIs are answered here ---
+async function settingsPage(width) {
+  const context = await browser.newContext({viewport: {width, height: 900}});
+  await context.addCookies([{name: 'yq_session', value: process.env.YUQIAO_SESSION, url: app + '/'}]);
+  const page = await context.newPage(), errors = [], sent = [];
+  page.on('pageerror', e => errors.push(String(e)));
+  let granted = [{username: 'alice', grantedBy: 'admin'}];
+  await context.route('**/api/admin/interpret-access**', route => { const request = route.request(), method = request.method();
+    if (method === 'POST') { sent.push(['POST', request.postDataJSON()]); granted = [...granted, {username: request.postDataJSON().username.toLowerCase(), grantedBy: 'admin'}]; }
+    if (method === 'DELETE') { const name = decodeURIComponent(request.url().split('/').pop()); sent.push(['DELETE', name]); granted = granted.filter(g => g.username !== name); return route.fulfill({status: 204}); }
+    return route.fulfill({status: method === 'POST' ? 201 : 200, contentType: 'application/json', body: JSON.stringify(method === 'POST' ? granted.at(-1) : granted)}); });
+  await context.route('**/api/admin/records-retention', route => { const request = route.request();
+    if (request.method() === 'PUT') { sent.push(['PUT', request.postDataJSON()]);
+      if (request.postDataJSON().days === 9999) return route.fulfill({status: 422, contentType: 'application/json', body: JSON.stringify({detail: '保存天數要在 1 到 3650 之間'})}); }
+    return route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(request.method() === 'PUT' ? request.postDataJSON() : {days: 90})}); });
+  await page.goto(app + '/admin/settings'); await page.waitForTimeout(900);
+  return {page, context, errors, sent};
+}
+const rows = page => page.$$eval('.settings .setting', sections => sections.map(s => { const text = s.querySelector('.setting-text').getBoundingClientRect(), control = s.querySelector('.setting-control').getBoundingClientRect();
+  return [s.querySelector('h2').textContent, control.left >= text.right, control.top >= text.bottom]; }));
+{
+  const {page, context, errors, sent} = await settingsPage(1440);
+  t('one card with both settings, the controls to the right of the name', [await page.$$eval('main .card', c => c.length), await rows(page)],
+    [1, [['紀錄保存期限', true, false], ['即時口譯權限', true, false]]]);
+  t('the retention shown, and the granted accounts', [await page.inputValue('#retentionDays'), await texts(page, '#accessList b')], ['90', ['alice']]);
+  await page.fill('#retentionDays', '30'); await page.click('#retentionForm button'); await page.waitForTimeout(400);
+  t('saving the days', [sent.at(-1), await page.textContent('#retentionNote')], [['PUT', {days: 30}], '已儲存：保存 30 天，較舊的紀錄已刪除。']);
+  await page.fill('#accessName', 'Bob'); await page.click('#accessForm button'); await page.waitForTimeout(400);
+  t('granting an account', [sent.at(-1), await texts(page, '#accessList b')], [['POST', {username: 'Bob'}], ['alice', 'bob']]);
+  await page.click('#accessList li:has-text("alice") button'); await page.click('#accessList li:has-text("alice") button'); await page.waitForTimeout(400);
+  t('removing an account asks once more', [sent.at(-1), await texts(page, '#accessList b')], [['DELETE', 'alice'], ['bob']]);
+  await page.$eval('#retentionForm', f => { f.noValidate = true; }); await page.fill('#retentionDays', '9999'); await page.click('#retentionForm button'); await page.waitForTimeout(400);
+  t('a refused request is reported on the page', [await page.textContent('#settingsError'), await page.isVisible('#settingsError')], ['保存天數要在 1 到 3650 之間', true]);
+  t('/admin/settings: no page errors', errors, []);
+  await context.close();
+}
+{
+  const {page, context} = await settingsPage(390);
+  t('on a phone the controls are below the explanation', await rows(page), [['紀錄保存期限', false, true], ['即時口譯權限', false, true]]);
+  t('on a phone the fields stay inside the card', await page.evaluate(() => { const card = document.querySelector('.settings').getBoundingClientRect();
+    return [...document.querySelectorAll('.settings input, .settings button')].every(e => { const r = e.getBoundingClientRect(); return r.left >= card.left && r.right <= card.right; }); }), true);
   await context.close();
 }
 
@@ -226,7 +278,7 @@ if (shots) {
     const page = await context.newPage();
     await page.goto(app + '/admin/usage'); await page.waitForTimeout(1200);
     await page.screenshot({path: join(shots, `usage-${width}-${theme}.png`), fullPage: true});
-    if (width === 1440 && theme === 'dark') { await page.goto(app + '/admin'); await page.waitForTimeout(1200); await page.screenshot({path: join(shots, 'admin-1440-dark.png'), fullPage: true}); }
+    for (const [name, path] of [['settings', '/admin/settings'], ['admin', '/admin']]) { await page.goto(app + path); await page.waitForTimeout(1200); await page.screenshot({path: join(shots, `${name}-${width}-${theme}.png`), fullPage: true}); }
     await context.close();
   }
 }

@@ -67,6 +67,14 @@ async def admin_page(user: auth.CurrentUser):
     return FileResponse(auth.STATIC_DIR / "admin.html", headers={"Cache-Control": "no-cache"})
 
 
+@router.get("/admin/settings")
+async def settings_page(user: auth.CurrentUser):
+    """Settings for the whole system (system-settings): the page is static, its figures come from the admin APIs."""
+    if not user.admin:
+        return HTMLResponse(FORBIDDEN_PAGE, status_code=403)
+    return FileResponse(auth.STATIC_DIR / "settings.html", headers={"Cache-Control": "no-cache"})
+
+
 @router.get("/api/admin/teams")
 async def list_teams(_admin: Admin):
     async with db.connect() as conn:

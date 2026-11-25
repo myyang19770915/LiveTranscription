@@ -297,10 +297,10 @@ const state = page => page.evaluate(() => ({
     if (request.method() === 'PUT') sent.push(['PUT', 'records-retention', request.postDataJSON()]);
     route.fulfill(json(request.method() === 'PUT' ? request.postDataJSON() : {days: 90}));
   });
-  await page.goto(new URL('admin', app).href);
+  await page.goto(new URL('admin/settings', app).href);   // system-settings: 即時口譯權限 and 紀錄保存期限 are there
   await page.waitForTimeout(1000);
   // The usage is on /admin/usage now (usage-admin; bench/usage_admin_e2e.mjs checks it).
-  t('no usage card on the team administration page', await page.locator('#interpretCard, #interpretUsageText').count(), 0);
+  t('no usage card on the system settings page', await page.locator('#interpretCard, #interpretUsageText').count(), 0);
   t('the granted accounts', await page.$$eval('#accessList b', b => b.map(x => x.textContent)), ['alice']);
   await page.fill('#accessName', 'Bob'); await page.click('#accessForm button'); await page.waitForTimeout(500);
   t('granting bob', await page.$$eval('#accessList b', b => b.map(x => x.textContent)), ['alice', 'bob']);
