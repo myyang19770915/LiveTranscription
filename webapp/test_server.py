@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import psycopg
+from psycopg.types.json import Jsonb
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 from ldap3 import MOCK_SYNC, OFFLINE_AD_2012_R2, Connection, Server, Tls
@@ -43,6 +44,7 @@ import record_meeting
 import records_retention
 import team_access
 import translation_quality
+import usage_admin
 import chunk_asr
 import mai_usage
 import quality_pass
@@ -4177,6 +4179,165 @@ class QualityCoverageTest(unittest.TestCase):
         prompt = quality_pass.system_prompt("en", "zh")
         self.assertIn("never delete, summarize, shorten or skip a sentence", prompt)
         self.assertIn("every sentence of CARRY", prompt)
+
+
+class UsageAdminTests(AccountTestCase):
+    """usage-admin: the figures of both paid services for administrators, and the budgets they set."""
+
+    TODAY = date(2026, 11, 25)
+
+    def figures(self, client=None):
+        with patch("usage_admin.today", return_value=self.TODAY):
+            return (client or self.signed_in("admin")).get("/api/admin/usage")
+
+    def test_usage_in_this_month_and_the_month_before(self):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("INSERT INTO mai_usage (day, purpose, seconds) VALUES ('2026-10-31', 'bench', 5400), ('2026-11-25', 'live', 1800)")
+            conn.execute("INSERT INTO interpret_usage (day, purpose, username, seconds) VALUES ('2026-11-24', 'live', 'alice', 3600), ('2026-06-30', 'lab', '', 129)")
+        usage = self.figures().json()
+        self.assertEqual((usage["today"], usage["month"], [s["key"] for s in usage["services"]]), ("2026-11-25", "2026-11", ["mai", "interpret"]))
+        mai, interpret = usage["services"]
+        self.assertEqual((mai["total"], mai["month"], mai["previousMonth"]),
+                         ({"seconds": 7200, "usd": 1.08}, {"seconds": 1800, "usd": 0.27}, {"seconds": 5400, "usd": 0.81}))
+        self.assertEqual(mai["byPurpose"], [{"purpose": "bench", "seconds": 5400, "monthSeconds": 0}, {"purpose": "live", "seconds": 1800, "monthSeconds": 1800}])
+        self.assertEqual((mai["byUser"], mai["usdPerHour"], mai["budgetUsd"], mai["state"]), ([], 0.54, 50, "ok"))
+        self.assertEqual((interpret["total"], interpret["month"], interpret["previousMonth"]),
+                         ({"seconds": 3729, "usd": 2.11}, {"seconds": 3600, "usd": 2.04}, {"seconds": 0, "usd": 0}))
+        self.assertEqual(interpret["byUser"], [{"username": "alice", "seconds": 3600, "monthSeconds": 3600}, {"username": "", "seconds": 129, "monthSeconds": 0}])
+        self.assertEqual(interpret["byPurpose"], [{"purpose": "live", "seconds": 3600, "monthSeconds": 3600}, {"purpose": "lab", "seconds": 129, "monthSeconds": 0}])
+        self.assertEqual((interpret["usdPerHour"], interpret["budgetUsd"], interpret["state"]), (2.04, None, "ok"))
+        daily = usage["daily"]
+        self.assertEqual((len(daily), daily[0]["day"], daily[-1], daily[-2]),
+                         (30, "2026-10-27", {"day": "2026-11-25", "mai": 1800, "interpret": 0}, {"day": "2026-11-24", "mai": 0, "interpret": 3600}))
+        self.assertEqual(daily[4], {"day": "2026-10-31", "mai": 5400, "interpret": 0})
+        self.assertEqual([d["day"] for d in daily], sorted(d["day"] for d in daily))
+        self.assertEqual([m["month"] for m in usage["months"]], ["2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"])
+        self.assertEqual((usage["months"][0], usage["months"][4], usage["months"][5]),
+                         ({"month": "2026-06", "mai": 0, "interpret": 129}, {"month": "2026-10", "mai": 5400, "interpret": 0}, {"month": "2026-11", "mai": 1800, "interpret": 3600}))
+
+    def test_no_usage_at_all(self):
+        usage = self.figures().json()
+        for service in usage["services"]:
+            self.assertEqual((service["total"], service["month"], service["previousMonth"], service["state"], service["byPurpose"], service["byUser"]),
+                             ({"seconds": 0, "usd": 0}, {"seconds": 0, "usd": 0}, {"seconds": 0, "usd": 0}, "ok", [], []))
+        self.assertEqual((len(usage["daily"]), len(usage["months"])), (30, 6))
+        self.assertEqual({(d["mai"], d["interpret"]) for d in usage["daily"]}, {(0, 0)})
+
+    def test_the_months_cross_a_year(self):
+        self.assertEqual(usage_admin.last_months(date(2027, 2, 28), 6), ["2026-09", "2026-10", "2026-11", "2026-12", "2027-01", "2027-02"])
+        self.assertEqual(usage_admin.last_months(date(2026, 3, 31), 6)[0], "2025-10")
+
+    def test_only_administrators_see_the_figures_and_the_page(self):
+        alice = self.signed_in("alice")
+        self.assertEqual(self.figures(alice).status_code, 403)
+        refused = alice.get("/admin/usage", follow_redirects=False)
+        self.assertEqual(refused.status_code, 403)
+        self.assertIn("管理頁面只開放給系統管理員。", refused.text)
+        self.assertIn("管理頁面只開放給系統管理員。", alice.get("/admin", follow_redirects=False).text)
+        page = self.signed_in("admin").get("/admin/usage")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("用量管理", page.text)
+
+    def test_budgets_before_and_after_an_administrator_saves_them(self):
+        admin = self.signed_in("admin")
+        self.assertEqual([s["budgetUsd"] for s in self.figures(admin).json()["services"]], [50, None])
+        saved = admin.put("/api/admin/usage/budgets", json={"mai": 80, "interpret": 20})
+        self.assertEqual((saved.status_code, saved.json()), (200, {"mai": 80, "interpret": 20}))
+        self.assertEqual([s["budgetUsd"] for s in self.figures(admin).json()["services"]], [80, 20])
+        self.assertEqual(self.query("SELECT key, updated_by FROM app_settings"), [("usage_budgets", "admin")])
+        # A member cannot change them.
+        self.assertEqual(self.signed_in("alice").put("/api/admin/usage/budgets", json={"mai": 1, "interpret": None}).status_code, 403)
+        self.assertEqual(asyncio.run(mai_usage.budgets()), {"mai": 80, "interpret": 20})
+        # Removed: 90 USD of cloud recognition, over the budget of 80, is ok without one.
+        asyncio.run(mai_usage.record("bench", 600000))
+        self.assertEqual(self.figures(admin).json()["services"][0]["state"], "over")
+        self.assertEqual(admin.put("/api/admin/usage/budgets", json={"mai": None, "interpret": None}).json(), {"mai": None, "interpret": None})
+        services = self.figures(admin).json()["services"]
+        self.assertEqual([(s["budgetUsd"], s["state"]) for s in services], [(None, "ok"), (None, "ok")])
+        self.assertEqual(services[0]["total"]["usd"], 90)
+
+    def test_budget_bodies_follow_the_example_table(self):
+        admin = self.signed_in("admin")
+        for body in ({"mai": 80, "interpret": None}, {"mai": 0.5, "interpret": 1000000}):
+            response = admin.put("/api/admin/usage/budgets", json=body)
+            self.assertEqual((response.status_code, response.json()), (200, body))
+        for body in ({"mai": 0, "interpret": None}, {"mai": -5, "interpret": None}, {"mai": 1000001, "interpret": None}, {"mai": "80", "interpret": None},
+                     {"mai": 80}, {"mai": True, "interpret": None}, {"mai": 80, "interpret": 0}):
+            self.assertEqual(admin.put("/api/admin/usage/budgets", json=body).status_code, 422, body)
+        self.assertEqual(admin.put("/api/admin/usage/budgets", json={"mai": 0, "interpret": None}).json()["detail"], "上限要是大於 0 的金額，留空表示不設上限")
+        self.assertEqual(asyncio.run(mai_usage.budgets()), {"mai": 0.5, "interpret": 1000000})   # a refused body changed nothing
+
+    def test_state_against_the_budget_follows_the_example_table(self):
+        for usd, budget, state in ((1.65, 50, "ok"), (40, 50, "near"), (50, 50, "over"), (0.29, None, "ok"), (16, 20, "near")):
+            self.assertEqual(mai_usage.state(usd, budget), state, (usd, budget))
+        # Each service is judged against its own budget.
+        admin = self.signed_in("admin")
+        admin.put("/api/admin/usage/budgets", json={"mai": 50, "interpret": 1})
+        asyncio.run(interpret_usage.record("live", 1800, "alice"))   # 1.02 USD of 1
+        asyncio.run(mai_usage.record("live", 1800))                  # 0.27 USD of 50
+        self.assertEqual([s["state"] for s in self.figures(admin).json()["services"]], ["ok", "over"])
+
+    def test_the_mai_usage_answer_and_the_log_follow_the_saved_budget(self):
+        admin = self.signed_in("admin")
+        admin.put("/api/admin/usage/budgets", json={"mai": 2, "interpret": None})
+        with patch.multiple("mai_usage", _told=set()), self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            asyncio.run(mai_usage.add("live", 7200))    # 1.08 USD of 2
+            first = admin.get("/api/admin/mai-usage").json()
+            asyncio.run(mai_usage.add("live", 7200))    # 2.16 USD: over, and one warning
+            logging.getLogger("uvicorn.error").warning("end")
+        self.assertEqual((first["budgetUsd"], first["state"]), (2, "ok"))
+        second = admin.get("/api/admin/mai-usage").json()
+        self.assertEqual((second["budgetUsd"], second["state"], second["usd"]), (2, "over", 2.16))
+        self.assertEqual(len(logs.output), 2)
+        self.assertIn("MAI usage is at or over the budget: about 2.16 USD of 2.00 USD", logs.output[0])
+        # Without a budget: ok whatever was used, nothing logged, and the command says so.
+        admin.put("/api/admin/usage/budgets", json={"mai": None, "interpret": None})
+        with patch.multiple("mai_usage", _told=set()), self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            asyncio.run(mai_usage.add("bench", 400000))
+            logging.getLogger("uvicorn.error").warning("end")
+        self.assertEqual(len(logs.output), 1)
+        third = admin.get("/api/admin/mai-usage").json()
+        self.assertEqual((third["budgetUsd"], third["state"]), (None, "ok"))
+        with patch("builtins.print") as printed:
+            self.assertEqual(mai_usage.main([]), 0)
+        self.assertIn("USD without a budget (ok)", printed.call_args[0][0])
+
+    def test_a_raised_budget_warns_again_and_a_broken_setting_counts_as_no_budget(self):
+        admin = self.signed_in("admin")
+        admin.put("/api/admin/usage/budgets", json={"mai": 2, "interpret": None})
+        with patch.multiple("mai_usage", _told=set(), USD_PER_HOUR=1), self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            asyncio.run(mai_usage.add("live", 7200))     # 2 USD of 2: over
+            asyncio.run(mai_usage.add("live", 3600))     # 3 USD: already told
+            admin.put("/api/admin/usage/budgets", json={"mai": 4, "interpret": None})
+            asyncio.run(mai_usage.add("live", 1800))     # 3.5 USD of 4: near the new budget
+            asyncio.run(mai_usage.add("live", 1800))     # 4 USD of 4: over the new budget
+            asyncio.run(mai_usage.add("live", 1800))     # told
+        self.assertEqual([line.split("budget: ")[1].split(" (")[0] for line in logs.output],
+                         ["about 2.00 USD of 2.00 USD", "about 3.50 USD of 4.00 USD", "about 4.00 USD of 4.00 USD"])
+        # A setting changed by hand into something that is no amount: no budget, and nothing breaks.
+        for value in ({"mai": "50", "interpret": -1}, {"interpret": True}, ["x"]):
+            with psycopg.connect(TEST_DATABASE_URL) as conn:
+                conn.execute("UPDATE app_settings SET value = %s WHERE key = 'usage_budgets'", (Jsonb(value),))
+            self.assertEqual(asyncio.run(mai_usage.budgets()), {"mai": None, "interpret": None}, value)
+            self.assertEqual([s["state"] for s in self.figures(admin).json()["services"]], ["ok", "ok"])
+        # The usage is recorded even when the budget cannot be read.
+        before = self.query("SELECT sum(seconds) FROM mai_usage")[0][0]
+        with patch("mai_usage.budgets", side_effect=OSError("database down")), self.assertLogs("uvicorn.error", level="WARNING") as logs:
+            asyncio.run(mai_usage.add("live", 60))
+        self.assertEqual((self.query("SELECT sum(seconds) FROM mai_usage")[0][0] - before, "MAI budget not read: OSError" in logs.output[0]), (60, True))
+        # An integer too large for a float is refused like any other amount over the limit.
+        self.assertEqual(admin.put("/api/admin/usage/budgets", content='{"mai": 1' + "0" * 400 + ', "interpret": null}',
+                                   headers={"content-type": "application/json"}).status_code, 422)
+
+    def test_figures_in_january(self):
+        with psycopg.connect(TEST_DATABASE_URL) as conn:
+            conn.execute("INSERT INTO mai_usage (day, purpose, seconds) VALUES ('2026-12-31', 'live', 3600), ('2027-01-01', 'live', 7200), ('2026-01-15', 'live', 100)")
+        with patch("usage_admin.today", return_value=date(2027, 1, 2)):
+            usage = self.signed_in("admin").get("/api/admin/usage").json()
+        mai = usage["services"][0]
+        self.assertEqual((usage["month"], mai["month"]["seconds"], mai["previousMonth"]["seconds"], mai["total"]["seconds"]), ("2027-01", 7200, 3600, 10900))
+        self.assertEqual(([m["month"] for m in usage["months"]], usage["daily"][0]["day"], usage["daily"][-2]),
+                         (["2026-08", "2026-09", "2026-10", "2026-11", "2026-12", "2027-01"], "2026-12-04", {"day": "2027-01-01", "mai": 7200, "interpret": 0}))
 
 
 class MaiUsageTests(AccountTestCase):

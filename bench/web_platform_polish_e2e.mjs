@@ -177,7 +177,7 @@ for (const theme of ['dark', 'light']) {
   for (let i = 1; i < a.items.length + 1; i++) { await page.keyboard.press('ArrowDown'); visited.push((await avatar(page)).focus); }
   t('900px: ↓ visits every visible item in order, then wraps', visited, [...a.items, a.items[0]]);
   t('900px: the narrow page links are among them and hidden items are never visited',
-    [a.items.some(text => ['我的紀錄', '成效指標', '團隊管理'].includes(text)), visited.some(text => hidden.includes(text))], [true, false]);
+    [a.items.some(text => ['我的紀錄', '成效指標', '管理'].includes(text)), visited.some(text => hidden.includes(text))], [true, false]);
   if (shots) await page.screenshot({path: join(shots, 'avatar-menu-900-dark.png')});
   // The next page draws the header at once from the account this tab remembers, before /api/me answers.
   await page.goto(app + '/actions'); await page.waitForTimeout(1200);

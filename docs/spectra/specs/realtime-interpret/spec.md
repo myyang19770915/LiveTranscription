@@ -366,7 +366,7 @@ tests:
 ---
 ### Requirement: Translation cost is recorded for administrators
 
-When an interpret session ends the server SHALL add its translated audio seconds to today's row (date in `MEETING_TIMEZONE`) of the table `interpret_usage (day, purpose, username, seconds)` with purpose `live` and the user's name; rows written before this field existed SHALL have the username `''`. The saved session's `usd` SHALL be those seconds / 3600 × `INTERPRET_USD_PER_HOUR` (default 2.04). A failure to write the usage SHALL be logged and SHALL NOT stop the session from being saved. `GET /api/admin/interpret-usage` SHALL require a system administrator and SHALL return `seconds`, `usd` (rounded to 2 decimals), `usdPerHour`, `byPurpose` and `byUser` (seconds per username). The team administration page SHALL show these figures in a card 即時口譯用量 with a line per user (the empty username shown as （未記名）). There SHALL be no usage limit. The translation cost SHALL NOT be added to the MAI budget. `python -m interpret_usage add <seconds> <purpose>` SHALL add usage by hand with the same purpose rules as `mai_usage` (1–40 of `a-z`, `0-9`, `-`; seconds more than 0 and finite) and the username `''`, and `python -m interpret_usage` SHALL print the total.
+When an interpret session ends the server SHALL add its translated audio seconds to today's row (date in `MEETING_TIMEZONE`) of the table `interpret_usage (day, purpose, username, seconds)` with purpose `live` and the user's name; rows written before this field existed SHALL have the username `''`. The saved session's `usd` SHALL be those seconds / 3600 × `INTERPRET_USD_PER_HOUR` (default 2.04). A failure to write the usage SHALL be logged and SHALL NOT stop the session from being saved. `GET /api/admin/interpret-usage` SHALL require a system administrator and SHALL return `seconds`, `usd` (rounded to 2 decimals), `usdPerHour`, `byPurpose` and `byUser` (seconds per username). The usage management page (`/admin/usage`, usage-admin) SHALL show these figures with a line per user (the empty username shown as （未記名）); the team administration page SHALL NOT show them. Administrators SHALL be able to set a budget for 即時口譯 on the usage management page; reaching it SHALL only show a warning there and SHALL NOT stop or limit interpreting. The translation cost SHALL NOT be added to the MAI budget. `python -m interpret_usage add <seconds> <purpose>` SHALL add usage by hand with the same purpose rules as `mai_usage` (1–40 of `a-z`, `0-9`, `-`; seconds more than 0 and finite) and the username `''`, and `python -m interpret_usage` SHALL print the total.
 
 #### Scenario: Cost of a session
 
@@ -385,59 +385,54 @@ When an interpret session ends the server SHALL add its translated audio seconds
 #### Scenario: Usage per user
 
 - **WHEN** 129 seconds were added by hand and alice used 1800 seconds
-- **THEN** `byUser` is `{"": 129, "alice": 1800}` and the card lists alice and （未記名）
+- **THEN** `byUser` is `{"": 129, "alice": 1800}` and the usage management page lists alice and （未記名）
 
 #### Scenario: A member asks for the usage
 
 - **WHEN** member alice requests `/api/admin/interpret-usage`
 - **THEN** the response is 403
 
+#### Scenario: The budget is reached
+
+- **WHEN** the accumulated translation cost is at or above the budget set for 即時口譯 and a granted user starts interpreting
+- **THEN** the session runs as usual
+
+#### Scenario: The team administration page
+
+- **WHEN** an administrator opens `/admin`
+- **THEN** the page has no card 即時口譯用量 and does not request `/api/admin/interpret-usage`
+
 
 <!-- @trace
-source: interpret-mode-on-home
-updated: 2026-11-17
+source: usage-admin
+updated: 2026-11-25
 code:
-  - webapp/static/app.js
-  - lab/realtime-translate/sessions/20261117-174651/output.wav
-  - webapp/static/refine.css
-  - lab/realtime-translate/sessions/20261117-174651/input.wav
-  - webapp/static/interpret-mode.js
-  - lab/realtime-translate/index.html
-  - webapp/migrations/020_interpret_access.sql
-  - webapp/static/admin.css
-  - lab/realtime-translate/sessions/20261117-174651/transcript.txt
-  - webapp/records_retention.py
-  - bench/privacy_e2e.mjs
-  - webapp/interpret_usage.py
-  - webapp/static/interpret-langs.js
-  - bench/translate_e2e.mjs
-  - webapp/server.py
-  - webapp/interpret.py
-  - webapp/static/review.html
-  - lab/realtime-translate/server.py
-  - webapp/static/meetings.html
-  - lab/realtime-translate/sessions/20261116-232831/session.json
-  - webapp/static/ask.html
-  - bench/interpret_e2e.mjs
-  - chang01.png
-  - lab/realtime-translate/sessions/20261116-232831/output.wav
-  - webapp/static/admin.html
-  - gpt-realtime-translate_demoUI.png
-  - webapp/static/metrics.html
-  - webapp/static/interpret.css
   - README.md
-  - webapp/static/index.html
-  - webapp/static/minutes.html
-  - webapp/static/interpret.html
-  - lab/realtime-translate/costs.jsonl
-  - webapp/static/interpret.js
-  - lab/realtime-translate/sessions/20261116-232831/transcript.txt
-  - 螢幕擷取畫面 2026-11-17 225637.png
-  - lab/realtime-translate/sessions/20261117-174651/session.json
+  - bench/README.md
+  - bench/interpret_e2e.mjs
+  - bench/ui_consistency_e2e.mjs
+  - bench/ui_review_e2e.mjs
+  - bench/web_platform_polish_e2e.mjs
+  - bench/usage_admin_e2e.mjs
+  - webapp/mai_usage.py
+  - webapp/server.py
+  - webapp/team_access.py
+  - webapp/usage_admin.py
   - webapp/static/account.js
+  - webapp/static/admin.css
+  - webapp/static/admin.html
+  - webapp/static/usage.css
+  - webapp/static/usage.html
+  - webapp/static/usage.js
   - webapp/static/actions.html
+  - webapp/static/ask.html
+  - webapp/static/index.html
+  - webapp/static/interpret.html
+  - webapp/static/meetings.html
+  - webapp/static/metrics.html
+  - webapp/static/minutes.html
+  - webapp/static/review.html
   - webapp/static/search.html
-  - lab/realtime-translate/sessions/20261116-232831/input.wav
 tests:
   - webapp/test_server.py
 -->

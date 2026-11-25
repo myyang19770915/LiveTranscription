@@ -57,7 +57,7 @@ async def team_exists(conn, team_id: int) -> bool:
 
 FORBIDDEN_PAGE = ('<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>沒有權限 — 語橋 Live</title>'
                   '<link rel="stylesheet" href="/assets/styles.css?v=20260927c"><link rel="stylesheet" href="/assets/themes.css?v=20260928b">'
-                  '<main><h1>沒有權限</h1><p>團隊管理只開放給系統管理員。</p><p><a href="/" style="color:var(--mint)">回到語橋 Live</a></p></main></html>')
+                  '<main><h1>沒有權限</h1><p>管理頁面只開放給系統管理員。</p><p><a href="/" style="color:var(--mint)">回到語橋 Live</a></p></main></html>')
 
 
 @router.get("/admin")

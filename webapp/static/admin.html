@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261123nd"><link rel="stylesheet" href="/assets/admin.css?v=20261123sd"><link rel="stylesheet" href="/assets/topbar.css?v=20261124wp"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>團隊管理 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261123nd"><link rel="stylesheet" href="/assets/admin.css?v=20261125ua"><link rel="stylesheet" href="/assets/topbar.css?v=20261124wp"></head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>團隊管理</small></span></a>
+  <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>管理</small></span></a>
   <div class="topbar-actions">
     <div id="account" class="account"></div>
     <button id="themeToggle" class="icon-button" type="button" aria-label="切換深淺主題" title="切換深淺主題"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="sun" d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/><path class="moon" d="M20.4 15.2A8.4 8.4 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/></svg></button>
@@ -10,6 +10,7 @@
 </header>
 
 <main class="page">
+  <nav class="section-tabs" aria-label="管理"><a href="/admin" aria-current="page">團隊管理</a><a href="/admin/usage">用量管理</a></nav>
   <div class="page-head">
     <div>
       <h1>團隊管理</h1>
@@ -17,18 +18,6 @@
     </div>
     <p id="summary" class="summary" aria-live="polite"></p>
   </div>
-
-  <section id="maiUsage" class="create card" aria-labelledby="maiUsageTitle" hidden>
-    <h2 id="maiUsageTitle" class="label">雲端辨識用量</h2>
-    <p id="maiUsageText" class="summary"></p>
-    <p id="maiUsageWarn" class="alert" role="alert" hidden></p>
-  </section>
-
-  <section id="interpretCard" class="create card interpret-entry" aria-labelledby="interpretTitle">
-    <h2 id="interpretTitle" class="label">即時口譯用量</h2>
-    <p id="interpretUsageText" class="summary">讀取中…</p>
-    <ul id="interpretByUser" class="usage-users" hidden></ul>
-  </section>
 
   <section id="interpretAccess" class="create card interpret-entry" aria-labelledby="accessTitle">
     <h2 id="accessTitle" class="label">即時口譯權限</h2>
@@ -63,30 +52,12 @@
 </main>
 
 <script src="/assets/return-path.js?v=20261113c"></script>
-<script src="/assets/account.js?v=20261124wp"></script>
+<script src="/assets/account.js?v=20261125ua"></script>
 <script>
 const $=id=>document.getElementById(id);
 function el(tag,props={},...children){const node=Object.assign(document.createElement(tag),props);node.append(...children.filter(child=>child!=null));return node}
 function showError(message){$('adminError').textContent=message;$('adminError').hidden=!message}
-// Azure MAI is billed by the audio sent (mai-usage): what has accumulated, against the budget. Reaching it stops nothing.
-function showMaiUsage(usage){
-  if(!usage)return;
-  $('maiUsage').hidden=false;
-  $('maiUsageText').textContent=`累計送出 ${(usage.seconds/3600).toFixed(1)} 小時的音訊，約 ${usage.usd.toFixed(2)} 美元（上限 ${usage.budgetUsd} 美元，每小時 ${usage.usdPerHour} 美元）。金額依送出的音訊長度估算，不是帳單。`;
-  const warn={near:'已達上限的八成。',over:'已達到或超過上限。雲端辨識仍可使用，是否繼續由你決定。'}[usage.state]||'';
-  $('maiUsageWarn').textContent=warn;$('maiUsageWarn').hidden=!warn;
-}
-fetch('/api/admin/mai-usage').then(response=>response.ok?response.json():null).then(showMaiUsage).catch(()=>{});
-// 即時口譯 (realtime-interpret): the translated speech is billed by its length; it is not part of the MAI budget.
-function showInterpretUsage(usage){
-  $('interpretUsageText').textContent=usage?`累計收到 ${(usage.seconds/3600).toFixed(2)} 小時的譯音，約 ${usage.usd.toFixed(2)} 美元（每小時 ${usage.usdPerHour} 美元，不算進雲端辨識的上限）。金額依譯音長度估算，不是帳單。`:'用量暫時讀不到。';
-  // Per user (interpret-mode-on-home); '' is usage entered by hand before users were recorded.
-  const users=Object.entries(usage?.byUser||{}).sort((a,b)=>b[1]-a[1]);
-  $('interpretByUser').hidden=!users.length;
-  $('interpretByUser').replaceChildren(...users.map(([name,seconds])=>el('li',{},el('b',{textContent:name||'（未記名）'}),
-    el('span',{textContent:`${(seconds/3600).toFixed(2)} 小時，約 ${(seconds/3600*usage.usdPerHour).toFixed(2)} 美元`}))));
-}
-fetch('/api/admin/interpret-usage').then(response=>response.ok?response.json():null).then(showInterpretUsage).catch(()=>showInterpretUsage(null));
+// The usage of the paid services is on its own page, /admin/usage (usage-admin).
 async function call(method,url,body){
   const response=await fetch(url,{method,headers:body?{'content-type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
   if(!response.ok){const detail=(await response.json().catch(()=>({}))).detail;throw new Error(typeof detail==='string'?detail:'操作失敗，請再試一次')}

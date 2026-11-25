@@ -196,12 +196,13 @@ window.MenuPopover=(()=>{
 // The header's page links (site-navigation). /review and /minutes belong to 會議紀錄, /ask to 搜尋.
 const NAV_LINKS=[{key:'live',href:'/',text:'即時會議'},{key:'meetings',href:'/meetings',text:'會議紀錄'},
   {key:'interpret',href:'/interpret',text:'我的紀錄',narrow:true},{key:'actions',href:'/actions',text:'待辦看板'},
-  {key:'metrics',href:'/metrics',text:'成效指標',narrow:true},{key:'admin',href:'/admin',text:'團隊管理',admin:true,narrow:true},
+  {key:'metrics',href:'/metrics',text:'成效指標',narrow:true},{key:'admin',href:'/admin',text:'管理',admin:true,narrow:true},
   {key:'search',href:'/search',text:'搜尋'}];
 function currentNav(path=location.pathname){
   if(path==='/')return 'live';
   if(['/meetings','/review','/minutes'].includes(path)||path.startsWith('/meetings/'))return 'meetings';
   if(path==='/ask')return 'search';
+  if(path==='/admin/usage')return 'admin';   // the administration pages share the 管理 link (usage-admin)
   return NAV_LINKS.find(n=>n.href===path)?.key||'';
 }
 // The account this tab last saw (page-switching): the header is drawn from it at once, before /api/me answers, and

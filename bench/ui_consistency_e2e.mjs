@@ -17,8 +17,8 @@ const {chromium} = (await import(pathToFileURL(modulePath).href)).default;
 const browser = await chromium.launch();
 const t = (name, got, want) => {const ok = JSON.stringify(got) === JSON.stringify(want); console.log(ok ? 'ok  ' : 'FAIL', name, JSON.stringify(got)); if (!ok) process.exitCode = 1};
 const PAGES = ['/', '/meetings', '/interpret', '/actions', '/metrics', '/search', '/ask', '/admin'];
-const LINKS = ['即時會議', '會議紀錄', '我的紀錄', '待辦看板', '成效指標', '團隊管理', '搜尋'];
-const MARKED = {'/': '即時會議', '/meetings': '會議紀錄', '/interpret': '我的紀錄', '/actions': '待辦看板', '/metrics': '成效指標', '/search': '搜尋', '/ask': '搜尋', '/admin': '團隊管理'};
+const LINKS = ['即時會議', '會議紀錄', '我的紀錄', '待辦看板', '成效指標', '管理', '搜尋'];
+const MARKED = {'/': '即時會議', '/meetings': '會議紀錄', '/interpret': '我的紀錄', '/actions': '待辦看板', '/metrics': '成效指標', '/search': '搜尋', '/ask': '搜尋', '/admin': '管理'};
 
 async function open(path, {width = 1440, theme = 'dark', signedIn = true} = {}) {
   const context = await browser.newContext({viewport: {width, height: 900}});
@@ -82,12 +82,12 @@ for (const [path, file] of [['/meetings/m-test', 'review.html'], ['/meetings/m-t
   await page.click('.account-avatar'); await page.waitForTimeout(200);
   t('500 /meetings/<id>: the avatar menu offers what the header hides',
     await page.$$eval('.account-menu .menu-nav', items => items.filter(i => getComputedStyle(i).display !== 'none').map(i => i.textContent)),
-    ['即時會議', '我的紀錄', '待辦看板', '成效指標', '團隊管理']);
+    ['即時會議', '我的紀錄', '待辦看板', '成效指標', '管理']);
   await context.close();
 }
 // The links the header hides are in the avatar menu (site-navigation), never the current page.
-for (const [width, path, want] of [[850, '/', ['會議紀錄', '待辦看板', '我的紀錄', '成效指標', '團隊管理'].filter(x => ['我的紀錄', '成效指標', '團隊管理'].includes(x))],
-                                   [500, '/actions', ['即時會議', '會議紀錄', '我的紀錄', '成效指標', '團隊管理']],
+for (const [width, path, want] of [[850, '/', ['會議紀錄', '待辦看板', '我的紀錄', '成效指標', '管理'].filter(x => ['我的紀錄', '成效指標', '管理'].includes(x))],
+                                   [500, '/actions', ['即時會議', '會議紀錄', '我的紀錄', '成效指標', '管理']],
                                    [1280, '/actions', []]]) {
   const {page, context} = await open(path, {width});
   await page.click('.account-avatar'); await page.waitForTimeout(200);

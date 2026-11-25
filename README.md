@@ -270,7 +270,7 @@ docker compose logs -f asr app
    ```powershell
    docker exec -it asr_confucius4-r2t2-app-1 python -m auth check-ldap <帳號>
    ```
-4. 系統管理員登入後，從頁首「團隊管理」（`/admin`）建立團隊、加入成員。成員可以在對方第一次登入前先用帳號加入。點成員的頭像就能設定或更換照片（PNG、JPEG、WebP）：選好圖片後會跳出裁切視窗，可拖曳、縮放正方形框選要的範圍並看圓形預覽，按「確定」才縮成 160×160 上傳，「取消」或 Esc 不會改動，有照片時旁邊有「移除照片」。每個人也能點頁首自己的頭像，從選單更換或移除自己的照片。團隊管理、頁首與待辦看板會顯示照片，沒有照片時顯示名字首字。
+4. 系統管理員登入後，從頁首「管理」（`/admin`，分頁「團隊管理」）建立團隊、加入成員。成員可以在對方第一次登入前先用帳號加入。點成員的頭像就能設定或更換照片（PNG、JPEG、WebP）：選好圖片後會跳出裁切視窗，可拖曳、縮放正方形框選要的範圍並看圓形預覽，按「確定」才縮成 160×160 上傳，「取消」或 Esc 不會改動，有照片時旁邊有「移除照片」。每個人也能點頁首自己的頭像，從選單更換或移除自己的照片。團隊管理、頁首與待辦看板會顯示照片，沒有照片時顯示名字首字。
 5. 一般使用者登入後，在「團隊」選單選擇這場會議所屬的團隊再開始。沒有任何團隊的帳號無法開始會議。
 
 權限規則：
@@ -514,7 +514,7 @@ curl http://<語橋主機 IP>:18000/v1/audio/transcriptions \
 - **我的紀錄**（`/interpret`，每位使用者都能開）：即時口譯與即時翻譯每次結束都存到 `output/interpret/<帳號>/<日期-時間>/`（`input.wav` 原音、口譯才有的 `output.wav` 譯音、`session.json`、`transcript.txt`、`bars.json` 波形），只有本人看得到。音訊邊收邊寫到以 `.recording-` 開頭的暫存資料夾，結束時改名。可載入重播（整段、只聽譯音、只聽原音，點或拖動波形從該處依目前模式播放）、下載、刪除。即時翻譯的譯文由頁面每 30 秒送一次（`PUT /api/interpret/live/<token>/translation`），結束後再送完整的（`PUT /api/interpret/sessions/<id>/translation`）。
 - **轉成會議紀錄**：「我的紀錄」每筆都有「轉成會議紀錄」，選自己的團隊與標題（預設如「即時翻譯 2026-11-18 14:03」），建立的會議屬於該團隊、建立者是本人，開始時間、語言與錄音照原紀錄（24 kHz 的口譯錄音轉成 16 kHz）。即時翻譯的紀錄存有逐句資料（每 30 秒與存檔時送出，存在 `session.json` 的 `segments`），會立即轉成段落，不經外部服務、不花費。沒有逐句資料的紀錄（即時口譯，或更早的即時翻譯）會把整段錄音交給精準模式：所有語言都由 Qwen3-ASR 辨識，再由文字模型斷句、修正、翻譯；轉換前畫面會說明音訊與文字會送到外部服務與大約要多久（約錄音長度的一半），轉換中顯示進度，任何一部分失敗就不建立會議。辨識或文字模型沒設定時不能轉換。原紀錄保留並標示「已轉成會議紀錄」，連到該會議，不能重複轉換。每人同時 1 個、全站最多 2 個轉換；轉換狀態只在記憶體，伺服器重啟後要重按。
 - **保存期限**：預設 90 天，管理員在團隊管理頁「紀錄保存期限」修改（`/api/admin/records-retention`，存在 `app_settings`）。伺服器啟動時與每 6 小時刪除過期紀錄與超過一天的暫存資料夾。
-- **費用**：依譯音長度每小時約 2.04 美元（`INTERPRET_USD_PER_HOUR`），記在資料表 `interpret_usage`，團隊管理頁顯示累計與每人用量，不設上限，不算進 MAI 上限。系統外的用量以 `docker exec -w /app <app 容器> python -m interpret_usage add <秒數> <用途>` 登記。
+- **費用**：依譯音長度每小時約 2.04 美元（`INTERPRET_USD_PER_HOUR`），記在資料表 `interpret_usage`，「管理」的「用量管理」分頁（`/admin/usage`）顯示每月、每日與每人用量；可在該頁設定累計金額上限（預設不設，達到只提示、不停用），不算進 MAI 上限。系統外的用量以 `docker exec -w /app <app 容器> python -m interpret_usage add <秒數> <用途>` 登記。
 - **串流名額**：一次口譯占兩條串流（翻譯與原文辨識），預設上限 2 條（`MAX_STREAMS_PER_USER`），開會中無法同時口譯。
 
 ## 成效指標
@@ -563,7 +563,7 @@ curl http://<語橋主機 IP>:18000/v1/audio/transcriptions \
 | `TRANSLATE_HEALTH_URL` | `TRANSLATE_URL` + `/health` | 開會頁「服務狀態」檢查翻譯服務用的網址；litellm 用 `/health/liveliness` |
 | `QWEN_GPU_MEMORY_UTILIZATION` | `0.3` | 內建 Qwen3-ASR 服務（profile `qwen-asr`）可用的顯示卡記憶體比例 |
 | `QWEN_ASR_PORT` | `18000` | 內建 Qwen3-ASR 服務對主機開放的連接埠（沒有驗證，只給區網；見[給其他系統使用 Qwen3-ASR](#給其他系統使用-qwen3-asr)）。被占用時改這裡，再 `docker compose --profile qwen-asr up -d qwen-asr` |
-| `MAI_USD_PER_HOUR` / `MAI_BUDGET_USD` | `0.54` / `50` | Azure MAI 每小時音訊的單價與累計金額上限（美元）。系統記錄送給 MAI 的音訊秒數（即時引擎與精準模式），系統管理員在「團隊管理」頁看到累計金額；達上限的八成與達上限時顯示提示並記一次警告日誌，不會停用 MAI。評測腳本直接連 MAI 的用量以 `docker exec -w /app <app 容器> python -m mai_usage add <秒數> bench` 登記，不帶參數時印出累計 |
+| `MAI_USD_PER_HOUR` / `MAI_BUDGET_USD` | `0.54` / `50` | Azure MAI 每小時音訊的單價與累計金額上限的預設值（美元）；上限可在「管理」的「用量管理」分頁（`/admin/usage`）直接修改，改過之後以頁面上的設定為準。系統記錄送給 MAI 的音訊秒數（即時引擎與精準模式），系統管理員在用量管理頁看到本月、每日與累計金額；達上限的八成與達上限時顯示提示並記一次警告日誌，不會停用 MAI。評測腳本直接連 MAI 的用量以 `docker exec -w /app <app 容器> python -m mai_usage add <秒數> bench` 登記，不帶參數時印出累計 |
 | `TRANSLATE_QUALITY_ASR_MODEL` / `TRANSLATE_QUALITY_MODEL` | 空（關閉） | 選用：「精準模式」的第二段辨識模型（`/audio/transcriptions`）與文字模型（`/chat/completions`）。兩個都填才啟用，頁面才出現開關（見[精準模式](#精準模式)） |
 | `TRANSLATE_QUALITY_ASR` | 空 | 精準模式的第二次辨識由誰做。空：`TRANSLATE_QUALITY_ASR_MODEL` 的辨識服務；`local`：本機 Confucius（音訊不離開這台機器）；`mai`：Azure MAI（需已設定 `AZURE_MAI_*`）；`hybrid`：中文（`zh`、`yue`）用辨識服務、其他語言用 MAI。用到 MAI 的串流會另開一條 MAI 連線，音訊照收到的速度送出並在每個區塊切點取回文字。文字都會送到文字模型。其他值視為未設定 |
 | `TRANSLATE_QUALITY_ASR_URL` / `_ASR_KEY` | 空（與文字模型同一個服務） | 辨識模型在另一個 OpenAI 相容服務時（例如架在本機的 Qwen3-ASR 或 Whisper），填它的位址與金鑰；文字模型服務的金鑰不會送到這裡 |
@@ -626,6 +626,7 @@ curl http://<語橋主機 IP>:18000/v1/audio/transcriptions \
 | `POST /api/login`、`POST /api/logout`、`GET /api/me` | LDAP 登入、登出、目前使用者與所屬團隊（含 `email`、`emailSource`：`ldap`／`self`） |
 | `PUT /api/me/email` | 自行填寫或清除（`""`）自己的 Email；來自 LDAP 時 409，格式不符 422 |
 | `GET /admin`、`/api/admin/teams…` | 團隊管理（限系統管理員） |
+| `GET /admin/usage`、`GET /api/admin/usage`、`PUT /api/admin/usage/budgets` | 用量管理：雲端辨識與即時口譯的用量、估算金額與上限（限系統管理員） |
 | `GET /interpret`、`GET /api/interpret/config`、`GET`／`DELETE /api/interpret/sessions…`、`PUT /api/interpret/sessions/<id>/translation`、`PUT /api/interpret/live/<token>/translation` | 我的紀錄（所有登入者；只限本人的紀錄） |
 | `WS /ws/interpret` | 即時口譯（系統管理員與被開放的帳號） |
 | `POST`／`GET /api/interpret/sessions/{sid}/meeting` | 把個人紀錄轉成團隊會議紀錄／查詢轉換進度（已轉過 409、團隊不屬於自己 404、同時轉換過多 429、精準模式未設定 503） |

@@ -299,11 +299,8 @@ const state = page => page.evaluate(() => ({
   });
   await page.goto(new URL('admin', app).href);
   await page.waitForTimeout(1000);
-  t('the usage card', await page.textContent('#interpretUsageText'),
-    '累計收到 0.54 小時的譯音，約 1.09 美元（每小時 2.04 美元，不算進雲端辨識的上限）。金額依譯音長度估算，不是帳單。');
-  t('usage per user', await page.$$eval('#interpretByUser li', rows => rows.map(r => r.textContent)),
-    ['alice0.50 小時，約 1.02 美元', '（未記名）0.04 小時，約 0.07 美元']);
-  t('no link to a separate interpret page', await page.locator('#interpretCard a').count(), 0);
+  // The usage is on /admin/usage now (usage-admin; bench/usage_admin_e2e.mjs checks it).
+  t('no usage card on the team administration page', await page.locator('#interpretCard, #interpretUsageText').count(), 0);
   t('the granted accounts', await page.$$eval('#accessList b', b => b.map(x => x.textContent)), ['alice']);
   await page.fill('#accessName', 'Bob'); await page.click('#accessForm button'); await page.waitForTimeout(500);
   t('granting bob', await page.$$eval('#accessList b', b => b.map(x => x.textContent)), ['alice', 'bob']);

@@ -3,7 +3,7 @@
 MAI is billed by the length of audio sent. Every connection that sends audio there counts its bytes with a Meter;
 the seconds are added to one row per date and purpose. Only seconds are kept: no meeting, user or text.
 The cost is an estimate (seconds x price), not the bill. Reaching the budget never disables MAI: administrators
-see it on the team page and decide.
+see it on the usage management page (usage-admin), where they also set the budget, and decide.
 
 Usage outside the app (benchmark scripts that talk to MAI directly) is entered by hand, in the app container:
     python -m mai_usage add <seconds> <purpose>      python -m mai_usage
@@ -25,12 +25,13 @@ import team_access
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
 USD_PER_HOUR = float(os.getenv("MAI_USD_PER_HOUR", "") or 0.54)
-BUDGET_USD = float(os.getenv("MAI_BUDGET_USD", "") or 50)
+BUDGET_USD = float(os.getenv("MAI_BUDGET_USD", "") or 50)   # the budget until administrators save one (usage-admin)
+BUDGETS_KEY = "usage_budgets"   # app_settings: {"mai": USD or null, "interpret": USD or null}
 NEAR = 0.8                      # of the budget
 BYTES_PER_SECOND = 32000        # 16 kHz PCM16 mono
 WRITE_EVERY = 300               # seconds of audio a connection may hold before writing them down
 PURPOSE = re.compile(r"[a-z0-9-]{1,40}")
-_told: set[str] = set()         # the states already logged by this process
+_told: set[tuple] = set()       # the (state, budget) pairs already logged by this process: a changed budget warns again
 _writing: set[asyncio.Task] = set()
 
 
@@ -39,8 +40,22 @@ def cost(seconds: float) -> float:
     return round(seconds / 3600 * USD_PER_HOUR, 2)
 
 
-def state(usd: float) -> str:
-    return "over" if usd >= BUDGET_USD else "near" if usd >= NEAR * BUDGET_USD else "ok"
+def state(usd: float, budget: float | None) -> str:
+    if budget is None:
+        return "ok"
+    return "over" if usd >= budget else "near" if usd >= NEAR * budget else "ok"
+
+
+async def budgets() -> dict:
+    """The budget of each paid service in USD, or None for no budget; judged against the accumulated cost."""
+    async with db.connect() as conn:
+        row = await (await conn.execute("SELECT value FROM app_settings WHERE key = %s", (BUDGETS_KEY,))).fetchone()
+    if not row:
+        return {"mai": BUDGET_USD, "interpret": None}
+    saved = row["value"] if isinstance(row["value"], dict) else {}
+    # Anything that is not an amount (a row edited by hand) counts as no budget rather than breaking recognition.
+    amount = lambda value: value if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None   # noqa: E731
+    return {"mai": amount(saved.get("mai")), "interpret": amount(saved.get("interpret"))}
 
 
 async def record(purpose: str, seconds: float) -> float:
@@ -63,11 +78,16 @@ async def add(purpose: str, seconds: float) -> None:
     except Exception as error:   # the database is down, or the table is not there yet
         logger.warning("MAI usage not recorded (%.0f s, %s): %s", seconds, purpose, type(error).__name__)
         return
-    now = state(usd)
-    if now != "ok" and now not in _told:
-        _told.add(now)
+    try:
+        budget = (await budgets())["mai"]
+    except Exception as error:   # recorded; only the budget could not be read
+        logger.warning("MAI budget not read: %s", type(error).__name__)
+        return
+    now = state(usd, budget)
+    if now != "ok" and (now, budget) not in _told:
+        _told.add((now, budget))
         logger.warning("MAI usage is %s the budget: about %.2f USD of %.2f USD (estimate from audio sent)",
-                       "at or over" if now == "over" else "at 80% of", usd, BUDGET_USD)
+                       "at or over" if now == "over" else "at 80% of", usd, budget)
 
 
 class Meter:
@@ -99,9 +119,9 @@ class Meter:
 async def summary() -> dict:
     async with db.connect() as conn:
         rows = await (await conn.execute("SELECT purpose, sum(seconds) AS seconds FROM mai_usage GROUP BY purpose ORDER BY purpose")).fetchall()
-    seconds = sum(row["seconds"] for row in rows)
-    return {"seconds": round(seconds, 1), "usd": cost(seconds), "budgetUsd": BUDGET_USD, "usdPerHour": USD_PER_HOUR,
-            "state": state(cost(seconds)), "byPurpose": {row["purpose"]: round(row["seconds"], 1) for row in rows}}
+    seconds, budget = sum(row["seconds"] for row in rows), (await budgets())["mai"]
+    return {"seconds": round(seconds, 1), "usd": cost(seconds), "budgetUsd": budget, "usdPerHour": USD_PER_HOUR,
+            "state": state(cost(seconds), budget), "byPurpose": {row["purpose"]: round(row["seconds"], 1) for row in rows}}
 
 
 @router.get("/api/admin/mai-usage")
@@ -122,7 +142,8 @@ def main(argv: list[str]) -> int:
             print(__doc__, file=sys.stderr)
             return 2
         total = await summary()
-        print(f"{total['seconds'] / 3600:.2f} h of audio sent to MAI, about {total['usd']:.2f} USD of a {total['budgetUsd']:.2f} USD budget "
+        budget = "without a budget" if total["budgetUsd"] is None else f"of a {total['budgetUsd']:.2f} USD budget"
+        print(f"{total['seconds'] / 3600:.2f} h of audio sent to MAI, about {total['usd']:.2f} USD {budget} "
               f"({total['state']}); by purpose (seconds): {total['byPurpose']}")
         return 0
     return asyncio.run(run())

@@ -25,6 +25,15 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 /* Page */
 /* One page width for every page (ui-consistency-pass, visual-tokens): the content lines up with the header's brand. */
 .page { width: min(calc(var(--page-width) + 2 * var(--page-gutter)), 100%); margin: 0 auto; padding: 40px var(--page-gutter) 64px; }
+/* The administration pages (/admin, /admin/usage) share these tabs above the title (site-navigation). They are links:
+   each opens its own page. The current one is marked by weight and an underline, not by colour alone. */
+.section-tabs { display: flex; gap: 4px; margin: 0 0 24px; border-bottom: 1px solid var(--border); }
+.section-tabs a { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: -1px; padding: 0 14px; border-bottom: 2px solid transparent;
+  color: var(--muted); font-size: 15px; font-weight: 600; text-decoration: none; }
+.section-tabs a:hover { color: var(--text); }
+.section-tabs a[aria-current="page"] { border-bottom-color: var(--accent); color: var(--text); font-weight: 700; }
+.section-tabs a:focus-visible { outline-offset: -2px; }
+@media (forced-colors: active) { .section-tabs a[aria-current="page"] { border-bottom-color: Highlight; } }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
 .lead { max-width: 640px; margin: 10px 0 0; color: var(--muted); font-size: 15px; line-height: 1.7; }
@@ -78,9 +87,6 @@ button:disabled { opacity: .6; cursor: wait; }
 .create { padding: 20px; margin-bottom: 16px; }
 .interpret-entry .summary, .create .summary { white-space: normal; }   /* card text wraps; only the page-head count stays on one line */
 .interpret-entry .members { margin: 10px 0; }
-.usage-users { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
-.usage-users li { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
-.usage-users span { color: var(--muted); font-variant-numeric: tabular-nums; }
 .retention-field { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; white-space: nowrap; }
 .retention-field .input, .row .retention-field .input { flex: none; width: 90px; }   /* not the phone .row rule's full width */
 .alert { margin: 0 0 16px; padding: 12px 16px; border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius: var(--radius-control); background: var(--danger-soft); color: var(--danger); font-size: 14px; }
