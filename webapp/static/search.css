@@ -11,7 +11,8 @@
 .search-form { display: flex; gap: 10px; margin-bottom: 12px; }
 .search-box { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; height: 46px; padding: 0 14px; border: 1.5px solid var(--field-border);
   border-radius: var(--radius-control); background: var(--field); }
-.search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-box:focus-within { border-color: var(--accent); }
+.search-box:has(:is(input, textarea):focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .search-box:has(input[aria-invalid="true"]) { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }   /* over 5 terms or 100 characters */
 .search-box svg { flex: none; width: 18px; height: 18px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
 .search-box input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 16px; }
@@ -39,12 +40,13 @@
 .result-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
 .result-head a, .result-head b { color: var(--text); font-size: 16px; font-weight: 700; text-decoration: none; }
 .result-head a:hover { color: var(--accent); }
-.result-meta { color: var(--muted); font-size: 12.5px; }
+.result-meta { color: var(--muted); font-size: 13px; }
 .result-count { margin-left: auto; color: var(--muted); font-size: 12px; }
 .hits { margin: 0; padding: 0; list-style: none; }
 .hit { border-top: 1px solid var(--border); }
 .hit a { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 10px 4px; color: var(--text); text-decoration: none; border-radius: var(--radius-control); }
-.hit a:hover, .hit a:focus-visible { background: var(--accent-soft); outline: none; }
+.hit a:hover, .hit a:focus-visible { background: var(--accent-soft); }
+.hit a:focus-visible { outline-offset: -2px; }
 .hit-tag { align-self: start; justify-self: start; padding: 2px 8px; border-radius: var(--radius-small); background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--muted); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .hit-tag.time { color: var(--accent); }

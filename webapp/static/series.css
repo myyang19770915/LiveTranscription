@@ -13,11 +13,11 @@
 .series-panel[hidden] { display: none; }
 .series-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 18px; }
 .series-head h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; font-weight: 600; }
-.series-count { padding: 1px 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--mint) 16%, transparent); color: var(--mint); font-size: 11px; }
+.series-count { padding: 1px 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--mint) 16%, transparent); color: var(--mint); font-size: 12px; }
 .series-detect { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; }
 .series-detect[hidden] { display: none; }
 .series-detect input { width: auto; margin: 0; padding: 0; accent-color: var(--mint); }
-.series-detect span { opacity: .75; font-size: 11px; }
+.series-detect span { opacity: .75; font-size: 12px; }
 .series-error { margin: 8px 0 0; color: var(--coral); font-size: 12px; }
 .series-error[hidden] { display: none; }
 .series-items { display: grid; gap: 6px; max-height: 260px; overflow-y: auto; margin: 10px 0 0; padding: 0; list-style: none; }
@@ -25,7 +25,7 @@
 .series-item.status-done, .series-item.status-cancelled { opacity: .6; }
 .series-item-main { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 14px; }
 .series-item-content { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-.series-item-meta { display: inline-flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 11px; }
+.series-item-meta { display: inline-flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 12px; }
 .series-overdue { color: var(--coral); font-weight: 700; }
 .series-status { color: var(--text); }
 .series-empty { color: var(--muted); font-size: 12px; }

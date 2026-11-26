@@ -1,48 +1,32 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>登入 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261123nd"><link rel="stylesheet" href="/assets/login.css?v=20261123nd"><link rel="stylesheet" href="/assets/topbar.css?v=20261124wp"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>登入 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261126sl"><link rel="stylesheet" href="/assets/login.css?v=20261126sl"><link rel="stylesheet" href="/assets/topbar.css?v=20261124wp"></head>
 <body>
 <main class="auth">
-  <!-- Left (login-redesign): the brand, what 語橋 Live does, and its features around the hub, between Cloud and Local. -->
+  <!-- Left (sign-in-page): the brand, one sentence on what 語橋 Live does, and the meeting screen as it looks in use. -->
   <section class="auth-intro" aria-label="語橋 Live 介紹">
-    <i class="auth-glow glow-a" aria-hidden="true"></i><i class="auth-glow glow-b" aria-hidden="true"></i>
     <a class="auth-brand" href="/"><img src="/assets/brand-icon.png?v=2" alt="" width="40" height="40"><b>語橋 Live</b></a>
-    <h2 class="auth-title">讓每場<em>會議</em>，化為團隊的行動。</h2>
-    <p class="auth-lead">即時轉錄與翻譯，從會議紀要到待辦追蹤，一路接續完成</p>
+    <div class="auth-pitch">
+      <h1 class="auth-title">會議中即時顯示逐字稿和翻譯</h1>
+      <p class="auth-lead">支援中文、日文和英文。會後整理成會議紀要與待辦，之後可以跨會議搜尋。</p>
 
-    <div class="auth-map">
-      <svg class="auth-orbit" viewBox="0 0 900 600" aria-hidden="true">
-        <ellipse class="orbit-outer" cx="450" cy="300" rx="300" ry="190"/>
-        <ellipse class="orbit-inner" cx="450" cy="300" rx="165" ry="102"/>
-        <path id="s1" class="orbit-spoke" d="M270 137 450 300"/>
-        <path id="s2" class="orbit-spoke" d="M630 137 450 300"/>
-        <path id="s4" class="orbit-spoke" d="M655 300 450 300"/>
-        <path id="s6" class="orbit-spoke" d="M630 463 450 300"/>
-        <path id="s5" class="orbit-spoke" d="M270 463 450 300"/>
-        <path id="s3" class="orbit-spoke" d="M245 300 450 300"/>
-        <path id="sc" class="orbit-spoke" d="M450 82 450 300"/>
-        <path id="sl" class="orbit-spoke" d="M450 518 450 300"/>
-        <g class="orbit-packets">
-          <circle opacity="0" r="5" style="--c: var(--f1)"><animateMotion dur="12s" begin="0s" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;.15;1" calcMode="linear"><mpath href="#s1"/></animateMotion><animate attributeName="opacity" dur="12s" begin="0s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;.02;.13;.15;1"/></circle>
-          <circle opacity="0" r="5" style="--c: var(--f2)"><animateMotion dur="12s" begin="2s" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;.15;1" calcMode="linear"><mpath href="#s2"/></animateMotion><animate attributeName="opacity" dur="12s" begin="2s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;.02;.13;.15;1"/></circle>
-          <circle opacity="0" r="5" style="--c: var(--f4)"><animateMotion dur="12s" begin="4s" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;.15;1" calcMode="linear"><mpath href="#s4"/></animateMotion><animate attributeName="opacity" dur="12s" begin="4s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;.02;.13;.15;1"/></circle>
-          <circle opacity="0" r="5" style="--c: var(--f6)"><animateMotion dur="12s" begin="6s" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;.15;1" calcMode="linear"><mpath href="#s6"/></animateMotion><animate attributeName="opacity" dur="12s" begin="6s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;.02;.13;.15;1"/></circle>
-          <circle opacity="0" r="5" style="--c: var(--f5)"><animateMotion dur="12s" begin="8s" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;.15;1" calcMode="linear"><mpath href="#s5"/></animateMotion><animate attributeName="opacity" dur="12s" begin="8s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;.02;.13;.15;1"/></circle>
-          <circle opacity="0" r="5" style="--c: var(--f3)"><animateMotion dur="12s" begin="10s" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;.15;1" calcMode="linear"><mpath href="#s3"/></animateMotion><animate attributeName="opacity" dur="12s" begin="10s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;.02;.13;.15;1"/></circle>
-          <circle class="packet-alt" opacity="0" r="4"><animateMotion dur="6s" begin="1s" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;.3;1" calcMode="linear"><mpath href="#sc"/></animateMotion><animate attributeName="opacity" dur="6s" begin="1s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;.04;.26;.3;1"/></circle>
-          <circle class="packet-alt" opacity="0" r="4"><animateMotion dur="6s" begin="4s" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;.3;1" calcMode="linear"><mpath href="#sl"/></animateMotion><animate attributeName="opacity" dur="6s" begin="4s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;.04;.26;.3;1"/></circle>
-        </g>
-      </svg>
-      <div class="auth-node node-cloud"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18h10.5a4 4 0 0 0 .4-8A6 6 0 0 0 6.3 11.2 3.5 3.5 0 0 0 7 18Z"/></svg><span>Cloud</span></div>
-      <div class="auth-node node-local"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v7H5zM5 13h14v7H5zM8.5 7.5h.01M8.5 16.5h.01"/></svg><span>Local</span></div>
-      <div class="auth-hub"><i class="hub-ripple" aria-hidden="true"></i><i class="hub-ripple" aria-hidden="true"></i><img src="/assets/brand-icon.png?v=2" alt="" width="84" height="84"></div>
-      <ul class="auth-features">
-        <li class="feat feat-1"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3ZM5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg></span><span><b>即時轉錄</b><small>多語辨識・逐字稿</small></span></li>
-        <li class="feat feat-2"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 5.5h9M8 3.5v2M5.5 5.5c.8 3.5 3.3 6 6.5 7.2M10.5 5.5c-.8 3.7-3.3 6.4-6.8 7.6M12.5 20.5l4.2-9.5 4.3 9.5M14 17.3h5.4"/></svg></span><span><b>即時翻譯</b><small>中日英・暫譯修訂</small></span></li>
-        <li class="feat feat-3"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3h7.5l4.5 4.5V21h-12zM14 3v4.5h4.5M9.5 12.5h6M9.5 16.5h6"/></svg></span><span><b>會議紀要</b><small>決議整理・說話者</small></span></li>
-        <li class="feat feat-4"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6h10M10 12h10M10 18h10M3.5 6l1.5 1.5L7.5 5M3.5 12l1.5 1.5 2.5-2.5M3.5 18l1.5 1.5 2.5-2.5"/></svg></span><span><b>待辦追蹤</b><small>負責人・到期提醒</small></span></li>
-        <li class="feat feat-5"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM20.5 20.5l-5.3-5.3M8 9.5a2.5 2.5 0 0 1 4.6 1.3c0 1.2-1.5 1.5-2 2.4M10.5 14.6h.01"/></svg></span><span><b>搜尋問答</b><small>跨會議・引用出處</small></span></li>
-        <li class="feat feat-6"><span class="feat-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 20.5h17M7 16.5v-5M12 16.5V6.5M17 16.5v-8"/></svg></span><span><b>成效指標</b><small>完成率・趨勢</small></span></li>
-      </ul>
+      <div class="auth-preview" role="img" aria-label="開會畫面示意：左邊是原文，右邊是翻譯">
+        <div class="preview-pane" aria-hidden="true">
+          <div class="preview-head"><span class="preview-badge">原</span><b>原文</b></div>
+          <ol class="preview-lines">
+            <li><time>10:02</time><span lang="ja">来週の出荷日程を確認させてください。</span></li>
+            <li><time>10:02</time><span>好，第一批預計週三出貨。</span></li>
+            <li><time>10:03</time><span lang="ja">数量は前回と同じでよろしいですか。</span></li>
+          </ol>
+        </div>
+        <div class="preview-pane" aria-hidden="true">
+          <div class="preview-head"><span class="preview-badge">中⇄日</span><b>翻譯</b></div>
+          <ol class="preview-lines">
+            <li><time>10:02</time><span>請讓我確認下週的出貨時程。</span></li>
+            <li><time>10:02</time><span lang="ja">はい、第一便は水曜日に出荷予定です。</span></li>
+            <li class="draft"><time>10:03</time><span>數量和上次一樣可以嗎</span><em>暫譯</em></li>
+          </ol>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -53,8 +37,7 @@
       <span class="auth-theme-label"></span>
     </button>
     <form id="loginForm" class="auth-form" novalidate>
-      <h1>歡迎回到 語橋 Live</h1>
-      <p class="auth-sub">登入團隊工作空間，開始跨語會議</p>
+      <h2>登入</h2>
 
       <label class="auth-label" for="username">帳號</label>
       <div class="auth-field">
@@ -103,6 +86,5 @@ form.password.addEventListener('blur',()=>{$('capsLock').hidden=true});
 const themeLabel=()=>{document.querySelector('.auth-theme-label').textContent=document.documentElement.dataset.theme==='light'?'深色':'明亮'};
 $('themeToggle').onclick=()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;themeLabel();try{localStorage.setItem('interpreter-theme',next)}catch{}};
 themeLabel();
-if(matchMedia('(prefers-reduced-motion: reduce)').matches)document.querySelector('.auth-orbit')?.pauseAnimations();
 </script>
 </body></html>

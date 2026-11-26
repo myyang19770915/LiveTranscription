@@ -11,7 +11,7 @@
   border-radius: var(--radius-pill);
   background: var(--surface);
   color: var(--text);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: background .18s ease, border-color .18s ease, transform .18s ease;
@@ -32,5 +32,5 @@
 .translation-card .state-chip { min-width: 66px; text-align: center; }
 
 @media (max-width: 430px) {
-  .status { gap: 6px; padding: 7px 9px; font-size: 10px; }
+  .status { gap: 6px; padding: 7px 9px; font-size: 12px; }
 }

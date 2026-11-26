@@ -70,12 +70,11 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 38px); letter-spacing: -.02em; }
   background: var(--field);
   color: var(--text);
   font-size: 16px;
-  outline: none;
-  transition: border-color .15s ease, box-shadow .15s ease;
+  transition: border-color .15s ease;
 }
 .input::placeholder { color: var(--faint); }
 .input:hover { border-color: var(--field-hover); }
-.input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.input:focus { border-color: var(--accent); }
 .input.compact { height: 40px; font-size: 15px; }
 
 .primary-button, .secondary-button {

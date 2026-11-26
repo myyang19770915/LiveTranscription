@@ -82,6 +82,10 @@ h1, h2, h3, .brand b { font-weight: 600; }   /* hierarchy from size and colour, 
 /* One typeface everywhere: form controls and code otherwise fall back to the browser's own fonts,
    and inputs inside a bold label would inherit its weight. */
 button, input, select, textarea { font: inherit; }
+/* Keyboard focus (visual-tokens): every control the Tab key reaches shows this outline, on itself or, for a field inside
+   a box, on the box (.board-search, .search-box, .ask-box and the like set it with :has(:focus-visible)). */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input::-webkit-calendar-picker-indicator:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }   /* the calendar button of a date field */
 input, select, textarea { font-weight: 400; }
 code, kbd { font-family: var(--font-mono); font-size: .88em; }
 

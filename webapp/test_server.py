@@ -6777,6 +6777,54 @@ class PlainWordingTests(unittest.TestCase):
         self.assertEqual(problems, [], "\n" + "\n".join(problems))
 
 
+class SignInPageAndLegibilityTests(unittest.TestCase):
+    """sign-in-page and visual-tokens (text floor, keyboard focus): what the static files themselves must hold; the
+    rendered sizes and outlines are measured in a browser by bench/login_e2e.mjs and bench/legibility_focus_e2e.mjs."""
+    STATIC = Path(__file__).parent / "static"
+
+    @staticmethod
+    def rules(css: str):
+        """(selector, declarations) of every rule, comments removed; an at-rule's block is searched like any other text."""
+        return re.findall(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.S))
+
+    def test_the_sign_in_page_describes_the_product_and_shows_the_meeting_screen(self):
+        page = (self.STATIC / "login.html").read_text(encoding="utf-8")
+        self.assertEqual(re.findall(r"<h1[^>]*>(.*?)</h1>", page), ["會議中即時顯示逐字稿和翻譯"])
+        self.assertEqual(re.findall(r"<h2[^>]*>(.*?)</h2>", page), ["登入"])
+        self.assertLess(page.index("<h1"), page.index("<h2"))
+        self.assertIn('role="img" aria-label="開會畫面示意：左邊是原文，右邊是翻譯"', page)
+        self.assertEqual((page.count('<li><time>') + page.count('<li class="draft"><time>'), page.count("<em>暫譯</em>")), (6, 1))
+        for gone in ("Cloud", "Local", "auth-orbit", "auth-features", "auth-glow", "歡迎回到", "animateMotion"):
+            self.assertNotIn(gone, page)
+
+    def test_the_sign_in_stylesheet_has_no_colours_of_its_own(self):
+        css = re.sub(r"/\*.*?\*/", "", (self.STATIC / "login.css").read_text(encoding="utf-8"), flags=re.S)
+        self.assertEqual(re.findall(r"#[0-9a-fA-F]{3,8}\b", css), [])
+        self.assertNotIn("blur(", css)
+        self.assertNotIn("infinite", css)   # nothing keeps moving after the entrance
+        self.assertNotIn("letter-spacing: .3em", css)
+
+    def test_no_stylesheet_sets_text_under_12px(self):
+        small = [f"{path.name}: {selector.strip()[:60]} {size}px" for path in sorted(self.STATIC.glob("*.css"))
+                 for selector, body in self.rules(path.read_text(encoding="utf-8"))
+                 for size in re.findall(r"font-size:\s*([0-9.]+)px", body) if float(size) < 12]
+        self.assertEqual(small, [], "\n" + "\n".join(small))
+
+    def test_no_stylesheet_removes_the_outline_of_keyboard_focus(self):
+        removed = []
+        for path in sorted(self.STATIC.glob("*.css")):
+            for selector, body in self.rules(path.read_text(encoding="utf-8")):
+                if not re.search(r"outline:\s*(none|0)\b", body):
+                    continue
+                for part in selector.split(","):
+                    # :focus-within marks the box around a field; :focus:not(:focus-visible) is focus that is not the keyboard's.
+                    keyboard = re.sub(r":focus-within|:focus:not\(:focus-visible\)", "", part)
+                    if ":focus" in keyboard:
+                        removed.append(f"{path.name}: {part.strip()}")
+        self.assertEqual(removed, [], "\n" + "\n".join(removed))
+        self.assertIn(":focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }", (self.STATIC / "tokens.css").read_text(encoding="utf-8"))
+
+
 class FakeQualityPass:
     """精準模式 for record-to-meeting tests: answers when finished with the events given, and remembers how it was made."""
     made: list = []

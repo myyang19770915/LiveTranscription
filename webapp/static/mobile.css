@@ -17,7 +17,7 @@
   .brand-mark img { width: 28px; height: 28px; }
   .brand b { font-size: 14px; white-space: nowrap; }
   .brand small { display: none; }
-  .status { max-width: 112px; min-width: 0; padding: 8px; font-size: 10px; }
+  .status { max-width: 112px; min-width: 0; padding: 8px; font-size: 12px; }
   .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status i { flex: 0 0 6px; }
   /* Narrow phones: the status dot alone (the live bar says 正在聆聽) and the brand mark without its name. */
@@ -31,7 +31,7 @@
   }
   .controls > .hint-stack, .controls > .refine-group { display: none; }   /* their contents live in the settings dialog; left in the grid they add empty tracks */
   .controls > .field { min-height: 58px; padding: 8px 10px; min-width: 0; }
-  .controls .field label { font-size: 10px; letter-spacing: 0; }
+  .controls .field label { font-size: 13px; letter-spacing: 0; }
   .controls select { font-size: 14px; padding-top: 6px; padding-right: 14px; text-overflow: ellipsis; }
   .controls > .direction { min-height: 44px; border: 0; background: transparent; gap: 0; }
   .direction .lang-tag { display: none; }
@@ -39,7 +39,7 @@
   .live-bar { flex: 0 0 auto; min-height: 0; }
   .live-bar:not(.visible) { display: none; }
   .live-bar.visible { height: 30px; margin: 0; padding: 0 10px; gap: 8px; border-radius: var(--radius-control); }
-  .live-bar > span { font-size: 10px; }
+  .live-bar > span { font-size: 12px; }
   .live-bar strong { display: none; }
   .wave { width: 40px; overflow: hidden; flex-shrink: 0; }
   .level { width: 40px; }
@@ -60,12 +60,12 @@
   .card-head h2 { margin: 0; font-size: 13px; }
   .head-actions { gap: 4px; }
   .icon-button { min-width: 44px; width: 44px; height: 44px; }
-  .state-chip { font-size: 8px; }
+  .state-chip { font-size: 12px; }
   .translation-card .state-chip { min-width: 48px; }
   .copy { min-height: 0; padding: 16px; font-size: 19px; line-height: 1.7; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; }
   .empty-state { padding: 8px; }
   .empty-state small { max-width: 240px; }
-  .card-foot { flex: 0 0 30px; min-height: 30px; padding: 5px 12px; font-size: 9px; letter-spacing: 0; }
+  .card-foot { flex: 0 0 30px; min-height: 30px; padding: 5px 12px; font-size: 12px; letter-spacing: 0; }
   .translation-draft { padding: 10px 12px; }
   footer { flex: 0 0 54px; display: flex; align-items: center; gap: 8px; padding: 0; }
   footer .secure-note, #subtitles, #overlay { display: none; }   /* no Document PiP or tab sharing on phones */
@@ -74,7 +74,7 @@
   #mobileActionSlot .button-copy { text-align: left; }
   #mobileActionSlot .button-copy small { display: none; }
   .footer-actions { gap: 0; }
-  .footer-actions .text-btn { min-width: 44px; min-height: 48px; padding: 7px 8px; font-size: 11px; }
+  .footer-actions .text-btn { min-width: 44px; min-height: 48px; padding: 7px 8px; font-size: 13px; }
   .toast { bottom: calc(80px + env(safe-area-inset-bottom)); max-width: calc(100% - 32px); width: max-content; }
   button { touch-action: manipulation; }
 
@@ -91,16 +91,16 @@
   .mobile-settings-heading p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
   .mobile-settings-fields { display: flex; flex-direction: column; gap: 10px; }
   .mobile-settings-fields .field { padding: 12px; border: 1px solid var(--line); background: var(--bg); }
-  .mobile-settings-fields .field label { color: var(--muted); font-size: 11px; letter-spacing: 0; }
+  .mobile-settings-fields .field label { color: var(--muted); font-size: 13px; letter-spacing: 0; }
   .mobile-settings-fields select, .mobile-settings-fields input { font-size: 16px; }
   .mobile-settings-fields .mic-field.is-hidden { display: none; }
   .mobile-settings-fields .mic-test { min-height: 52px; }
   .mobile-settings-fields .mic-test b { font-size: 13px; }
-  .mobile-settings-fields .mic-test small, .mobile-settings-fields .mic-health { font-size: 11px; }
+  .mobile-settings-fields .mic-test small, .mobile-settings-fields .mic-health { font-size: 12px; }
   .mobile-settings-fields .source-hint { color: var(--muted); padding: 2px; font-size: 12px; line-height: 1.65; }
   .mobile-settings-fields .mode-row { padding: 0 2px 4px; }
   .mobile-settings-fields .mode-note { flex-basis: 100%; font-size: 12px; }
-  .mobile-settings-fields .setup-heading { margin: 8px 0 -2px; padding: 0 2px; font-size: 11px; }
+  .mobile-settings-fields .setup-heading { margin: 8px 0 -2px; padding: 0 2px; font-size: 12px; }
   .mobile-settings-fields .setup-heading:first-child { margin-top: 0; }
   .mobile-settings-fields .field-note { font-size: 12px; }
   .mobile-settings-fields .toggle-text b { font-size: 14px; }

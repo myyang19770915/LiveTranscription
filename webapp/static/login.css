@@ -1,112 +1,78 @@
-/* Sign-in page (login-redesign): the company's sign-in layout. A wide brand side with the features around the hub,
-   between Cloud and Local, and the sign-in panel on the right. Colours come from tokens.css; the six feature hues have
-   one set per theme. Below 1200 px the orbit gives way to a grid of the same cards; below 760 px only the brand and
-   title stay above the form. */
+/* Sign-in page (sign-in-page): on the left the brand, one sentence on what 語橋 Live does and the meeting screen as it
+   looks in use; on the right the sign-in form. Every colour is a token of tokens.css. Up to 760 px wide the preview is
+   hidden and the description sits above the form. Nothing moves after the short entrance. */
 * { box-sizing: border-box; }
 html, body { min-height: 100%; }
 body { margin: 0; color: var(--text); background: var(--page); }
 
-:root {
-  --intro-bg: var(--page);
-  --card: var(--panel);
-  --card-border: var(--border);
-  --card-shadow: 0 10px 28px rgb(0 0 0 / .28);
-  --hub: var(--field);
-  --orbit: color-mix(in srgb, var(--accent) 30%, transparent);
-  --orbit-fill: transparent;
-  --input-border: var(--field-border);
-  --f1: #4cb8ff; --f2: #b39bff; --f3: #ff9a4d; --f4: #6fd39b; --f5: #5fd4d4; --f6: #ff7fae;
-}
-:root[data-theme="light"] {
-  --intro-bg: var(--page);
-  --card: var(--panel);
-  --card-border: var(--border);
-  --card-shadow: 0 10px 28px rgb(23 62 112 / .08);
-  --hub: var(--panel);
-  --orbit: color-mix(in srgb, var(--accent) 30%, transparent);
-  --orbit-fill: transparent;
-  --input-border: var(--field-border);
-  --f1: #1479c7; --f2: #7a4ee0; --f3: #d0661a; --f4: #2e9a5e; --f5: #1d9196; --f6: #cf3f7a;
-}
+.auth { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) clamp(420px, 32vw, 560px); }
 
-.auth { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) clamp(420px, 32vw, 620px); }
-
-/* Left: brand, title and the feature map */
-.auth-intro { display: flex; flex-direction: column; min-width: 0; padding: 40px clamp(32px, 4.2vw, 80px) 32px; background: var(--intro-bg); }
+/* Left: brand, description and the preview */
+.auth-intro { display: flex; flex-direction: column; min-width: 0; padding: 40px clamp(32px, 4.2vw, 80px) 48px; background: var(--page); }
 .auth-brand { display: inline-flex; align-items: center; gap: 12px; align-self: flex-start; color: var(--text); text-decoration: none; }
-.auth-brand img { display: block; width: 40px; height: 40px; }
-.auth-brand b { font-size: 28px; font-weight: 600; letter-spacing: -.01em; }
-.auth-title { margin: 48px 0 0; font-size: clamp(34px, 3.3vw, 58px); line-height: 1.18; font-weight: 600; letter-spacing: 0; }
-.auth-title em { font-style: normal; color: var(--accent); }
-.auth-lead { margin: 14px 0 0; color: var(--muted); font-size: clamp(17px, 1.3vw, 23px); }
+.auth-brand img { display: block; width: 36px; height: 36px; }
+.auth-brand b { font-size: 22px; font-weight: 600; }
+.auth-pitch { width: 100%; max-width: 880px; margin: auto 0; padding: 40px 0 24px; }
+.auth-title { margin: 0; font-size: clamp(30px, 2.9vw, 46px); line-height: 1.2; font-weight: 600; letter-spacing: 0; text-wrap: balance; }
+.auth-lead { max-width: 34em; margin: 16px 0 0; color: var(--muted); font-size: 17px; line-height: 1.7; text-wrap: pretty; }
 
-.auth-map { position: relative; width: min(900px, 100%); aspect-ratio: 3 / 2; margin: auto auto 0; padding-top: 24px; }
-.auth-orbit { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.orbit-outer { fill: none; stroke: var(--orbit); stroke-width: 1.4; }
-.orbit-inner { fill: var(--accent-soft); stroke: var(--orbit); stroke-width: 1.2; }
-.orbit-spoke { fill: none; stroke: var(--accent); stroke-opacity: .5; stroke-width: 1.6; stroke-dasharray: 1 6; stroke-linecap: round; }
-.auth-hub { position: absolute; left: 50%; top: 50%; width: 16.7%; aspect-ratio: 1; transform: translate(-50%, -50%); display: grid; place-items: center;
-  border-radius: 26%; background: var(--hub); border: 1px solid var(--card-border); box-shadow: 0 18px 44px rgb(20 80 160 / .18); }
-.auth-hub img { width: 58%; height: auto; }
-.auth-node { position: absolute; left: 50%; display: grid; justify-items: center; gap: 6px; transform: translate(-50%, -50%); color: var(--accent); font-size: 17px; font-weight: 700; }
-.auth-node svg { width: 38px; height: 38px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.node-cloud { top: 7.5%; }
-.node-local { top: 92.5%; }
-
-.auth-features { margin: 0; padding: 0; list-style: none; }
-.feat { position: absolute; width: 30%; display: flex; align-items: center; gap: 14px; padding: 13px 16px; transform: translateY(-50%);
-  border: 1px solid var(--card-border); border-radius: var(--radius-control); background: var(--card); box-shadow: var(--card-shadow); }
-.feat-1 { --hue: var(--f1); left: 15%; top: 22.8%; } .feat-2 { --hue: var(--f2); left: 55%; top: 22.8%; }
-.feat-3 { --hue: var(--f3); left: 2.2%; top: 50%; } .feat-4 { --hue: var(--f4); left: 67.8%; top: 50%; }
-.feat-5 { --hue: var(--f5); left: 15%; top: 77.2%; } .feat-6 { --hue: var(--f6); left: 55%; top: 77.2%; }
-.feat > span:last-child { display: grid; gap: 3px; min-width: 0; }
-.feat b { font-size: 17px; font-weight: 700; }
-.feat small { color: var(--muted); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.feat-icon { flex: none; width: 46px; height: 46px; display: grid; place-items: center; border-radius: var(--radius-control); color: var(--hue); background: color-mix(in srgb, var(--hue) 14%, var(--card)); }
-.feat-icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* The meeting screen: two panes like the real page, the last translated line still a draft. */
+.auth-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 40px; overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius-feature); background: var(--panel); box-shadow: var(--shadow-card); }
+.preview-pane { min-width: 0; }
+.preview-pane + .preview-pane { border-left: 1px solid var(--border); }
+.preview-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.preview-head b { font-weight: 600; }
+.preview-badge { display: inline-grid; place-items: center; min-width: 30px; height: 26px; padding: 0 7px; border-radius: var(--radius-small);
+  background: var(--field); color: var(--muted); font-size: 12px; font-weight: 600; }
+.preview-lines { display: grid; gap: 18px; margin: 0; padding: 20px 20px 24px; list-style: none; }
+.preview-lines li { display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: 8px; align-items: baseline; font-size: 16px; line-height: 1.6; }
+.preview-lines time { color: var(--faint); font-family: var(--font-mono); font-size: 12px; }
+.preview-lines .draft span { color: var(--muted); }
+.preview-lines em { grid-column: 2; justify-self: start; margin-top: 4px; padding: 1px 8px; border: 1px solid var(--border); border-radius: var(--radius-pill);
+  color: var(--muted); font-size: 12px; font-style: normal; }
 
 /* Right: the sign-in panel */
 .auth-panel { position: relative; display: flex; flex-direction: column; justify-content: center; padding: 96px clamp(32px, 3vw, 58px) 72px; background: var(--panel); }
 @media (min-width: 761px) { :root:not([data-theme="light"]) .auth-panel { border-left: 1px solid var(--border); } }
 .auth-form { width: 100%; max-width: 520px; display: flex; flex-direction: column; }
-.auth-form h1 { margin: 0; font-size: clamp(28px, 2vw, 38px); font-weight: 600; letter-spacing: 0; }
-.auth-sub { margin: 12px 0 44px; color: var(--muted); font-size: 17px; }
+.auth-form h2 { margin: 0 0 32px; font-size: 26px; font-weight: 600; letter-spacing: 0; }
 
-.auth-label { margin: 0 0 10px; color: var(--text); font-size: 16px; font-weight: 700; }
-.auth-field { position: relative; margin-bottom: 26px; }
+.auth-label { margin: 0 0 10px; color: var(--text); font-size: 15px; font-weight: 600; }
+.auth-field { position: relative; margin-bottom: 24px; }
 .auth-field-icon { position: absolute; left: 17px; top: 50%; width: 20px; height: 20px; transform: translateY(-50%); fill: none; stroke: var(--muted); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .auth-input {
-  width: 100%; height: 56px; padding: 0 16px 0 50px;
-  border: 1px solid var(--input-border); border-radius: var(--radius-control); background: var(--field); color: var(--text);
+  width: 100%; height: 52px; padding: 0 16px 0 50px;
+  border: 1px solid var(--field-border); border-radius: var(--radius-control); background: var(--field); color: var(--text);
   font: inherit; font-size: 16px;               /* 16px keeps iOS from zooming on focus */
-  outline: none; transition: border-color .15s ease, box-shadow .15s ease;
+  transition: border-color .15s ease;
 }
 .auth-input.has-reveal { padding-right: 56px; }
 .auth-input::placeholder { color: var(--faint); }
-.auth-input:hover { border-color: var(--field-border); }
-.auth-input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.auth-input:hover { border-color: var(--field-hover); }
+.auth-input:focus-visible { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
 .auth-input[aria-invalid="true"] { border-color: var(--danger); }
-.auth-reveal { position: absolute; right: 8px; top: 50%; width: 40px; height: 40px; display: grid; place-items: center; transform: translateY(-50%);
+.auth-reveal { position: absolute; right: 6px; top: 50%; width: 40px; height: 40px; display: grid; place-items: center; transform: translateY(-50%);
   border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); cursor: pointer; }
 .auth-reveal:hover { color: var(--text); background: var(--accent-soft); }
 .auth-reveal svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .auth-reveal .eye-on, .auth-reveal[aria-pressed="true"] .eye-off { display: none; }
 .auth-reveal[aria-pressed="true"] .eye-on { display: block; }
-.auth-caps { margin: -16px 0 18px; color: var(--warn); font-size: 14px; }
+.auth-caps { margin: -14px 0 18px; color: var(--warn); font-size: 14px; }
 
 .auth-error { margin: 0 0 18px; padding: 12px 14px; border-radius: var(--radius-control); border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
   background: var(--danger-soft); color: var(--danger); font-size: 14px; }
 
-.auth-submit { height: 56px; margin-top: 4px; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-  border: 0; border-radius: var(--radius-control); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 18px; font-weight: 700; letter-spacing: .3em; text-indent: .3em;
-  cursor: pointer; transition: box-shadow .15s ease, opacity .15s ease, filter .15s ease; }
-.auth-submit:hover:not(:disabled) { filter: brightness(1.06); box-shadow: none; }
+.auth-submit { height: 52px; margin-top: 4px; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  border: 0; border-radius: var(--radius-control); background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 16px; font-weight: 600;
+  cursor: pointer; transition: opacity .15s ease, filter .15s ease; }
+.auth-submit:hover:not(:disabled) { filter: brightness(1.06); }
+.auth-submit:active:not(:disabled) { filter: brightness(.94); }
 .auth-submit:disabled { cursor: wait; opacity: .8; }
-.auth-submit.loading { letter-spacing: .05em; text-indent: 0; }
 .auth-spinner { display: none; }   /* the shared .spinner (tokens.css), shown while signing in */
 .auth-submit.loading .auth-spinner { display: inline-block; }
-.auth-help { margin: 30px 0 0; color: var(--muted); font-size: 13.5px; line-height: 1.7; text-align: center; }
-.auth-copy { position: absolute; left: clamp(32px, 3vw, 58px); bottom: 28px; margin: 0; color: var(--muted); font-size: 13.5px; }
+.auth-help { margin: 24px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; text-align: center; }
+.auth-copy { position: absolute; left: clamp(32px, 3vw, 58px); bottom: 28px; margin: 0; color: var(--muted); font-size: 13px; }
 
 .auth-theme { position: absolute; top: 24px; right: 28px; height: 40px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px;
   border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--panel); color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
@@ -119,88 +85,32 @@ body { margin: 0; color: var(--text); background: var(--page); }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 [hidden] { display: none !important; }
 
-
-/* Motion (login-motion): the left side is alive but calm. Features light up one at a time, clockwise every 2 s, and a
-   packet travels from each one along its dotted line to the hub, which answers with a ripple; Cloud and Local send their
-   own packets. The dashes flow towards the hub, the outer orbit turns slowly, the cards float, two soft glows drift and
-   「會議」shimmers. Everything enters with a short rise. prefers-reduced-motion turns all of it off (the SVG packets are
-   paused in the page script). */
-.auth-intro { position: relative; overflow: hidden; }
-.auth-intro > :not(.auth-glow) { position: relative; z-index: 1; }
-.auth-glow { display: none; position: absolute; z-index: 0; width: 44vw; aspect-ratio: 1; border-radius: 50%; filter: blur(70px); pointer-events: none; }
-.glow-a { left: -12%; top: 28%; background: color-mix(in srgb, var(--accent) 20%, transparent); animation: glow-drift-a 18s ease-in-out infinite alternate; }
-.glow-b { right: -14%; bottom: -10%; background: color-mix(in srgb, var(--f2) 14%, transparent); animation: glow-drift-b 22s ease-in-out infinite alternate; }
-@keyframes glow-drift-a { to { transform: translate(28%, -14%) scale(1.15); } }
-@keyframes glow-drift-b { to { transform: translate(-24%, -18%) scale(.9); } }
-
-.auth-title em { color: var(--accent); }   /* plain accent: no gradient text (ui-night-celadon) */
-@keyframes title-shimmer { to { background-position: -200% 0; } }
-
-.auth-brand, .auth-title, .auth-lead, .auth-map { animation: auth-rise .7s cubic-bezier(.2, .7, .2, 1) both; }
-.auth-title { animation-delay: .08s; } .auth-lead { animation-delay: .16s; } .auth-map { animation-delay: .26s; }
-.auth-title em { animation: auth-rise .7s cubic-bezier(.2, .7, .2, 1) .08s both; }
-@keyframes auth-rise { from { opacity: 0; translate: 0 16px; } }
-
-.orbit-outer { stroke-dasharray: 5 9; animation: orbit-turn 50s linear infinite; }
-@keyframes orbit-turn { to { stroke-dashoffset: -560; } }
-.orbit-spoke { animation: spoke-flow 1.4s linear infinite; }
-@keyframes spoke-flow { to { stroke-dashoffset: -14; } }
-.orbit-packets circle { fill: var(--c, var(--accent)); filter: drop-shadow(0 0 6px var(--c, var(--accent))); }   /* the colour of the card it leaves */
-.orbit-packets .packet-alt { fill: var(--accent-2); filter: drop-shadow(0 0 5px var(--accent-2)); }
-
-.auth-hub img { position: relative; }
-.auth-hub { animation: hub-breathe 4s ease-in-out infinite; }
-@keyframes hub-breathe { 50% { box-shadow: 0 18px 54px color-mix(in srgb, var(--accent) 34%, transparent); } }
-.hub-ripple { position: absolute; inset: -1px; border-radius: inherit; border: 2px solid var(--accent); opacity: 0; animation: hub-ripple 2s ease-out infinite; }
-.hub-ripple + .hub-ripple { animation-delay: 1s; }
-@keyframes hub-ripple { from { transform: scale(1); opacity: .5; } to { transform: scale(1.6); opacity: 0; } }
-
-.auth-node svg { animation: node-bob 4s ease-in-out infinite; }
-.node-local svg { animation-delay: -2s; }
-@keyframes node-bob { 50% { translate: 0 -5px; } }
-
-/* Each card: a slow float, and its 2 s turn in the 12 s cycle (feat-1, 2, 4, 6, 5, 3: clockwise, matching the packets). */
-.feat { animation: feat-float 6s ease-in-out var(--float) infinite, feat-active 12s ease-in-out var(--turn) infinite; }
-.feat-icon { animation: feat-icon 12s ease-in-out var(--turn) infinite; }
-.feat-1 { --float: -1s; --turn: 0s; } .feat-2 { --float: -4s; --turn: 2s; } .feat-4 { --float: -2s; --turn: 4s; }
-.feat-6 { --float: -5s; --turn: 6s; } .feat-5 { --float: -3s; --turn: 8s; } .feat-3 { --float: 0s; --turn: 10s; }
-@keyframes feat-float { 50% { translate: 0 -6px; } }
-@keyframes feat-active {
-  0%, 17%, 100% { border-color: var(--card-border); box-shadow: var(--card-shadow); }
-  3%, 12% { border-color: color-mix(in srgb, var(--hue) 65%, transparent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--hue) 18%, transparent), 0 16px 36px color-mix(in srgb, var(--hue) 24%, transparent); }
+/* The entrance: the description and the preview rise once, and then the page is still. */
+@media (prefers-reduced-motion: no-preference) {
+  .auth-title, .auth-lead, .auth-preview { animation: auth-rise .5s cubic-bezier(.2, .7, .2, 1) both; }
+  .auth-lead { animation-delay: .06s; }
+  .auth-preview { animation-delay: .14s; }
 }
-@keyframes feat-icon {
-  0%, 17%, 100% { transform: none; background: color-mix(in srgb, var(--hue) 14%, var(--card)); }
-  3%, 12% { transform: scale(1.1); background: color-mix(in srgb, var(--hue) 26%, var(--card)); }
-}
+@keyframes auth-rise { from { opacity: 0; translate: 0 12px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
-/* Narrower: the same cards as a grid, without the orbit. */
-@media (max-width: 1199px) {
-  .auth-title { margin-top: 36px; }
-  .auth-map { aspect-ratio: auto; margin: 40px 0 0; padding: 0; width: 100%; }
-  .auth-orbit, .auth-hub, .auth-node { display: none; }
-  .auth-features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .feat { position: static; width: auto; transform: none; }
+/* Narrower: the panes of the preview stack. */
+@media (max-width: 1100px) {
+  .auth-preview { grid-template-columns: minmax(0, 1fr); }
+  .preview-pane + .preview-pane { border-left: 0; border-top: 1px solid var(--border); }
 }
-/* Phone: brand and title above the form. */
+/* Phone: brand and description above the form, no preview. */
 @media (max-width: 760px) {
   .auth { position: relative; grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .auth-intro { padding: 22px 20px 26px; }
-  .auth-brand b { font-size: 22px; }
-  .auth-brand img { width: 34px; height: 34px; }
-  .auth-title { margin-top: 26px; font-size: 24px; }
-  .auth-lead { font-size: 14px; }
-  .auth-map { display: none; }
+  .auth-brand b { font-size: 20px; }
+  .auth-brand img { width: 32px; height: 32px; }
+  .auth-pitch { margin: 0; padding: 26px 0 0; }
+  .auth-title { font-size: 26px; }
+  .auth-lead { margin-top: 10px; font-size: 15px; }
+  .auth-preview { display: none; }
   .auth-panel { position: static; justify-content: flex-start; padding: 30px 20px 72px; border-top: 1px solid var(--border); }
-  .auth-theme { top: 20px; right: 16px; height: 36px; padding: 0 10px; }   /* next to the brand, at the top of the page */
-  .auth-sub { margin-bottom: 28px; }
+  .auth-theme { top: 18px; right: 16px; }   /* next to the brand, at the top of the page */
+  .auth-form h2 { margin-bottom: 24px; font-size: 22px; }
   .auth-copy { left: 20px; bottom: 24px; }
 }
-@media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; transition: none !important; }
-  .orbit-packets, .hub-ripple { display: none; }
-}
-
-/* ui-night-celadon: the hub sits on its surface without a glow. */
-.auth-hub, :root[data-theme="light"] .auth-hub { box-shadow: none; animation: none; }

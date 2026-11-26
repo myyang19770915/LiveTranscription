@@ -11,7 +11,8 @@
 .toolbar-gap { flex: 1; }
 .board-search { display: flex; align-items: center; gap: 8px; width: min(260px, 100%); height: 38px; padding: 0 12px; border: 1.5px solid var(--field-border);
   border-radius: var(--radius-control); background: var(--field); }
-.board-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.board-search:focus-within { border-color: var(--accent); }
+.board-search:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .board-search svg { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
 .board-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 14px; }
 .toolbar-select { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
@@ -59,7 +60,7 @@
 .issue:focus-visible, .issue.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
 .issue.dragging { opacity: .45; }
 .issue.is-overdue { box-shadow: inset 3px 0 0 var(--danger), 0 1px 2px rgb(0 0 0 / .12); }
-.issue-source { margin: 0; overflow: hidden; color: var(--muted); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.issue-source { margin: 0; overflow: hidden; color: var(--muted); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
 .issue-summary { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; margin: 0; overflow: hidden; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
 .issue.status-done .issue-summary, .issue.status-cancelled .issue-summary { color: var(--muted); }
 .issue.status-cancelled .issue-summary { text-decoration: line-through; }

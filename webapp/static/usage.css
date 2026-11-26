@@ -17,7 +17,7 @@
 .budget-head h2 { margin: 0; font-size: 16px; }
 .budget-figure { margin: 0; color: var(--muted); font-size: 15px; font-variant-numeric: tabular-nums; }
 .budget-figure b { color: var(--text); font-size: 26px; font-weight: 650; }
-.budget-foot { margin: 0; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.budget-foot { margin: 0; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 
 /* The state is an icon and words; the colour only repeats it. */
 .state { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--muted); font-size: 13px; font-weight: 700; white-space: nowrap; }
