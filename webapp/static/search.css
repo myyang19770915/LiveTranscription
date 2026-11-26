@@ -61,3 +61,9 @@
   .hit a { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .result-count { margin-left: 0; }
 }
+
+/* ui-review-round-two: on phones the two switches are 44px touch targets. */
+@media (max-width: 760px) {
+  .mode-switch a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; }
+  .kind { height: 44px; }
+}

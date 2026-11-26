@@ -30,7 +30,8 @@
 /* Page links are plain text (ui-night-celadon): no border, no fill; the current page sits on the --field surface. */
 .account > a { border: 0; border-radius: var(--radius-control); background: transparent; color: var(--muted); }
 .account > a:hover { color: var(--text); background: var(--field); }
-.account > a.current, .account > a[aria-current="page"] { background: var(--field); color: var(--text); font-weight: 500; }
+.account > a.current, .account > a[aria-current="page"] { background: var(--field); color: var(--text); font-weight: 500;
+  background-image: linear-gradient(var(--accent), var(--accent)); background-repeat: no-repeat; background-position: center bottom; background-size: calc(100% - 24px) 2px; }   /* a straight line too: the current page is not told by colour alone (ui-review-round-two) */
 
 /* The theme button: one round icon button on every page, the sign-in page included. */
 .topbar #themeToggle, .auth-theme {
@@ -105,4 +106,12 @@
   .account { gap: 2px; }
   .account > a, .account > button { font-size: 15px; }
   .account > a { padding: 0 10px; }
+}
+
+/* ui-review-round-two: on phones every header control is a 44px touch target. */
+@media (max-width: 760px) {
+  .topbar .brand { min-height: 44px; }
+  .account > a, .account > button, .account .account-avatar { height: 44px; }
+  .account .account-avatar { width: 44px; }
+  .topbar #themeToggle { width: 44px; height: 44px; }
 }

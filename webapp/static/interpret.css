@@ -106,3 +106,15 @@
 .history .acts button:disabled { opacity: .45; cursor: not-allowed; }
 .convert-actions > button { width: auto; }   /* admin.css makes buttons full width on phones; here the two share the row */
 @media (max-width: 640px) { .convert-actions > button { flex: 1; } }
+
+/* ui-review-round-two: one main action a row (載入), the downloads in a menu, 刪除 in the danger colour; the replay area
+   and the texts appear with a loaded record. */
+.history .acts .row-load { display: inline-flex; width: auto; height: 32px; padding: 0 14px; margin-right: 4px; align-items: center; justify-content: center; line-height: 1; vertical-align: middle; }
+.history .acts .text-button.danger { color: var(--danger); }
+.load-hint { margin: 12px 0 0; }
+.row-menu { position: fixed; inset: auto; margin: 0; min-width: 140px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-card);
+  background: var(--panel); color: var(--text); box-shadow: 0 16px 40px rgb(0 0 0 / .35); }
+:root[data-theme="light"] .row-menu { box-shadow: 0 12px 32px rgb(20 32 27 / .14); }
+.row-menu:popover-open { display: grid; }
+.row-menu a { display: flex; align-items: center; min-height: 40px; padding: 0 12px; border-radius: var(--radius-control); color: var(--text); font-size: 14px; text-decoration: none; }
+.row-menu a:hover { background: var(--field); }

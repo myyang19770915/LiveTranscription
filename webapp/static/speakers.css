@@ -70,3 +70,10 @@
   .spk-now { flex-direction: column; gap: 8px; }
   .spk-edit .secondary-button, .spk-edit .primary-button, .spk-toggle { width: auto; }
 }
+
+/* ui-review-round-two: on phones a turn takes taps over 44px of height (its width is its duration), and the lanes are
+   44px apart so that the areas of two lanes never overlap. */
+@media (max-width: 760px) {
+  .spk-lanes { gap: 30px; padding: 16px 0; }
+  .spk-turn::before { content: ""; position: absolute; inset: -17px 0; }
+}

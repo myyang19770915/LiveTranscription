@@ -23,12 +23,21 @@ code { padding: 1px 6px; border-radius: var(--radius-small); background: var(--a
 .meeting-list { display: grid; gap: 10px; }
 .group-title { margin: 14px 0 0; color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: 0; }
 .group-title:first-child { margin-top: 0; }
-.meeting { display: flex; align-items: center; gap: 20px; padding: 16px 20px; }
+.meeting { position: relative; display: flex; align-items: center; gap: 20px; padding: 16px 20px; }
+.meeting:has(.meeting-link):hover { border-color: var(--field-border); }
 .meeting-main { flex: 1; min-width: 0; }
 .meeting-title { display: block; font-size: 17px; overflow-wrap: anywhere; }
 .meeting .meeting-meta { margin-top: 6px; }
 .meeting-meta { font-variant-numeric: tabular-nums; }
-.meeting-actions { display: flex; gap: 8px; }
+.meeting-actions { display: flex; gap: 4px; }
+/* ui-review-round-two: text links. The area of 逐字稿校對 covers the whole row (its ::after is placed against .meeting),
+   so a click anywhere opens the meeting; 會議紀要 sits above that area. */
+.meeting-link { display: inline-flex; align-items: center; height: 40px; padding: 0 12px; border-radius: var(--radius-control);
+  color: var(--muted); font-size: 14px; font-weight: 600; text-decoration: none; }
+.meeting-link:hover { color: var(--text); background: var(--accent-soft); }
+.meeting-link.opens { color: var(--text); }
+.meeting-link.opens::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius-card); }
+.meeting-link:not(.opens) { position: relative; z-index: 1; }
 .meeting-progress { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; color: var(--muted); }
 
 /* Review */
@@ -125,7 +134,8 @@ main.no-target .seg-target, main.no-target .segment-head span:nth-child(3) { dis
   .seg-source, .seg-target, .edit-form { grid-column: 1 / -1; }
   .meeting { flex-wrap: wrap; }
   .meeting-actions { width: 100%; }
-  .meeting-actions .link-button { flex: 1; width: auto; }   /* admin.css makes phone buttons 100% wide */
+  .meeting-actions { margin-left: -12px; }
+  .meeting-link { height: 44px; }
   .filters label { flex: 1 1 140px; }
   .filters .input { width: 100%; }
   .meeting-progress { align-items: flex-start; }

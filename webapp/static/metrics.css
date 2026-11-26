@@ -17,7 +17,7 @@
 .tile-label { margin: 0; color: var(--muted); font-size: 13px; font-weight: 700; }
 .tile-value { margin: 0; color: var(--text); font-size: 30px; font-weight: 650; line-height: 1.15; }
 .tile-value small { margin-left: 4px; color: var(--muted); font-size: 15px; font-weight: 600; }
-.tile-note { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.tile-note { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; text-wrap: pretty; }   /* no last line of one word */
 
 .metrics-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; margin-bottom: 16px; }
 .viz-card { padding: 18px 20px; min-width: 0; }

@@ -31,6 +31,20 @@
     for (const id of ['srcText', 'outText']) $(id).replaceChildren(Object.assign(document.createElement('span'), {className: 'hint', textContent: '按「載入」顯示紀錄。'}));
     $('sent').textContent = '0:00.0'; $('cost').textContent = '$0.000'; $('outLen').textContent = '0.0 秒';
     finishSession(); currentId = null; showLoaded(''); markCurrent();
+    $('player').hidden = true; showHint();
+  }
+  // The line under the list, while there are records and none is loaded (ui-review-round-two).
+  function showHint() { $('loadHint').hidden = !$('historyRows').children.length || !$('player').hidden; }
+  // 下載: the files of a record in a menu (a popover, so the table's scrolling box does not clip it); without the
+  // Popover API the links stay in the row.
+  const MENU = 'popover' in HTMLElement.prototype;
+  function openDownloads(button, files) {
+    const menu = $('downloadMenu'), box = button.getBoundingClientRect();
+    for (const a of files) a.onclick = () => menu.hidePopover();
+    menu.replaceChildren(...files);
+    Object.assign(menu.style, {top: `${box.bottom + 6}px`, right: `${Math.max(8, innerWidth - box.right)}px`});
+    menu.showPopover();
+    files[0].focus();
   }
 
   // --- Replay: both tracks on the session clock; the playhead is the furthest of the playing tracks.
@@ -116,15 +130,17 @@
       const acts = td(undefined, 'acts');
       const btn = (label, fn, cls = '') => Object.assign(document.createElement('button'), {type: 'button', className: `text-button ${cls}`, textContent: label, onclick: fn});
       const link = (label, file) => Object.assign(document.createElement('a'), {textContent: label, href: `/api/interpret/sessions/${s.id}/${file}`, download: ''});
-      acts.append(btn('載入', () => loadSession(s.id)), link('原音', 'input.wav'), s.kind === 'translate' ? '' : link('譯音', 'output.wav'),
-        link('文字', 'transcript.txt'), conversionCell(s, btn), btn('刪除', () => removeSession(s.id), 'danger'));
+      const load = btn('載入', () => loadSession(s.id)); load.className = 'secondary-button compact row-load';
+      const files = [link('原音', 'input.wav'), ...(s.kind === 'translate' ? [] : [link('譯音', 'output.wav')]), link('文字', 'transcript.txt')];
+      const downloads = MENU ? [btn('下載', event => openDownloads(event.currentTarget, files), 'downloads')] : files;
+      acts.append(load, ...downloads, conversionCell(s, btn), btn('刪除', () => removeSession(s.id), 'danger'));
       const engine = s.engine === 'mai' ? '・雲端' : s.engine === 'local' ? '・本機' : '';
       tr.append(td(s.startedAt, 'when'), td(KIND[s.kind] || KIND.interpret, 'kind'), td(`${name(s.sourceLang)}${engine} → ${name(s.target)}`, 'langs'),
         td(fmt(s.inputSeconds || 0), 'length'), td(`$${(s.usd || 0).toFixed(4)}`, 'cost'), what, acts);
       what.classList.add('what');
       return tr;
     }));
-    markCurrent();
+    markCurrent(); showHint();
     clearTimeout(polling);
     if (rows.some(s => s.conversion?.state === 'running')) polling = setTimeout(pollConversions, 2000);
   }
@@ -202,6 +218,7 @@
     try { [meta, bars] = await Promise.all([get(base), get(`${base}/bars`)]); }
     catch { showError('這筆紀錄已不存在或讀取失敗。'); loadHistory().catch(() => {}); return; }
     resetSession();
+    $('player').hidden = false; showHint();
     current = meta;
     const box = $('srcText');
     box.textContent = meta.sourceText || '';

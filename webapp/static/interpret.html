@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>我的紀錄 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261126sl"><link rel="stylesheet" href="/assets/admin.css?v=20261126sl"><link rel="stylesheet" href="/assets/interpret.css?v=20261118rn"><link rel="stylesheet" href="/assets/topbar.css?v=20261124wp"></head>
+<html lang="zh-Hant" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png?v=2"><link rel="icon" type="image/png" sizes="192x192" href="/assets/favicon-192.png?v=2"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png?v=2"><title>我的紀錄 — 語橋 Live</title><script>try{document.documentElement.dataset.theme=localStorage.getItem('interpreter-theme')==='light'?'light':'dark'}catch{}</script><link rel="stylesheet" href="/assets/tokens.css?v=20261126sl"><link rel="stylesheet" href="/assets/admin.css?v=20261126sl"><link rel="stylesheet" href="/assets/interpret.css?v=20261126r2"><link rel="stylesheet" href="/assets/topbar.css?v=20261126r2"></head>
 <body>
 <header class="topbar">
   <a class="brand" href="/"><span class="brand-mark"><img src="/assets/brand-icon.png?v=2" alt="" width="28" height="28"></span><span><b>語橋 Live</b><small>我的紀錄</small></span></a>
@@ -26,9 +26,12 @@
   <section class="card history" aria-labelledby="historyTitle">
     <h2 id="historyTitle">紀錄列表</h2>
     <div class="table-wrap"><table><thead><tr><th>時間</th><th>類型</th><th>語言</th><th>長度</th><th>花費</th><th>內容</th><th><span class="sr-only">動作</span></th></tr></thead><tbody id="historyRows"></tbody></table></div>
+    <p id="loadHint" class="hint load-hint" hidden>按「載入」重播一筆紀錄，並顯示它的原文和譯文。</p>
     <p id="historyEmpty" class="empty-note">還沒有紀錄。在首頁用即時翻譯或即時口譯後，就會出現在這裡。</p>
   </section>
 
+  <!-- ui-review-round-two: shown once a record is loaded -->
+  <div id="player" hidden>
   <section class="card wave-card" aria-labelledby="waveTitle">
     <div class="wave-head">
       <div>
@@ -51,6 +54,8 @@
     <div class="card text-card"><h2>原文 <small id="srcEngine"></small></h2><div id="srcText" class="text"></div></div>
     <div class="card text-card"><h2>譯文</h2><div id="outText" class="text"></div></div>
   </section>
+  </div>
+  <div id="downloadMenu" class="row-menu" popover></div>
 </main>
 
 <dialog id="convertDialog" class="convert-dialog" aria-labelledby="convertTitle">
@@ -73,6 +78,6 @@
 <script src="/assets/return-path.js?v=20261113c"></script>
 <script src="/assets/account.js?v=20261125st"></script>
 <script src="/assets/interpret-langs.js?v=20261118a"></script>
-<script src="/assets/interpret.js?v=20261118rq"></script>
+<script src="/assets/interpret.js?v=20261126r2"></script>
 </body>
 </html>

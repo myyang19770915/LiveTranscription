@@ -252,6 +252,7 @@ docker exec -w /app asr_confucius4-r2t2-app-1 python -m mai_usage          # 印
 - `usage_admin_e2e.mjs`：用量管理頁（`/admin/usage`）的瀏覽器檢查（usage-admin）：數字卡、上限提示與儲存、每日圖與表格、分頁列、團隊管理頁不再有用量卡。API 由測試回應，不寫入任何設定。`YUQIAO_SESSION=<管理員 session> node bench/usage_admin_e2e.mjs [app 網址] [截圖資料夾]`。
 - `login_e2e.mjs`：登入頁的瀏覽器檢查（sign-in-page）：兩個主題在 1440、900、390 三種寬度的主標與說明、開會畫面示意（原文與翻譯各三行，手機不顯示）、標題層級、登入按鈕、顯示密碼、空欄位與錯誤訊息、主題記憶、沒有橫向捲動，以及載入兩秒後沒有還在播放的動畫。錯誤密碼那一步用不存在的帳號，結束時刪掉它的失敗計數。`node bench/login_e2e.mjs <截圖資料夾> [app 網址]`。
 - `legibility_focus_e2e.mjs`：文字下限與鍵盤焦點的瀏覽器檢查（visual-tokens）：14 個頁面在 1440 與 390 兩種寬度，看得到的字不小於 12px，句子、按鈕、連結、欄位標籤不小於 13px；1440 寬時按 Tab 走完一圈，每一站都要有至少 2px 的外框。只讀取，不是 GET 的請求一律擋下。`YUQIAO_SESSION=<管理員 session> node bench/legibility_focus_e2e.mjs [app 網址]`。
+- `ui_round_two_e2e.mjs`：ui-review-round-two 的瀏覽器檢查：頂端列目前頁的底線、手機上 44px 的觸控目標（頂端列、搜尋與問答的切換、種類分頁、校對頁時間軸的發言片段）、「我的紀錄」每列的動作與下載選單、載入後才出現的重播區、會議紀錄列表整列可點與兩個文字連結、數字卡說明與會議紀要狀態行的排版。「我的紀錄」與會議列表的資料由測試回應；校對頁用一場有說話者的真實會議。只讀取，不是 GET 的請求一律擋下。`YUQIAO_SESSION=<管理員 session> node bench/ui_round_two_e2e.mjs [app 網址] [截圖資料夾]`。
 - 累計上限預設 50 美元，可在用量管理頁修改（自 2026-11-14 起累計）；跑會用到 MAI 的評測前先看累計金額。一段 4 分鐘的片段約 0.036 美元，10 段中 7 段非中文約 0.25 美元。
 
 ## 2026-11-14 修正後的完整 10 段與回顧修訂（quality-revision）

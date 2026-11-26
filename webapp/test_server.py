@@ -6825,6 +6825,37 @@ class SignInPageAndLegibilityTests(unittest.TestCase):
         self.assertIn(":focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }", (self.STATIC / "tokens.css").read_text(encoding="utf-8"))
 
 
+class RowActionsTests(unittest.TestCase):
+    """ui-review-round-two: what the static files hold; the behaviour is checked in a browser by bench/ui_round_two_e2e.mjs."""
+    STATIC = Path(__file__).parent / "static"
+
+    def test_a_record_row_downloads_the_same_three_files_from_a_menu(self):
+        script = (self.STATIC / "interpret.js").read_text(encoding="utf-8")
+        page = (self.STATIC / "interpret.html").read_text(encoding="utf-8")
+        for file in ("'input.wav'", "'output.wav'", "'transcript.txt'"):
+            self.assertIn(file, script)
+        self.assertIn("'popover' in HTMLElement.prototype", script)   # without it the links stay in the row
+        self.assertIn('<div id="downloadMenu" class="row-menu" popover></div>', page)
+        self.assertIn('<div id="player" hidden>', page)
+        self.assertIn('<p id="loadHint" class="hint load-hint" hidden>按「載入」重播一筆紀錄，並顯示它的原文和譯文。</p>', page)
+
+    def test_a_meeting_row_holds_two_text_links_and_one_of_them_covers_the_row(self):
+        page = (self.STATIC / "meetings.html").read_text(encoding="utf-8")
+        css = (self.STATIC / "review.css").read_text(encoding="utf-8")
+        self.assertEqual(re.findall(r"className:'(meeting-link[^']*)',href:`(/meetings/\$\{m\.id\}[^`]*)`", page),
+                         [("meeting-link", "/meetings/${m.id}/minutes"), ("meeting-link opens", "/meetings/${m.id}")])
+        self.assertNotIn("primary-button compact link-button", page)
+        self.assertIn('.meeting-link.opens::after { content: ""; position: absolute; inset: 0;', css)
+
+    def test_the_current_header_link_carries_a_line_and_phones_get_44px_targets(self):
+        css = (self.STATIC / "topbar.css").read_text(encoding="utf-8")
+        current = re.search(r'\.account > a\.current, \.account > a\[aria-current="page"\] \{([^}]*)\}', css).group(1)
+        self.assertIn("background-size: calc(100% - 24px) 2px", current)
+        phone = css[css.index("@media (max-width: 760px)"):]
+        for rule in (".topbar .brand { min-height: 44px; }", ".account .account-avatar { width: 44px; }", ".topbar #themeToggle { width: 44px; height: 44px; }"):
+            self.assertIn(rule, phone)
+
+
 class FakeQualityPass:
     """精準模式 for record-to-meeting tests: answers when finished with the events given, and remembers how it was made."""
     made: list = []
